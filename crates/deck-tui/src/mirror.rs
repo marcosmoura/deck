@@ -206,6 +206,8 @@ pub(crate) mod tests {
                     title: None,
                     cwd: None,
                     exit_status: None,
+                    pid: None,
+                    keep: false,
                 })
                 .collect(),
         }
@@ -230,6 +232,7 @@ pub(crate) mod tests {
             active_project: Some(ProjectId(1)),
             active_panel: Some(PanelId(3)),
             layout_viewport: Some((71, 23)),
+            attached_clients: 0,
             projects: vec![
                 project(
                     1,
@@ -260,6 +263,7 @@ pub(crate) mod tests {
             active_project: Some(ProjectId(2)),
             active_panel: Some(PanelId(3)),
             layout_viewport: Some((80, 23)),
+            attached_clients: 0,
             projects: vec![ProjectView {
                 id: ProjectId(2),
                 name: "proj".into(),
@@ -278,6 +282,8 @@ pub(crate) mod tests {
                         title: title.map(str::to_string),
                         cwd: None,
                         exit_status: None,
+                        pid: None,
+                        keep: false,
                     }],
                 }],
             }],

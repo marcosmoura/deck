@@ -191,6 +191,7 @@ mod tests {
             active_project: None,
             active_panel: None,
             layout_viewport: None,
+            attached_clients: 0,
         }
     }
 

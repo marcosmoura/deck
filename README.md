@@ -50,3 +50,27 @@ border_style = "plain"
 ```
 
 More: [sessions](docs/features/sessions.md), [keys](docs/features/keys.md), [config](docs/features/config.md).
+
+## Agents
+
+Inside deck, a coding agent can drive deck itself: run a test suite or a dev server in a visible terminal next to it, read that terminal's screen, type into it, wait for it to finish and organize panels. The commands are described in [control API](docs/features/control-api.md); the skill in [skills/deck](skills/deck/SKILL.md) teaches an agent how to use them, and it only applies when `DECK=1` is set in the environment.
+
+Link the skill once. Claude Code (OpenCode reads `~/.claude/skills` too, so this one link serves both):
+
+```sh
+ln -s <repo>/skills/deck ~/.claude/skills/deck
+```
+
+Codex:
+
+```sh
+ln -s <repo>/skills/deck ~/.agents/skills/deck
+```
+
+Replace `<repo>` with the path of your clone. For an agent without skill support, `deck guide` prints the same text:
+
+```sh
+deck guide
+```
+
+The socket is open to every process of your user, so an agent can type into any of your terminals: it has the power of your shell. Agent sandboxes (Claude Code, Codex) may block the Unix socket. The agent then sees `no deck daemon running` or a permission error, and the sandbox has to allow the socket path (`$DECK_SOCKET` inside deck).

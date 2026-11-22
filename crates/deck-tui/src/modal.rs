@@ -232,20 +232,26 @@ impl App {
         self.modal = Some(Modal::Confirm(Confirm { target, question }));
     }
 
-    /// Asks before closing the focused terminal of the active panel.
-    pub(crate) fn confirm_close_terminal(&mut self, now: Instant) {
+    /// Asks before closing the focused terminal of the active panel; a kept terminal whose
+    /// process already ended closes at once.
+    pub(crate) fn confirm_close_terminal(&mut self, now: Instant) -> Vec<Out> {
         let found = self.mirror.active_panel().and_then(|panel| {
             let focused = panel.focused_terminal?;
             let index = panel.terminals.iter().position(|t| t.id == focused)?;
-            Some((focused, index))
+            let exited = panel.terminals.get(index)?.exit_status.is_some();
+            Some((focused, index, exited))
         });
-        let Some((focused, index)) = found else {
+        let Some((focused, index, exited)) = found else {
             self.set_flash("no terminal to close".into(), now, false);
-            return;
+            return Vec::new();
         };
+        if exited {
+            return vec![self.act(Act::CloseTerminal { terminal: focused }, None)];
+        }
         let question = format!("Close terminal {}? (y/n)", index + 1);
         let target = Target::Terminal(focused, index + 1);
         self.modal = Some(Modal::Confirm(Confirm { target, question }));
+        Vec::new()
     }
 
     pub(crate) fn confirm_close_project(&mut self, project: ProjectId) {

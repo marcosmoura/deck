@@ -3,7 +3,6 @@
 //! Lock order: `state`, then a terminal's `emu`. Nothing waits while holding either.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -15,8 +14,8 @@ use deck_core::config::Config;
 use deck_core::layout::Ratios;
 use deck_core::layout::{self, Rect, panel_area};
 use deck_core::model::{
-    LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, Terminal,
-    TerminalId,
+    LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, SessionView,
+    Terminal, TerminalId,
 };
 use deck_core::protocol::{
     ByeReason, Frame, NoticeLevel, OuterColors, ScrollTo, ServerMsg, SessionSummary,
@@ -34,8 +33,11 @@ use crate::queue::Queue;
 use crate::startup::DaemonPaths;
 use crate::terminal::{self, SpawnRequest, TermHandle};
 
+mod control;
 mod cwd;
 mod restore;
+mod terminal_io;
+mod waiting;
 
 pub type ClientId = u64;
 
@@ -54,6 +56,57 @@ const DEFAULT_VIEWPORT: (u16, u16) = (80, 24);
 
 /// Notices kept for the next client while none is attached.
 const MAX_PENDING_NOTICES: usize = 20;
+
+/// Where a terminal lives, for its environment.
+#[derive(Debug, Clone, Copy)]
+struct Place {
+    session: SessionId,
+    panel: PanelId,
+    terminal: TerminalId,
+}
+
+/// The ids a `New*` request created.
+#[derive(Debug, Clone, Copy)]
+struct Made {
+    project: ProjectId,
+    panel: PanelId,
+}
+
+/// The directory a launch spec names, if it names one (an empty one means the default).
+fn launch_dir(launch: Option<&LaunchSpec>) -> Option<PathBuf> {
+    launch
+        .map(|l| &l.cwd)
+        .filter(|c| !c.as_os_str().is_empty())
+        .cloned()
+}
+
+/// A new terminal's model: the launch spec it was asked with, and the directory it started in.
+fn new_terminal(
+    id: TerminalId,
+    launch: Option<&LaunchSpec>,
+    req: &SpawnRequest,
+    keep: bool,
+) -> Terminal {
+    let program = launch.and_then(|l| l.program.clone());
+    Terminal {
+        id,
+        launch: LaunchSpec {
+            args: if program.is_some() {
+                launch.map(|l| l.args.clone()).unwrap_or_default()
+            } else {
+                Vec::new()
+            },
+            program,
+            cwd: req.cwd.clone(),
+            env: launch.map(|l| l.env.clone()).unwrap_or_default(),
+        },
+        program: program_name(&req.program),
+        title: None,
+        cwd: None,
+        exit_status: None,
+        keep,
+    }
+}
 
 /// What an attaching client asks for.
 #[derive(Debug, Clone)]
@@ -172,6 +225,8 @@ struct State {
     save_pending: bool,
     /// Terminals started by a restore: one that fails at once is reported.
     restored: HashSet<TerminalId>,
+    /// The exit codes of terminals that ended, for `wait --exit` calls that come late.
+    exits: waiting::Exits,
 }
 
 impl State {
@@ -221,13 +276,46 @@ impl State {
             .max_by_key(|c| c.active)
     }
 
+    /// The session as clients see it: the model, plus what only the daemon knows (the
+    /// processes' ids and the attached clients).
+    fn view_of(&self, sess: &SessionRt) -> SessionView {
+        let mut view = sess
+            .model
+            .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT)));
+        view.attached_clients =
+            u32::try_from(self.clients_of(sess.model.id).count()).unwrap_or(u32::MAX);
+        for t in view
+            .projects
+            .iter_mut()
+            .flat_map(|p| p.panels.iter_mut())
+            .flat_map(|p| p.terminals.iter_mut())
+        {
+            // Until the shell reports a directory, the one it was started in.
+            if t.cwd.is_none() {
+                t.cwd = sess
+                    .model
+                    .projects
+                    .iter()
+                    .flat_map(|p| &p.panels)
+                    .flat_map(|p| &p.terminals)
+                    .find(|m| m.id == t.id)
+                    .map(|m| m.launch.cwd.clone())
+                    .filter(|c| !c.as_os_str().is_empty());
+            }
+            t.pid = sess
+                .terminals
+                .get(&t.id)
+                .and_then(|h| h.pid)
+                .filter(|_| t.exit_status.is_none());
+        }
+        view
+    }
+
     fn push_view(&self, sid: SessionId) {
         let Some(sess) = self.session(sid) else {
             return;
         };
-        let view = sess
-            .model
-            .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT)));
+        let view = self.view_of(sess);
         for (_, c) in self.clients_of(sid) {
             c.queue.push_view(view.clone());
         }
@@ -334,6 +422,10 @@ pub struct Shared {
     pub handle: Handle,
     state: Mutex<State>,
     shutdown_tx: watch::Sender<bool>,
+    /// Counts up whenever something a pending `wait` may care about changed.
+    changes: watch::Sender<u64>,
+    /// How many `wait` requests are pending.
+    waiters: Arc<AtomicUsize>,
     writers: AtomicUsize,
     writers_done: Notify,
     attaching: tokio::sync::Mutex<()>,
@@ -369,6 +461,7 @@ impl Shared {
         clock: Arc<dyn Clock>,
         version: u32,
         cwd_query: CwdQuery,
+        waiters: Arc<AtomicUsize>,
     ) -> (Arc<Self>, watch::Receiver<bool>) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let shared = Arc::new(Self {
@@ -379,6 +472,8 @@ impl Shared {
             handle: Handle::current(),
             state: Mutex::new(State::default()),
             shutdown_tx,
+            changes: watch::channel(0).0,
+            waiters,
             writers: AtomicUsize::new(0),
             writers_done: Notify::new(),
             attaching: tokio::sync::Mutex::new(()),
@@ -541,10 +636,7 @@ impl Shared {
             queue.push_msg(ServerMsg::Notice { level, text });
         }
         if let Some(sess) = st.session(sid) {
-            queue.push_view(
-                sess.model
-                    .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT))),
-            );
+            queue.push_view(st.view_of(sess));
         }
         for frame in st.full_frames(sid) {
             queue.push_frame(frame);
@@ -597,7 +689,17 @@ impl Shared {
         let pid = ProjectId(st.alloc());
         let panel = PanelId(st.alloc());
         let tid = TerminalId(st.alloc());
-        let req = self.spawn_request(&a.env, &a.cwd, single_size(viewport), sid, panel, tid);
+        let req = self.spawn_request(
+            &a.env,
+            None,
+            &a.cwd,
+            single_size(viewport),
+            Place {
+                session: sid,
+                panel,
+                terminal: tid,
+            },
+        );
         NewSession {
             sid,
             pid,
@@ -608,29 +710,36 @@ impl Shared {
         }
     }
 
-    /// The process of a new terminal: the shell, in `cwd`, with a PTY of `inner` size.
+    /// The process of a new terminal: the launch spec's program or else the shell, in `cwd`,
+    /// with a PTY of `inner` size.
     fn spawn_request(
         &self,
         session_env: &Env,
+        launch: Option<&LaunchSpec>,
         cwd: &Path,
         inner: (u16, u16),
-        session: SessionId,
-        panel: PanelId,
-        terminal: TerminalId,
+        at: Place,
     ) -> SpawnRequest {
         let config = self.config();
-        let program = shell_program(&config, session_env);
+        let (program, args) = match launch.and_then(|l| l.program.clone()) {
+            Some(program) => (program, launch.map(|l| l.args.clone()).unwrap_or_default()),
+            None => (
+                shell_program(&config, session_env),
+                config.shell_args.clone(),
+            ),
+        };
         SpawnRequest {
             program,
-            args: config.shell_args.clone(),
+            args,
             cwd: cwd.to_path_buf(),
             env: env::terminal_env(
                 session_env,
+                launch.map(|l| l.env.as_slice()).unwrap_or_default(),
                 &TerminalIds {
                     socket: &self.paths.socket,
-                    session,
-                    panel,
-                    terminal,
+                    session: at.session,
+                    panel: at.panel,
+                    terminal: at.terminal,
                 },
             ),
             cols: inner.0,
@@ -673,19 +782,7 @@ impl Shared {
                     name_source: NameSource::Default,
                     focused_terminal: Some(tid),
                     ratios: Ratios::default_for(1),
-                    terminals: vec![Terminal {
-                        id: tid,
-                        launch: LaunchSpec {
-                            program: None,
-                            args: Vec::new(),
-                            cwd: a.cwd.clone(),
-                            env: Vec::<(OsString, OsString)>::new(),
-                        },
-                        program: program_name(&req.program),
-                        title: None,
-                        cwd: None,
-                        exit_status: None,
-                    }],
+                    terminals: vec![new_terminal(tid, None, &req, false)],
                 }],
             }],
         };
@@ -877,10 +974,7 @@ impl Shared {
             return;
         };
         if let Some(sess) = st.session(sid) {
-            client.queue.push_view(
-                sess.model
-                    .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT))),
-            );
+            client.queue.push_view(st.view_of(sess));
         }
         for frame in st.full_frames(sid) {
             client.queue.push_frame(frame);
@@ -893,6 +987,7 @@ impl Shared {
     pub fn output(self: &Arc<Self>, h: &Arc<TermHandle>, bytes: &[u8]) {
         let events = h.with_emu(|e| e.feed(bytes)).unwrap_or_default();
         h.dirty.notify_one();
+        self.bump();
         for event in events {
             self.emu_event(h, event);
         }
@@ -999,18 +1094,30 @@ impl Shared {
     }
 
     /// A terminal's process exited and its output was read.
-    pub fn terminal_gone(self: &Arc<Self>, h: &Arc<TermHandle>, status: u32) {
+    pub fn terminal_gone(self: &Arc<Self>, h: &Arc<TermHandle>, status: i32) {
         let mut st = self.st();
+        h.finish(status);
+        st.exits.record(h.id, status, self.clock.now());
+        self.bump();
         if st.shutting_down {
             return;
         }
-        h.close();
         let sid = h.session;
-        // Closed by an action, or its session was killed: already out of the model.
-        if !st
+        let in_model = st
             .session(sid)
-            .is_some_and(|s| s.terminals.contains_key(&h.id))
-        {
+            .is_some_and(|s| s.terminals.contains_key(&h.id));
+        let kept = in_model
+            && st
+                .session_mut(sid)
+                .and_then(|s| terminal_model(&mut s.model, h.id))
+                .is_some_and(|t| t.keep);
+        if kept {
+            self.keep_exited(&mut st, h, status);
+            return;
+        }
+        h.close();
+        // Closed by an action, or its session was killed: already out of the model.
+        if !in_model {
             h.release();
             return;
         }
@@ -1077,10 +1184,31 @@ impl Shared {
         }
     }
 
+    /// A kept terminal's process ended: it stays, with its screen and its exit code; what is
+    /// typed to it is dropped.
+    fn keep_exited(self: &Arc<Self>, st: &mut State, h: &Arc<TermHandle>, status: i32) {
+        let sid = h.session;
+        let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id));
+        if streamed && let Some(frame) = h.with_emu(|e| e.damage_frame(h.id)) {
+            st.push_frame(sid, &frame);
+        }
+        h.stop_input();
+        st.restored.remove(&h.id);
+        let Some(sess) = st.session_mut(sid) else {
+            return;
+        };
+        let before = sess.model.active_panel();
+        if let Some(t) = terminal_model(&mut sess.model, h.id) {
+            t.exit_status = Some(status);
+        }
+        self.settle(st, sid, before);
+    }
+
     /// After a change to a session: its terminals match the viewport, every client has the
     /// new view, and a new active panel is shown in full.
     fn settle(self: &Arc<Self>, st: &mut State, sid: SessionId, before: Option<PanelId>) {
         self.mark_dirty(st);
+        self.bump();
         let Some(sess) = st.session(sid) else {
             return;
         };
@@ -1108,6 +1236,7 @@ impl Shared {
         }
         st.sessions.retain(|s| s.model.id != sid);
         self.mark_dirty(st);
+        self.bump();
     }
 
     // Actions.
@@ -1128,17 +1257,22 @@ impl Shared {
             Action::NewProject { name, root } => {
                 let name = validate_name(&name, NameKind::Project)?;
                 check_dir(&root)?;
-                self.add_panel(sid, PanelTarget::NewProject { name, root })
+                self.add_panel(sid, PanelTarget::NewProject { name, root }, None, true)
                     .await
+                    .map(|_| ())
             }
             Action::NewPanel { project, name } => {
                 let name = name
                     .map(|n| validate_name(&n, NameKind::Panel))
                     .transpose()?;
-                self.add_panel(sid, PanelTarget::Project { project, name })
+                self.add_panel(sid, PanelTarget::Project { project, name }, None, true)
                     .await
+                    .map(|_| ())
             }
-            Action::NewTerminal { panel } => self.add_terminal(sid, panel).await,
+            Action::NewTerminal { panel } => self
+                .add_terminal(sid, panel, None, true, false)
+                .await
+                .map(|_| ()),
             Action::KillSession => {
                 let queue = self.st().clients.get(&cid).map(|c| Arc::clone(&c.queue));
                 let answer = || {
@@ -1312,12 +1446,16 @@ impl Shared {
         Ok(())
     }
 
-    /// Adds a panel with one new shell, in an existing project or a new one.
+    /// Adds a panel with one new process (a shell unless `launch` names a program), in an
+    /// existing project or a new one. `focus` makes the new panel (and project) the active
+    /// one; without it the session's focus stays where it was.
     async fn add_panel(
         self: &Arc<Self>,
         sid: SessionId,
         target: PanelTarget,
-    ) -> Result<(), ActionError> {
+        launch: Option<LaunchSpec>,
+        focus: bool,
+    ) -> Result<Made, ActionError> {
         let (project_id, panel_id, tid, req) = {
             let mut st = self.st();
             if st.shutting_down {
@@ -1346,7 +1484,18 @@ impl Shared {
             let project_id = existing.unwrap_or_else(|| ProjectId(st.alloc()));
             let panel_id = PanelId(st.alloc());
             let tid = TerminalId(st.alloc());
-            let req = self.spawn_request(&env, &root, single_size(viewport), sid, panel_id, tid);
+            let cwd = launch_dir(launch.as_ref()).unwrap_or_else(|| root.clone());
+            let req = self.spawn_request(
+                &env,
+                launch.as_ref(),
+                &cwd,
+                single_size(viewport),
+                Place {
+                    session: sid,
+                    panel: panel_id,
+                    terminal: tid,
+                },
+            );
             (project_id, panel_id, tid, req)
         };
 
@@ -1388,19 +1537,17 @@ impl Shared {
         };
         sess.terminals.insert(tid, handle);
         let before = sess.model.active_panel();
-        let root = req.cwd.clone();
-        let program = program_name(&req.program);
         let (panel_name, name_source) = match &target {
             PanelTarget::Project {
                 name: Some(name), ..
             } => (Some(name.clone()), NameSource::Manual),
             _ => (None, NameSource::Default),
         };
-        if let PanelTarget::NewProject { name, .. } = target {
+        if let PanelTarget::NewProject { name, root } = target {
             sess.model.projects.push(Project {
                 id: project_id,
                 name,
-                root: root.clone(),
+                root,
                 panels: Vec::new(),
                 active_panel: None,
                 collapsed: false,
@@ -1416,32 +1563,39 @@ impl Shared {
             name_source,
             focused_terminal: Some(tid),
             ratios: Ratios::default_for(1),
-            terminals: vec![Terminal {
-                id: tid,
-                launch: LaunchSpec {
-                    program: None,
-                    args: Vec::new(),
-                    cwd: root,
-                    env: Vec::<(OsString, OsString)>::new(),
-                },
-                program,
-                title: None,
-                cwd: None,
-                exit_status: None,
-            }],
+            terminals: vec![new_terminal(tid, launch.as_ref(), &req, false)],
         });
-        sess.model.focus_panel(panel_id);
+        if focus {
+            sess.model.focus_panel(panel_id);
+        } else {
+            // Without focus the panel is still its project's active one when that has none,
+            // and a session without an active project gets this one.
+            if project.active_panel.is_none() {
+                project.active_panel = Some(panel_id);
+            }
+            if sess.model.active_project.is_none() {
+                sess.model.active_project = Some(project_id);
+            }
+        }
         self.settle(&mut st, sid, before);
-        Ok(())
+        Ok(Made {
+            project: project_id,
+            panel: panel_id,
+        })
     }
 
-    /// Adds a shell to a panel (the active one by default), refused when the grid for one
-    /// more terminal would leave a terminal below the minimum size.
+    /// Adds a terminal to a panel (the active one by default): a shell, or the program of
+    /// `launch`. It is refused when the grid for one more terminal would leave a terminal
+    /// below the minimum size. `focus` focuses the new terminal in its panel; `keep` makes it
+    /// stay after its process exits.
     async fn add_terminal(
         self: &Arc<Self>,
         sid: SessionId,
         panel: Option<PanelId>,
-    ) -> Result<(), ActionError> {
+        launch: Option<LaunchSpec>,
+        focus: bool,
+        keep: bool,
+    ) -> Result<TerminalId, ActionError> {
         let room = |sess: &SessionRt, panel: PanelId| -> Result<(usize, (u16, u16)), ActionError> {
             let p = sess
                 .model
@@ -1479,7 +1633,8 @@ impl Shared {
                 .find(|p| p.panels.iter().any(|x| x.id == panel_id))
                 .ok_or(ActionError::NoSuchPanel(panel_id))?;
             let root = project.root.clone();
-            // Where the panel's focused terminal is, else where it started, else the root.
+            // The directory the launch spec names, else where the panel's focused terminal
+            // is, else where it started, else the root.
             let focused = project
                 .panels
                 .iter()
@@ -1489,21 +1644,39 @@ impl Shared {
                     p.terminals.iter().find(|t| t.id == id)
                 });
             let dirs = [
+                launch_dir(launch.as_ref()),
                 focused.and_then(|t| t.cwd.clone()),
                 focused.map(|t| t.launch.cwd.clone()),
                 Some(root.clone()),
             ];
             let env = sess.env.clone();
             let tid = TerminalId(st.alloc());
-            let req = self.spawn_request(&env, &root, size, sid, panel_id, tid);
+            let req = self.spawn_request(
+                &env,
+                launch.as_ref(),
+                &root,
+                size,
+                Place {
+                    session: sid,
+                    panel: panel_id,
+                    terminal: tid,
+                },
+            );
             (panel_id, tid, req, dirs)
         };
 
         let program = req.program.clone();
+        let explicit = dirs.first().is_some_and(Option::is_some);
         let (parts, req) = tokio::task::spawn_blocking(move || {
-            // The directory may be gone: the first one that exists.
+            // A named directory is used as it is (starting fails when it is no directory);
+            // otherwise the first that exists, as one may be gone.
             let mut req = req;
-            if let Some(dir) = restore::first_dir(dirs) {
+            let dir = if explicit {
+                dirs.into_iter().next().flatten()
+            } else {
+                restore::first_dir(dirs)
+            };
+            if let Some(dir) = dir {
                 req.cwd = dir;
             }
             terminal::open(&req).map(|parts| (parts, req))
@@ -1531,27 +1704,19 @@ impl Shared {
         };
         sess.terminals.insert(tid, handle);
         let before = sess.model.active_panel();
-        let term = Terminal {
-            id: tid,
-            launch: LaunchSpec {
-                program: None,
-                args: Vec::new(),
-                cwd: req.cwd.clone(),
-                env: Vec::<(OsString, OsString)>::new(),
-            },
-            program: program_name(&req.program),
-            title: None,
-            cwd: None,
-            exit_status: None,
-        };
+        let term = new_terminal(tid, launch.as_ref(), &req, keep);
         if let Some(panel) = panel_mut(&mut sess.model, panel_id) {
+            let focused = panel.focused_terminal;
             panel.add_terminal(term);
+            if !focus {
+                panel.focused_terminal = focused;
+            }
         }
         self.settle(&mut st, sid, before);
         for frame in st.full_frames_of(sid, &[tid]) {
             st.push_frame(sid, &frame);
         }
-        Ok(())
+        Ok(tid)
     }
 
     /// Hangs up the processes of the session `which` picks and ends it. `answer` runs once
@@ -1582,7 +1747,18 @@ impl Shared {
         if handles.is_empty() {
             return;
         }
-        self.st().hanging.extend(handles.iter().cloned());
+        {
+            let mut st = self.st();
+            // Retention runs from removal: a kept terminal closed long after it exited can
+            // still be waited on for a minute.
+            let now = self.clock.now();
+            for h in &handles {
+                if let Some(code) = h.finished() {
+                    st.exits.record(h.id, code, now);
+                }
+            }
+            st.hanging.extend(handles.iter().cloned());
+        }
         let shared = Arc::clone(self);
         self.handle.spawn(async move {
             hang_up_and_wait(handles.clone()).await;
@@ -1685,6 +1861,7 @@ impl Shared {
             });
         }
         drop(st);
+        self.bump();
         let _ = self.shutdown_tx.send(true);
     }
 

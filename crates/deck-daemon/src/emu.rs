@@ -18,6 +18,8 @@ use deck_core::protocol::{
 
 use crate::lock;
 
+mod capture;
+
 /// Collects the events a `Term` raises while it processes bytes.
 #[derive(Clone, Default)]
 struct Listener(Arc<Mutex<Vec<Event>>>);

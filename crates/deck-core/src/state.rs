@@ -101,6 +101,13 @@ pub struct TerminalState {
     /// The launch directory until the live one is tracked.
     #[serde(with = "opt_text_path")]
     pub cwd: Option<PathBuf>,
+    /// The terminal stays after its process exits.
+    #[serde(default)]
+    pub keep: bool,
+    /// The exit code of a kept terminal whose process ended; such a terminal is not
+    /// restored.
+    #[serde(default)]
+    pub exited: Option<i32>,
 }
 
 fn is_deck_var(key: &[u8]) -> bool {
@@ -126,6 +133,8 @@ impl TerminalState {
                 })
                 .collect(),
             cwd: t.cwd.clone().or_else(|| Some(t.launch.cwd.clone())),
+            keep: t.keep,
+            exited: t.exit_status.filter(|_| t.keep),
         }
     }
 
@@ -151,7 +160,13 @@ impl TerminalState {
             title: None,
             cwd: None,
             exit_status: None,
+            keep: self.keep,
         }
+    }
+
+    /// A kept terminal whose process had ended: it is not restored.
+    pub fn is_spent(&self) -> bool {
+        self.keep && self.exited.is_some()
     }
 }
 
@@ -267,7 +282,8 @@ impl StateFile {
     /// `next_id` moves past every saved id, a duplicate id drops the later item, a duplicate
     /// session or project name gets ` (2)`, ` (3)`, ..., references to missing items are
     /// dropped and focus falls back to the first item, ratios invalid for the restored
-    /// count become the defaults, and a panel without terminals goes.
+    /// count become the defaults, and a panel without terminals goes. A kept terminal that
+    /// had exited goes without a note.
     pub fn validate(&mut self) -> Vec<String> {
         let mut notes = Vec::new();
         let mut max_id = 0u64;
@@ -327,7 +343,13 @@ impl StateFile {
                         }
                         fresh
                     });
+                    // A kept terminal that had exited is not restored; no note for it.
+                    let had = panel.terminals.len();
+                    panel.terminals.retain(|t| !t.is_spent());
                     if panel.terminals.is_empty() {
+                        if had > 0 {
+                            continue;
+                        }
                         notes.push(format!("panel {} has no terminals: dropped", panel.id));
                         continue;
                     }
@@ -391,6 +413,7 @@ mod tests {
             title: None,
             cwd: None,
             exit_status: None,
+            keep: false,
         }
     }
 
@@ -571,5 +594,43 @@ mod tests {
             file.sessions[0].projects[0].panels[1].ratios.main,
             Some(700)
         );
+    }
+
+    #[test]
+    fn an_exited_kept_terminal_is_not_restored() {
+        let mut kept = terminal(4, Some("sh"));
+        kept.keep = true;
+        kept.exit_status = Some(3);
+        let mut other = terminal(9, Some("sh"));
+        other.keep = true;
+        other.exit_status = Some(0);
+        let mut running = terminal(5, Some("sleep"));
+        running.keep = true;
+        let saved = TerminalState::from_model(&kept);
+        assert!(saved.keep && saved.exited == Some(3));
+        assert!(TerminalState::from_model(&running).keep);
+
+        let sessions = [session(
+            1,
+            "main",
+            vec![project(
+                2,
+                "p",
+                vec![
+                    panel(3, vec![terminal(6, None), kept.clone()]),
+                    panel(7, vec![other]),
+                    panel(8, vec![running]),
+                ],
+            )],
+        )];
+        let mut file = StateFile::new(30, vec![], &sessions);
+        let notes = file.validate();
+        assert!(notes.is_empty(), "{notes:?}");
+        let panels = &file.sessions[0].projects[0].panels;
+        assert_eq!(panels.len(), 2, "the panel of the exited terminal is gone");
+        assert_eq!(panels[0].terminals.len(), 1);
+        assert_eq!(panels[0].focused_terminal, Some(TerminalId(6)));
+        assert_eq!(panels[1].terminals.len(), 1);
+        assert!(panels[1].terminals[0].keep);
     }
 }

@@ -19,6 +19,7 @@ deck-tui = { path = "../deck-tui" }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 libc = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time", "macros"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

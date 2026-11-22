@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionError};
 use crate::config::Config;
-use crate::model::{SessionId, SessionView, TerminalId};
+use crate::keys::KeySpec;
+use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -92,6 +93,128 @@ pub enum Request {
         from: String,
         to: String,
     },
+    /// One session's tree (by name), or every session's; answered by `Response::Tree`.
+    Tree {
+        session: Option<String>,
+    },
+    /// Adds a project with one panel to a session; answered by `Response::Created` with the
+    /// project's id.
+    NewProject {
+        session: SessionId,
+        name: String,
+        #[serde(with = "crate::wire::path")]
+        root: PathBuf,
+        focus: bool,
+    },
+    /// Adds a panel with one terminal to a project of the session; answered by
+    /// `Response::Created` with the panel's id.
+    NewPanel {
+        session: SessionId,
+        project: Target,
+        name: Option<String>,
+        launch: Option<LaunchSpec>,
+        focus: bool,
+    },
+    /// Adds a terminal to a panel; answered by `Response::Created` with the terminal's id.
+    NewTerminal {
+        panel: PanelId,
+        launch: Option<LaunchSpec>,
+        keep: bool,
+        focus: bool,
+    },
+    /// Focuses a terminal (and its panel and project) or a panel, by its daemon-wide id.
+    Focus {
+        id: u64,
+    },
+    /// Closes a terminal, a panel or a project, by its daemon-wide id.
+    Close {
+        id: u64,
+    },
+    RenamePanel {
+        panel: PanelId,
+        name: String,
+    },
+    /// Types bytes into a terminal; with `paste` they are wrapped in bracketed-paste markers
+    /// when the terminal asked for them. Answered by `Ok`.
+    Send {
+        terminal: TerminalId,
+        bytes: Vec<u8>,
+        paste: bool,
+    },
+    /// Types keys into a terminal, encoded for the terminal's current modes. Answered by `Ok`.
+    SendKeys {
+        terminal: TerminalId,
+        keys: Vec<KeySpec>,
+    },
+    /// Reads a terminal's screen as text (`lines`: only the last ones; `history`: with the
+    /// scrollback; `ansi`: with colours and attributes); answered by `Response::Captured`.
+    Capture {
+        terminal: TerminalId,
+        lines: Option<u32>,
+        history: bool,
+        ansi: bool,
+    },
+    /// Answers, after a while, with `Response::Waited`; `timeout_ms` is enforced by the
+    /// daemon.
+    Wait {
+        terminal: TerminalId,
+        until: WaitFor,
+        timeout_ms: Option<u64>,
+    },
+}
+
+/// What a `Request::Wait` waits for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WaitFor {
+    /// The process exits.
+    Exit,
+    /// A line of the visible screen contains the text.
+    Text(String),
+    /// The terminal printed nothing for `quiet_ms`.
+    Idle { quiet_ms: u64 },
+}
+
+/// How a `Request::Wait` ended well.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Waited {
+    /// The process exited with this code (a death by signal `n` is `128 + n`).
+    Exit(i32),
+    /// The first visible line that contains the text.
+    Text(String),
+    Idle,
+    TimedOut,
+}
+
+/// A terminal's screen as text, from `Request::Capture`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Captured {
+    pub terminal: TerminalId,
+    /// The terminal's size in columns and rows.
+    pub size: (u16, u16),
+    /// The cursor's row and column on the visible screen.
+    pub cursor: (u16, u16),
+    pub alternate_screen: bool,
+    /// How many earlier lines the size cap left out (0 when none).
+    pub truncated: u32,
+    /// One entry per line, trailing spaces trimmed.
+    pub lines: Vec<String>,
+}
+
+/// A project named by id or by name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Target {
+    Id(u64),
+    Name(String),
+}
+
+impl Target {
+    /// All digits is an id, anything else a name.
+    pub fn parse(text: &str) -> Self {
+        match text.parse::<u64>() {
+            Ok(id) if text.bytes().all(|b| b.is_ascii_digit()) => Self::Id(id),
+            _ => Self::Name(text.to_string()),
+        }
+    }
 }
 
 /// The outer terminal's colours as the client found them.
@@ -157,6 +280,13 @@ pub enum Response {
         id: SessionId,
         name: String,
     },
+    /// The id of what a `New*` request created.
+    Created {
+        id: u64,
+    },
+    Tree(Vec<SessionView>),
+    Captured(Captured),
+    Waited(Waited),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,6 +503,7 @@ mod tests {
             active_project: Some(ProjectId(2)),
             active_panel: Some(PanelId(3)),
             layout_viewport: Some((100, 30)),
+            attached_clients: 2,
             projects: vec![ProjectView {
                 id: ProjectId(2),
                 name: "p".into(),
@@ -391,6 +522,8 @@ mod tests {
                         title: Some("t".into()),
                         cwd: Some("/x".into()),
                         exit_status: Some(1),
+                        pid: Some(77),
+                        keep: true,
                     }],
                 }],
             }],
@@ -506,6 +639,87 @@ mod tests {
                 from: "a".into(),
                 to: "b".into(),
             }),
+            ClientMsg::Request(Request::Tree { session: None }),
+            ClientMsg::Request(Request::Tree {
+                session: Some("s".into()),
+            }),
+            ClientMsg::Request(Request::NewProject {
+                session: SessionId(1),
+                name: "api".into(),
+                root: "/tmp".into(),
+                focus: true,
+            }),
+            ClientMsg::Request(Request::NewPanel {
+                session: SessionId(1),
+                project: Target::Name("api".into()),
+                name: Some("tests".into()),
+                launch: Some(LaunchSpec {
+                    program: Some("sh".into()),
+                    args: vec!["-c".into(), "true".into()],
+                    cwd: PathBuf::new(),
+                    env: vec![("K".into(), "V".into())],
+                }),
+                focus: false,
+            }),
+            ClientMsg::Request(Request::NewPanel {
+                session: SessionId(1),
+                project: Target::Id(4),
+                name: None,
+                launch: None,
+                focus: true,
+            }),
+            ClientMsg::Request(Request::NewTerminal {
+                panel: PanelId(3),
+                launch: None,
+                keep: true,
+                focus: false,
+            }),
+            ClientMsg::Request(Request::Focus { id: 5 }),
+            ClientMsg::Request(Request::Close { id: 6 }),
+            ClientMsg::Request(Request::RenamePanel {
+                panel: PanelId(3),
+                name: "build".into(),
+            }),
+            ClientMsg::Request(Request::Send {
+                terminal: TerminalId(4),
+                bytes: b"echo \xe2\x9c\x93\r".to_vec(),
+                paste: true,
+            }),
+            ClientMsg::Request(Request::SendKeys {
+                terminal: TerminalId(4),
+                keys: vec![
+                    KeySpec::parse("C-c").unwrap(),
+                    KeySpec::parse("Up").unwrap(),
+                    KeySpec::parse("M-x").unwrap(),
+                ],
+            }),
+            ClientMsg::Request(Request::Capture {
+                terminal: TerminalId(4),
+                lines: Some(30),
+                history: true,
+                ansi: false,
+            }),
+            ClientMsg::Request(Request::Capture {
+                terminal: TerminalId(4),
+                lines: None,
+                history: false,
+                ansi: true,
+            }),
+            ClientMsg::Request(Request::Wait {
+                terminal: TerminalId(4),
+                until: WaitFor::Exit,
+                timeout_ms: None,
+            }),
+            ClientMsg::Request(Request::Wait {
+                terminal: TerminalId(4),
+                until: WaitFor::Text("ready ✓".into()),
+                timeout_ms: Some(5000),
+            }),
+            ClientMsg::Request(Request::Wait {
+                terminal: TerminalId(4),
+                until: WaitFor::Idle { quiet_ms: 500 },
+                timeout_ms: Some(0),
+            }),
             ClientMsg::Action(Action::KillSession),
             ClientMsg::Scroll {
                 terminal: TerminalId(3),
@@ -579,7 +793,31 @@ mod tests {
             ServerMsg::ActionResult(Err(ActionError::EmptyName)),
             ServerMsg::Response(Response::Ok),
             ServerMsg::Response(Response::Error("no".into())),
+            ServerMsg::Response(Response::Created { id: 12 }),
+            ServerMsg::Response(Response::Tree(vec![view()])),
+            ServerMsg::Response(Response::Captured(Captured {
+                terminal: TerminalId(4),
+                size: (80, 24),
+                cursor: (3, 7),
+                alternate_screen: true,
+                truncated: 12,
+                lines: vec!["日本 🙂 e\u{301}".into(), String::new(), "$".into()],
+            })),
+            ServerMsg::Response(Response::Waited(Waited::Exit(-1))),
+            ServerMsg::Response(Response::Waited(Waited::Exit(143))),
+            ServerMsg::Response(Response::Waited(Waited::Text("ready".into()))),
+            ServerMsg::Response(Response::Waited(Waited::Idle)),
+            ServerMsg::Response(Response::Waited(Waited::TimedOut)),
         ]
+    }
+
+    #[test]
+    fn a_target_is_an_id_only_when_it_is_all_digits() {
+        assert_eq!(Target::parse("12"), Target::Id(12));
+        assert_eq!(Target::parse("api"), Target::Name("api".into()));
+        assert_eq!(Target::parse("+3"), Target::Name("+3".into()));
+        assert_eq!(Target::parse("12a"), Target::Name("12a".into()));
+        assert_eq!(Target::parse(""), Target::Name(String::new()));
     }
 
     #[test]

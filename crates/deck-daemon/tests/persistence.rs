@@ -52,6 +52,8 @@ fn shell(id: u64) -> TerminalState {
         args: vec![],
         env: vec![],
         cwd: None,
+        keep: false,
+        exited: None,
     }
 }
 
@@ -151,6 +153,8 @@ fn structure(view: &SessionView) -> SessionView {
         .flat_map(|p| &mut p.terminals)
     {
         t.title = None;
+        // The process ids differ after a restart.
+        t.pid = None;
     }
     view
 }

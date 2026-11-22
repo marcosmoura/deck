@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use deck_core::model::{PanelId, ProjectId, SessionId};
+use deck_core::model::{LaunchSpec, PanelId, ProjectId, SessionId};
 use deck_core::protocol::NoticeLevel;
 use deck_core::state::{StateFile, TerminalState};
 
 use super::{
-    DEFAULT_VIEWPORT, Env, SessionRt, Shared, State, TITLE_VIEW_INTERVAL, Throttle,
+    DEFAULT_VIEWPORT, Env, Place, SessionRt, Shared, State, TITLE_VIEW_INTERVAL, Throttle,
     panel_of_terminal, program_name, shell_program, single_size, terminal,
 };
 use crate::lock;
@@ -155,27 +155,29 @@ impl Shared {
     /// The process of a restored terminal, in `dir`, with the daemon's start environment
     /// plus the additions of its launch spec.
     fn restored_request(&self, launch: &Launch, dir: &std::path::Path) -> SpawnRequest {
-        let mut env: Env = std::env::vars_os().collect();
-        env.extend(
-            launch
+        let env: Env = std::env::vars_os().collect();
+        let spec = LaunchSpec {
+            program: launch.saved.program.clone(),
+            args: launch.saved.args.clone(),
+            cwd: dir.to_path_buf(),
+            env: launch
                 .saved
                 .env
                 .iter()
-                .map(|(k, v)| (OsString::from(k), OsString::from(v))),
-        );
-        let mut req = self.spawn_request(
+                .map(|(k, v)| (OsString::from(k), OsString::from(v)))
+                .collect(),
+        };
+        self.spawn_request(
             &env,
+            Some(&spec),
             dir,
             single_size(DEFAULT_VIEWPORT),
-            launch.session,
-            launch.panel,
-            launch.saved.id,
-        );
-        if let Some(program) = &launch.saved.program {
-            req.program.clone_from(program);
-            req.args.clone_from(&launch.saved.args);
-        }
-        req
+            Place {
+                session: launch.session,
+                panel: launch.panel,
+                terminal: launch.saved.id,
+            },
+        )
     }
 
     async fn launch_one(self: &Arc<Self>, launch: Launch) {

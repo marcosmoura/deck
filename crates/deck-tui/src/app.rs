@@ -714,10 +714,7 @@ impl App {
                     Vec::new()
                 }
             }
-            Action::CloseTerminal => {
-                self.confirm_close_terminal(now);
-                Vec::new()
-            }
+            Action::CloseTerminal => self.confirm_close_terminal(now),
             Action::FocusTerminal(dir) => {
                 if active_panel.is_some() {
                     vec![self.act(Act::FocusDirection { dir }, None)]

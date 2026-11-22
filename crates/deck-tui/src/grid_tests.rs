@@ -35,6 +35,7 @@ pub(crate) fn app_with(n: u64, focus: u64) -> App {
         active_project: Some(ProjectId(1)),
         active_panel: Some(PanelId(3)),
         layout_viewport: Some((SIZE.0, SIZE.1 - 1)),
+        attached_clients: 0,
         projects: vec![project(1, "terminal-multiplexer", false, vec![p])],
     };
     let mut a = App::new(&no_sidebar(), SIZE, &[]);
@@ -296,4 +297,55 @@ fn the_default_config_binds_the_new_actions() {
     ] {
         assert!(!c.keys[name].is_empty(), "{name}");
     }
+}
+
+/// Marks terminal `id` of the app's only panel as an exited kept terminal.
+fn exit_terminal(a: &mut App, id: u64, code: i32) {
+    let mut view = a.mirror.view().unwrap().clone();
+    for t in &mut view.projects[0].panels[0].terminals {
+        if t.id == TerminalId(id) {
+            t.keep = true;
+            t.exit_status = Some(code);
+        }
+    }
+    a.on_server(ServerMsg::SessionView(view));
+}
+
+#[test]
+fn an_exited_terminal_shows_its_code_on_a_muted_border() {
+    let mut a = app_with(3, 1);
+    exit_terminal(&mut a, 32, 3);
+    let (_, buf, rows) = render(&a);
+    let title = rows.iter().find(|r| r.contains("exited 3")).unwrap();
+    assert!(title.contains("2 · cargo watch · exited 3"), "{title}");
+    let y = rows.iter().position(|r| r.contains("exited 3")).unwrap();
+    let x = title.chars().count() - title.chars().rev().position(|c| c == '╭').unwrap() - 1;
+    // The border cell next to the title is muted, not the unfocused-border color.
+    let theme = Theme::default();
+    let (x, y) = (u16::try_from(x).unwrap(), u16::try_from(y).unwrap());
+    assert_eq!(buf[(x, y)].fg, color(theme.muted));
+    // A running neighbor keeps its own color.
+    assert!(rows.iter().any(|r| r.contains("1 · nvim")));
+}
+
+#[test]
+fn a_single_exited_terminal_shows_its_code_in_the_status_bar() {
+    let mut a = app_with(1, 1);
+    exit_terminal(&mut a, 31, 143);
+    let (_, _, rows) = render(&a);
+    assert!(rows[0].contains("exited 143") || rows[23].contains("exited 143"));
+}
+
+#[test]
+fn closing_an_exited_terminal_needs_no_confirmation() {
+    let mut a = app_with(3, 2);
+    exit_terminal(&mut a, 32, 0);
+    let out = run(&mut a, &[prefix(), ch('x')]);
+    assert!(a.modal.is_none());
+    assert_eq!(
+        out,
+        [action(Act::CloseTerminal {
+            terminal: TerminalId(32)
+        })]
+    );
 }

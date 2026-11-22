@@ -26,7 +26,7 @@ const ANSWER_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long `kill-server` waits for the lock to be released.
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Read timeout of commands that expect an answer from a healthy daemon.
-const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Most daemons one launcher starts while it waits for a socket.
 const START_ATTEMPTS: u32 = 20;
 const RESTART_BACKOFF: Duration = Duration::from_millis(100);
@@ -41,7 +41,7 @@ fn daemon_paths() -> anyhow::Result<DaemonPaths> {
 }
 
 /// The paths, after the runtime directory check every connecting command makes.
-fn checked_paths() -> anyhow::Result<DaemonPaths> {
+pub(crate) fn checked_paths() -> anyhow::Result<DaemonPaths> {
     let paths = daemon_paths()?;
     check_runtime_dir(&paths.runtime_dir, platform::effective_uid())?;
     Ok(paths)
@@ -165,13 +165,15 @@ fn finish(exit: deck_tui::Exit) -> anyhow::Result<ExitCode> {
 }
 
 /// A connection to the daemon.
-struct Conn {
+pub(crate) struct Conn {
     stream: UnixStream,
     reader: FrameReader,
+    /// The `Hello` of a control connection was sent.
+    said_hello: bool,
 }
 
 /// What the daemon answered to a control request.
-enum Outcome {
+pub(crate) enum Outcome {
     Response(Response),
     Mismatch(u32),
     /// Anything else: a timeout, a closed connection, another `Bye`.
@@ -179,14 +181,20 @@ enum Outcome {
 }
 
 impl Conn {
-    fn open(socket: &Path, timeout: Duration) -> io::Result<Self> {
+    pub(crate) fn open(socket: &Path, timeout: Duration) -> io::Result<Self> {
         let stream = UnixStream::connect(socket)?;
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
         Ok(Self {
             stream,
             reader: FrameReader::new(),
+            said_hello: false,
         })
+    }
+
+    /// Lets reads wait without limit (for the answer to a `wait`).
+    pub(crate) fn no_read_timeout(&self) -> io::Result<()> {
+        self.stream.set_read_timeout(None)
     }
 
     fn send(&mut self, msg: &ClientMsg) -> anyhow::Result<()> {
@@ -231,11 +239,16 @@ impl Conn {
         }
     }
 
-    /// Says hello as a control client, sends `request` and waits for the answer.
-    fn control(&mut self, request: Request) -> Outcome {
-        let sent = self
-            .hello(Role::Control)
-            .and_then(|()| self.send(&ClientMsg::Request(request)));
+    /// Says hello as a control client (once per connection), sends `request` and waits for
+    /// the answer.
+    pub(crate) fn control(&mut self, request: Request) -> Outcome {
+        let hello = if self.said_hello {
+            Ok(())
+        } else {
+            self.said_hello = true;
+            self.hello(Role::Control)
+        };
+        let sent = hello.and_then(|()| self.send(&ClientMsg::Request(request)));
         if let Err(e) = sent {
             return Outcome::Other(e);
         }
@@ -256,16 +269,16 @@ impl Conn {
     }
 }
 
-fn bye_text(reason: &ByeReason) -> String {
+pub(crate) fn bye_text(reason: &ByeReason) -> String {
     match reason {
         ByeReason::Error(text) => text.clone(),
         ByeReason::SessionEnded => "the session ended".into(),
-        ByeReason::ServerShutdown => "the daemon is shutting down".into(),
+        ByeReason::ServerShutdown => "deck daemon stopped".into(),
         ByeReason::VersionMismatch { daemon } => mismatch_text(*daemon),
     }
 }
 
-fn mismatch_text(daemon: u32) -> String {
+pub(crate) fn mismatch_text(daemon: u32) -> String {
     format!(
         "the daemon speaks protocol {daemon}, this deck speaks {PROTOCOL_VERSION}; \
          run \"deck kill-server\" to restart it; sessions are restored when the daemon saved them"
@@ -369,10 +382,18 @@ pub fn probe(session: Option<String>) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `deck ls`.
-pub fn ls() -> anyhow::Result<ExitCode> {
+/// The daemon's socket for the commands that run inside deck too: `DECK_SOCKET` when set,
+/// else the path of the environment (`DECK_HOME` or the XDG directories).
+pub(crate) fn control_socket(paths: &DaemonPaths) -> PathBuf {
+    std::env::var_os("DECK_SOCKET")
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| paths.socket.clone(), PathBuf::from)
+}
+
+/// `deck ls`, of the session `only` when given.
+pub fn ls(only: Option<&str>) -> anyhow::Result<ExitCode> {
     let paths = checked_paths()?;
-    let Ok(mut conn) = Conn::open(&paths.socket, REPLY_TIMEOUT) else {
+    let Ok(mut conn) = Conn::open(&control_socket(&paths), REPLY_TIMEOUT) else {
         match saved_session_count(&paths) {
             0 => println!("no sessions"),
             n => println!(
@@ -383,14 +404,18 @@ pub fn ls() -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     };
     match conn.control(Request::ListSessions) {
-        Outcome::Response(Response::Sessions(sessions)) if sessions.is_empty() => {
-            println!("no sessions");
+        Outcome::Response(Response::Sessions(mut sessions)) => {
+            if let Some(name) = only {
+                sessions.retain(|s| s.name == name);
+            }
+            if sessions.is_empty() {
+                println!("no sessions");
+            } else {
+                print!("{}", session_lines(&sessions));
+            }
         }
-        Outcome::Response(Response::Sessions(sessions)) => print!("{}", session_lines(&sessions)),
         Outcome::Response(Response::Error(text)) => bail!("{text}"),
-        Outcome::Response(Response::Ok | Response::Session { .. }) => {
-            bail!("unexpected answer from the daemon")
-        }
+        Outcome::Response(_) => bail!("unexpected answer from the daemon"),
         Outcome::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
         Outcome::Other(e) => return Err(e),
     }

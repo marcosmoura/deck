@@ -41,3 +41,4 @@ deck follows each terminal's working directory, so a restored shell comes back w
 
 - After `kill -9` of the daemon, child processes that ignore `SIGHUP` (`nohup`, their own `setsid`) keep running, and the restored daemon starts explicit programs again next to them.
 - A shell without OSC 7 is only looked at every 5 s: a `cd` followed within seconds by `kill -9` of the daemon is lost.
+- Terminals made with `new-terminal --keep` are saved with `keep`. One that had exited is not restored; one that was running is started again and stays after it exits (see [Control API](control-api.md#kept-terminals)).

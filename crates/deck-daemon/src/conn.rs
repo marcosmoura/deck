@@ -11,6 +11,7 @@ use deck_core::protocol::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::task::JoinSet;
 
 use crate::env::Env;
 use crate::queue::{Next, Queue};
@@ -147,6 +148,8 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
         }
     }
 
+    // A pending `wait` ends with its connection: dropping the set aborts it.
+    let mut waits = JoinSet::new();
     let mut writer_done = false;
     loop {
         tokio::select! {
@@ -157,7 +160,7 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
             }
             next = reader.payload() => match next {
                 Ok(Some(payload)) => {
-                    if !dispatch(&shared, cid, &queue, &hello, &payload).await {
+                    if !dispatch(&shared, cid, &queue, &hello, &mut waits, &payload).await {
                         break;
                     }
                 }
@@ -180,8 +183,9 @@ struct Hello {
 async fn dispatch(
     shared: &Arc<Shared>,
     cid: ClientId,
-    queue: &Queue,
+    queue: &Arc<Queue>,
     hello: &Hello,
+    waits: &mut JoinSet<()>,
     payload: &[u8],
 ) -> bool {
     match decode_payload::<ClientMsg>(payload) {
@@ -220,6 +224,35 @@ async fn dispatch(
                     .rename_session_named(&from, &to)
                     .map_or_else(|e| Response::Error(e.to_string()), |()| Response::Ok),
             ));
+        }
+        Ok(ClientMsg::Request(
+            request @ (Request::Tree { .. }
+            | Request::NewProject { .. }
+            | Request::NewPanel { .. }
+            | Request::NewTerminal { .. }
+            | Request::Focus { .. }
+            | Request::Close { .. }
+            | Request::RenamePanel { .. }),
+        )) => {
+            let response = shared.control(request).await;
+            queue.push_msg(ServerMsg::Response(response));
+        }
+        Ok(ClientMsg::Request(
+            request @ (Request::Send { .. } | Request::SendKeys { .. } | Request::Capture { .. }),
+        )) => {
+            queue.push_msg(ServerMsg::Response(shared.terminal_io(request)));
+        }
+        Ok(ClientMsg::Request(Request::Wait {
+            terminal,
+            until,
+            timeout_ms,
+        })) => {
+            while waits.try_join_next().is_some() {}
+            let (shared, queue) = (Arc::clone(shared), Arc::clone(queue));
+            waits.spawn(async move {
+                let response = shared.wait(terminal, until, timeout_ms).await;
+                queue.push_msg(ServerMsg::Response(response));
+            });
         }
         Ok(ClientMsg::Action(action)) => {
             let result = shared.action(cid, action).await;

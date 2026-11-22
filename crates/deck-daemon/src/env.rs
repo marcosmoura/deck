@@ -38,17 +38,34 @@ pub struct TerminalIds<'a> {
     pub terminal: TerminalId,
 }
 
+fn is_deck_var(key: &OsStr) -> bool {
+    let key = key.as_bytes();
+    key.starts_with(b"DECK_") || key == b"DECK"
+}
+
 /// The environment of one terminal: the session's, minus what deck owns, plus what deck
-/// sets.
-pub fn terminal_env(session_env: &[(OsString, OsString)], ids: &TerminalIds<'_>) -> Env {
+/// sets, with `extra` (a launch spec's `--env`) between: an `extra` value replaces the
+/// session's, but `DECK` and `DECK_*` are set last and can never be overridden.
+pub fn terminal_env(
+    session_env: &[(OsString, OsString)],
+    extra: &[(OsString, OsString)],
+    ids: &TerminalIds<'_>,
+) -> Env {
     let mut env: Env = session_env
         .iter()
         .filter(|(k, _)| !dropped(k))
         .cloned()
         .collect();
-    let mut set = |k: &str, v: OsString| env.push((OsString::from(k), v));
-    set("TERM", "xterm-256color".into());
-    set("COLORTERM", "truecolor".into());
+    let mut set = |k: &OsStr, v: OsString| {
+        env.retain(|(have, _)| have != k);
+        env.push((k.to_os_string(), v));
+    };
+    set(OsStr::new("TERM"), "xterm-256color".into());
+    set(OsStr::new("COLORTERM"), "truecolor".into());
+    for (k, v) in extra.iter().filter(|(k, _)| !is_deck_var(k)) {
+        set(k, v.clone());
+    }
+    let mut set = |k: &str, v: OsString| set(OsStr::new(k), v);
     set("DECK", "1".into());
     set(
         "DECK_SOCKET",
@@ -115,7 +132,7 @@ mod tests {
             ("COLORTERM", "no"),
             ("LANG", "en_US.UTF-8"),
         ]);
-        let env = terminal_env(&session, &ids(Path::new("/s/deck.sock")));
+        let env = terminal_env(&session, &[], &ids(Path::new("/s/deck.sock")));
         let get = |k: &str| lookup(&env, k).map(|v| v.to_str().unwrap().to_string());
         assert_eq!(get("FOO").as_deref(), Some("bar"));
         assert_eq!(get("LANG").as_deref(), Some("en_US.UTF-8"));
@@ -138,6 +155,30 @@ mod tests {
             assert_eq!(get(gone), None, "{gone}");
         }
         // Each key once.
+        let mut keys: Vec<_> = env.iter().map(|(k, _)| k.clone()).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), env.len());
+    }
+
+    #[test]
+    fn extra_variables_override_the_session_but_never_deck_ones() {
+        let session = e(&[("FOO", "bar"), ("KEEP", "1")]);
+        let extra = e(&[
+            ("FOO", "new"),
+            ("TERM", "dumb"),
+            ("DECK_TERMINAL_ID", "1"),
+            ("DECK", "0"),
+            ("EXTRA", "x"),
+        ]);
+        let env = terminal_env(&session, &extra, &ids(Path::new("/s/deck.sock")));
+        let get = |k: &str| lookup(&env, k).map(|v| v.to_str().unwrap().to_string());
+        assert_eq!(get("FOO").as_deref(), Some("new"));
+        assert_eq!(get("KEEP").as_deref(), Some("1"));
+        assert_eq!(get("EXTRA").as_deref(), Some("x"));
+        assert_eq!(get("TERM").as_deref(), Some("dumb"));
+        assert_eq!(get("DECK_TERMINAL_ID").as_deref(), Some("4"));
+        assert_eq!(get("DECK").as_deref(), Some("1"));
         let mut keys: Vec<_> = env.iter().map(|(k, _)| k.clone()).collect();
         keys.sort();
         keys.dedup();

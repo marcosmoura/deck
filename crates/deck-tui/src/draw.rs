@@ -2,6 +2,7 @@
 //! Every colour and glyph of deck's own UI comes from the [`Theme`].
 
 use deck_core::config::HelpGroup;
+use deck_core::model::TerminalView;
 use deck_core::protocol::{CursorShape, NoticeLevel};
 use deck_core::theme::{BorderStyle, Theme};
 use ratatui::Frame;
@@ -271,6 +272,20 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
     (x < cw && y < ch).then_some(Position::new(panel.x + x, panel.y + y))
 }
 
+/// What a terminal is called on its border or in the status bar: its title, else its
+/// program, then `exited <code>` once a kept terminal's process ended.
+fn terminal_label(view: &TerminalView) -> String {
+    let name = view
+        .title
+        .clone()
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| view.program.clone());
+    match view.exit_status {
+        Some(code) => format!("{name} · exited {code}"),
+        None => name,
+    }
+}
+
 /// Every terminal of a grid of two or more in its rect, with its own border and title;
 /// returns where the focused terminal's cursor is, when visible.
 fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
@@ -282,19 +297,18 @@ fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
             continue;
         }
         let focused = grid.focused == Some(i);
-        let (border, title_color) = if focused {
+        let Some(view) = panel.terminals.get(i) else {
+            continue;
+        };
+        // An exited kept terminal is drawn muted, focused or not.
+        let (border, title_color) = if view.exit_status.is_some() {
+            (theme.muted, theme.muted)
+        } else if focused {
             (theme.border_focused, theme.accent)
         } else {
             (theme.border, theme.title)
         };
-        let Some(view) = panel.terminals.get(i) else {
-            continue;
-        };
-        let name = view
-            .title
-            .clone()
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| view.program.clone());
+        let name = terminal_label(view);
         // One border cell, then the title: `╭─ 1 · nvim ───╮`.
         let label = truncate(&format!("{} · {name}", i + 1), rect.width.saturating_sub(6));
         let area = Rect::new(rect.x, rect.y, rect.width, rect.height);
@@ -440,12 +454,7 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
     // The terminal's title, or its program, after the location; not when there is no panel.
     let location = match app.mirror.focused() {
         Some(term) if !app.panel_area_empty() => {
-            let title = term
-                .title
-                .clone()
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| term.program.clone());
-            format!("{location} · {title}")
+            format!("{location} · {}", terminal_label(term))
         }
         _ => location,
     };

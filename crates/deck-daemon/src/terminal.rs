@@ -24,7 +24,7 @@ pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// A terminal whose process is gone is dropped after this much silence on its PTY.
 pub const DRAIN_SILENCE: Duration = Duration::from_millis(200);
 
-/// How the child is polled for its exit (no `unsafe` wait, and the child stays killable).
+/// How the child is polled for its exit (the child stays killable).
 const WAIT_POLL_MIN: Duration = Duration::from_millis(10);
 const WAIT_POLL_MAX: Duration = Duration::from_millis(250);
 /// Input queued for a program that does not read it is dropped past this many bytes.
@@ -59,6 +59,8 @@ pub struct TermHandle {
     /// Woken on every chunk of output and at the end of the stream.
     pub activity: Notify,
     last_data: AtomicU64,
+    /// The exit code, set once the process ended and its output was read.
+    finished: Mutex<Option<i32>>,
     eof: AtomicBool,
     exited: AtomicBool,
     closed: AtomicBool,
@@ -124,6 +126,12 @@ impl TermHandle {
         *lock(&self.input) = None;
     }
 
+    /// Ends the input channel: what is written to the terminal from now on is dropped. A
+    /// kept terminal whose process ended keeps its emulator, so its screen stays.
+    pub fn stop_input(&self) {
+        *lock(&self.input) = None;
+    }
+
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
@@ -139,6 +147,21 @@ impl TermHandle {
 
     pub fn set_reports_cwd(&self) {
         self.reports_cwd.store(true, Ordering::Release);
+    }
+
+    /// Records the exit code: the process ended and its output was read.
+    pub fn finish(&self, code: i32) {
+        *lock(&self.finished) = Some(code);
+    }
+
+    /// The exit code once the process ended and its output was read.
+    pub fn finished(&self) -> Option<i32> {
+        *lock(&self.finished)
+    }
+
+    /// When the program last printed, on the daemon's clock (zero before its first output).
+    pub fn last_output(&self) -> Duration {
+        Duration::from_nanos(self.last_data.load(Ordering::Acquire))
     }
 
     pub fn has_exited(&self) -> bool {
@@ -319,6 +342,7 @@ pub fn start(
         dirty: Notify::new(),
         activity: Notify::new(),
         last_data: AtomicU64::new(0),
+        finished: Mutex::new(None),
         eof: AtomicBool::new(false),
         exited: AtomicBool::new(false),
         closed: AtomicBool::new(false),
@@ -405,7 +429,7 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
         .ok();
 }
 
-fn spawn_waiter(handle: &Arc<TermHandle>) -> oneshot::Receiver<u32> {
+fn spawn_waiter(handle: &Arc<TermHandle>) -> oneshot::Receiver<i32> {
     let (tx, rx) = oneshot::channel();
     let h = Arc::clone(handle);
     std::thread::Builder::new()
@@ -413,11 +437,19 @@ fn spawn_waiter(handle: &Arc<TermHandle>) -> oneshot::Receiver<u32> {
         .spawn(move || {
             let mut poll = WAIT_POLL_MIN;
             loop {
-                let polled = lock(&h.child).try_wait();
+                // The daemon reaps the child itself, so a death by signal has its code;
+                // portable-pty reports it as 1. Without a pid, portable-pty's wait is all
+                // there is.
+                let polled = match h.pid {
+                    Some(pid) => crate::platform::wait_status(pid),
+                    None => lock(&h.child)
+                        .try_wait()
+                        .map(|s| s.map(|s| i32::try_from(s.exit_code()).unwrap_or(1))),
+                };
                 match polled {
-                    Ok(Some(status)) => {
+                    Ok(Some(code)) => {
                         h.exited.store(true, Ordering::Release);
-                        let _ = tx.send(status.exit_code());
+                        let _ = tx.send(code);
                         return;
                     }
                     Ok(None) => {

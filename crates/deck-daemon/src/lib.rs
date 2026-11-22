@@ -18,6 +18,7 @@ use std::fs;
 use std::future::Future;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -95,6 +96,8 @@ pub struct Options {
     /// How often the directories of terminals that never reported one are looked up.
     pub cwd_poll: Duration,
     pub cwd_query: CwdQuery,
+    /// Counts the pending `wait` requests, for tests that check none is left behind.
+    pub waiters: Arc<AtomicUsize>,
 }
 
 impl Default for Options {
@@ -106,6 +109,7 @@ impl Default for Options {
             config_poll: CONFIG_POLL,
             cwd_poll: CWD_POLL,
             cwd_query: CwdQuery::default(),
+            waiters: Arc::default(),
         }
     }
 }
@@ -225,6 +229,7 @@ impl Daemon {
             options.clock,
             options.protocol_version,
             options.cwd_query,
+            options.waiters,
         );
         let launches = match loaded {
             persist::Loaded::Missing => Vec::new(),

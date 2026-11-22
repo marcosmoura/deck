@@ -105,6 +105,8 @@ pub struct Terminal {
     pub cwd: Option<PathBuf>,
     /// Exit status of a kept terminal whose process ended.
     pub exit_status: Option<i32>,
+    /// Stays after its process exits (`deck new-terminal --keep`).
+    pub keep: bool,
 }
 
 /// A serializable snapshot of one session for clients. It carries no launch specs or
@@ -119,6 +121,8 @@ pub struct SessionView {
     pub active_panel: Option<PanelId>,
     /// The panel area the daemon sized the active panel's terminals for.
     pub layout_viewport: Option<(u16, u16)>,
+    /// Clients attached to the session (filled by the daemon).
+    pub attached_clients: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,7 +153,12 @@ pub struct TerminalView {
     pub title: Option<String>,
     #[serde(with = "crate::wire::opt_path")]
     pub cwd: Option<PathBuf>,
+    /// The exit code of a kept terminal whose process ended; a death by signal `n` is
+    /// `128 + n`.
     pub exit_status: Option<i32>,
+    /// The process id while it runs (filled by the daemon).
+    pub pid: Option<u32>,
+    pub keep: bool,
 }
 
 impl Terminal {
@@ -160,6 +169,8 @@ impl Terminal {
             title: self.title.clone(),
             cwd: self.cwd.clone(),
             exit_status: self.exit_status,
+            pid: None,
+            keep: self.keep,
         }
     }
 }
@@ -226,6 +237,7 @@ impl Session {
             active_project: self.active_project,
             active_panel: self.active_panel(),
             layout_viewport,
+            attached_clients: 0,
         }
     }
 
@@ -383,6 +395,7 @@ mod tests {
                         title: Some("vim".into()),
                         cwd: None,
                         exit_status: None,
+                        keep: false,
                     }],
                 }],
             }],
@@ -524,6 +537,7 @@ mod tests {
             title: None,
             cwd: None,
             exit_status: None,
+            keep: false,
         }
     }
 
