@@ -67,3 +67,5 @@ The layout is not in anything public that deck can read (DeepWiki could not conf
 3. **New dependency:** none under the recommendations above. `time` formatting ("2h ago") is done by hand in `deck-core`.
 
 Reviewed by spec-reviewer on 22 Nov 2026.
+
+Approved on 22 Nov 2026 by the user's instruction to build every remaining backlog item, including this one, without a separate approval round.

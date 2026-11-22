@@ -65,3 +65,5 @@ The sidebar and the panel area can be resized with the mouse, and the sidebar ga
 - **Double-click on the separator to reset the width**: not specified (needs click timing). Recommendation: leave out; dragging back or editing `sidebar_width` resets it.
 
 Reviewed by spec-reviewer on 22 Nov 2026.
+
+Approved on 22 Nov 2026 by the user's instruction to build every remaining backlog item, including this one, without a separate approval round.

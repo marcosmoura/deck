@@ -31,8 +31,8 @@ Open tasks the user has not placed in the queue: none.
 | DECK-06 | Agent status, hooks and resume         | ready       | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
 | DECK-08 | Config and theming                     | done        | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
 | DECK-09 | Sidebar titles with icons              | ready       | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
-| DECK-10 | Sidebar mouse and buttons              | draft spec  | DECK-06          | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
-| DECK-11 | Restore agent sessions                 | draft spec  | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
+| DECK-10 | Sidebar mouse and buttons              | ready       | DECK-06          | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
+| DECK-11 | Restore agent sessions                 | ready       | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
 
 ### Withdrawn
 
