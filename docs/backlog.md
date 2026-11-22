@@ -18,7 +18,9 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue: none.
+Open tasks the user has not placed in the queue:
+
+- [DECK-09](#deck-09): sidebar titles with program and agent icons
 
 ## Tasks
 
@@ -32,6 +34,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-06 | Agent status, hooks and resume            | ready      | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)          |
 | DECK-07 | Auto-named panels                         | todo       | DECK-06          | — (simple task, [note](#deck-07))                                     |
 | DECK-08 | Config and theming                        | ready      | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)      |
+| DECK-09 | Sidebar titles with icons                 | needs spec | DECK-06          | — ([note](#deck-09))                                                  |
 
 ### Withdrawn
 
@@ -48,6 +51,15 @@ None.
 - What: a panel whose `name_source` is not `manual` takes its name from its first terminal (in grid order) that has an agent. Source, in order: the agent's terminal title (OSC 0/2), with leading spinner or status glyphs (any non-alphanumeric prefix) stripped, once it differs (case-insensitively) from the bare program name and the product names (`claude`, `Claude Code`, `codex`, `Codex`, `opencode`, `OpenCode`); otherwise the first prompt of the agent's session from its `UserPromptSubmit` hook event (DECK-06), first line only. Names are cut to 32 display cells (by Unicode width) with `…`. The naming logic is pure and lives in `deck-core`. The `name_source` becomes `auto`. A manual rename (`prefix ,` or `deck rename-panel`) sets `manual` and is never overwritten; `deck rename-panel --auto` (a new flag this task adds to DECK-05's command) returns the panel to `auto`. When the agent exits, the auto name stays until another agent renames it.
 - Why: panels full of agents all read "claude" otherwise.
 - Acceptance: unit tests in `deck-core` for the title cleanup (including product-name titles), the source order, the 32-cell cut with wide characters and the manual lock; an end-to-end test where a fake agent script sets its title with OSC 2 and its panel's sidebar row shows the new name, and where a manual rename then survives another title change; `docs/features/agents.md` (created by DECK-06) describes it.
+
+### DECK-09
+
+**Sidebar titles with icons.** Asked on 22 Nov 2026, after trying DECK-02 (which moved a single terminal's title from its border to the status bar):
+
+- The sidebar always shows each panel's terminal title.
+- When an agent runs in it (Claude Code, Codex, OpenCode), the agent's name is not shown; its icon comes before the title instead (`<claude icon> fix login bug`).
+- Other programs get an icon from a fixed set: a plain shell (zsh, bash, fish) shows a terminal icon, other known programs a more fitting one, and anything unknown falls back to the terminal icon.
+- Open for the spec: how icons are drawn (Nerd Font glyphs or plain Unicode, and a fallback), how it relates to panel names and to DECK-07's auto-naming (which may fold into this task), and whether the status bar keeps the title.
 
 ## Statuses
 
