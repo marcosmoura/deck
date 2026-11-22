@@ -11,7 +11,7 @@ use crate::action::{Action, ActionError};
 use crate::config::Config;
 use crate::model::{SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -384,6 +384,7 @@ mod tests {
                     name: "e".into(),
                     name_source: NameSource::Auto,
                     focused_terminal: Some(TerminalId(4)),
+                    ratios: crate::layout::Ratios::default_for(1),
                     terminals: vec![TerminalView {
                         id: TerminalId(4),
                         program: "sh".into(),

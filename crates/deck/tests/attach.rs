@@ -136,8 +136,8 @@ fn the_non_breaking_space_arms_the_prefix_and_twice_sends_its_own_bytes() {
     let mut h = attached();
     h.send_bytes(b"\xc2\xa0");
     h.wait_for_text("PREFIX", TIMEOUT);
-    h.send_keys("x");
-    h.wait_for_text("no binding for x", TIMEOUT);
+    h.send_keys("z");
+    h.wait_for_text("no binding for z", TIMEOUT);
     h.send_keys("stty raw -echo; printf 'REA%s\\r\\n' DY; od -An -tx1 -N3 | tr -d ' '\r");
     h.wait_for_text("READY", TIMEOUT);
     h.send_bytes(b"\xc2\xa0\xc2\xa0");
@@ -154,8 +154,8 @@ fn the_non_breaking_space_arms_the_prefix_and_twice_sends_its_own_bytes() {
 fn an_unbound_key_after_the_prefix_flashes_and_sends_nothing() {
     let mut h = attached();
     h.send_keys("stty raw -echo; od -An -tx1 -N1 | tr -d ' '\r");
-    prefixed(&mut h, "x");
-    h.wait_for_text("no binding for x", TIMEOUT);
+    prefixed(&mut h, "z");
+    h.wait_for_text("no binding for z", TIMEOUT);
     h.send_keys("a");
     wait_until("the byte of `a`", TIMEOUT, || {
         rows(&h).iter().any(|r| r.contains("61"))
@@ -205,11 +205,11 @@ fn the_prefix_badge_shows_until_the_next_key() {
     wait_until("the badge to go", TIMEOUT, || {
         !h.screen_text().contains("PREFIX")
     });
-    prefixed(&mut h, "x");
+    prefixed(&mut h, "z");
     wait_until("the badge to go", TIMEOUT, || {
         !h.screen_text().contains("PREFIX")
     });
-    h.wait_for_text("no binding for x", TIMEOUT);
+    h.wait_for_text("no binding for z", TIMEOUT);
     // The message goes after two seconds and the hints return.
     h.wait_for_text(HINT, Duration::from_secs(6));
 }

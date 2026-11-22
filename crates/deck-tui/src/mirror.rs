@@ -198,6 +198,7 @@ pub(crate) mod tests {
             name: name.into(),
             name_source: NameSource::Default,
             focused_terminal: Some(TerminalId(id * 10 + 1)),
+            ratios: deck_core::layout::Ratios::default_for(usize::try_from(terminals).unwrap_or(1)),
             terminals: (1..=terminals)
                 .map(|n| TerminalView {
                     id: TerminalId(id * 10 + n),
@@ -270,6 +271,7 @@ pub(crate) mod tests {
                     name: "p".into(),
                     name_source: NameSource::Default,
                     focused_terminal: Some(TerminalId(4)),
+                    ratios: deck_core::layout::Ratios::default_for(1),
                     terminals: vec![TerminalView {
                         id: TerminalId(4),
                         program: "sh".into(),

@@ -4,12 +4,18 @@ mod app;
 mod colors;
 mod convert;
 mod draw;
+mod grid;
+#[cfg(test)]
+mod grid_tests;
 mod input;
 mod mirror;
 mod modal;
 mod picker;
 #[cfg(test)]
 mod reload_tests;
+mod resize;
+#[cfg(test)]
+mod resize_tests;
 mod sidebar;
 #[cfg(test)]
 mod sidebar_tests;
@@ -187,7 +193,7 @@ async fn run_async(mut options: Options) -> Exit {
         let wake = if app.is_dirty() {
             Some(last_draw + REDRAW)
         } else {
-            app.flash_deadline()
+            app.wake_deadline()
         };
         let outs = if early.is_empty() {
             tokio::select! {

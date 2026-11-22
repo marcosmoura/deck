@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{PanelId, ProjectId};
+use crate::layout::{Direction, Ratios};
+use crate::model::{PanelId, ProjectId, TerminalId};
 
 /// Longest name, in characters.
 pub const MAX_NAME_LEN: usize = 64;
@@ -53,6 +54,26 @@ pub enum Action {
         name: String,
     },
     KillSession,
+    /// A new shell in `panel`, or in the active panel.
+    NewTerminal {
+        panel: Option<PanelId>,
+    },
+    CloseTerminal {
+        terminal: TerminalId,
+    },
+    FocusTerminal {
+        terminal: TerminalId,
+    },
+    /// Moves focus in the active panel to the terminal in that direction.
+    FocusDirection {
+        dir: Direction,
+    },
+    /// Stores `ratios` for `panel`, which the client computed for `n` terminals.
+    SetRatios {
+        panel: PanelId,
+        n: usize,
+        ratios: Ratios,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
@@ -77,6 +98,16 @@ pub enum ActionError {
     NoSuchProject(ProjectId),
     #[error("no panel {0}")]
     NoSuchPanel(PanelId),
+    #[error("no terminal {0}")]
+    NoSuchTerminal(TerminalId),
+    #[error("not enough room for another terminal")]
+    NoRoom,
+    #[error("layout changed, try again")]
+    LayoutChanged,
+    #[error("invalid layout ratios")]
+    InvalidRatios,
+    #[error("no panel to act on")]
+    NoActivePanel,
     #[error("no session named \"{0}\"")]
     NoSuchSession(String),
     #[error("not attached to a session")]
@@ -229,6 +260,24 @@ mod tests {
             Action::CyclePanel { delta: -1 },
             Action::RenameSession { name: "s".into() },
             Action::KillSession,
+            Action::NewTerminal { panel: None },
+            Action::NewTerminal {
+                panel: Some(PanelId(2)),
+            },
+            Action::CloseTerminal {
+                terminal: TerminalId(5),
+            },
+            Action::FocusTerminal {
+                terminal: TerminalId(5),
+            },
+            Action::FocusDirection {
+                dir: Direction::Left,
+            },
+            Action::SetRatios {
+                panel: PanelId(2),
+                n: 3,
+                ratios: Ratios::default_for(3),
+            },
         ];
         for a in actions {
             let msg = ClientMsg::Action(a);
@@ -239,6 +288,10 @@ mod tests {
             Err(ActionError::EmptyName),
             Err(ActionError::NoSuchPanel(PanelId(4))),
             Err(ActionError::Spawn("boom".into())),
+            Err(ActionError::NoRoom),
+            Err(ActionError::NoSuchTerminal(TerminalId(3))),
+            Err(ActionError::LayoutChanged),
+            Err(ActionError::InvalidRatios),
         ] {
             let msg = ServerMsg::ActionResult(r);
             assert_eq!(decode::<ServerMsg>(&encode(&msg).unwrap()).unwrap(), msg);

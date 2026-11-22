@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 02 — Several terminals per panel
@@ -55,10 +55,14 @@ Panel `tests` with 3 terminals, terminal 2 focused (accent), at 100×24 with the
 - [ ] In a 40×12 window (sidebar auto-hidden, panel area 40×11), terminals 2 to 4 are added and the fourth `⌥Space t` (a 5th terminal) is refused with the room error, because even the default 5-terminal ratios give its grid columns 10 cells (8 inside).
 - [ ] The wheel over an unfocused terminal scrolls it without moving focus or entering scroll mode.
 - [ ] A click in an unfocused terminal focuses it without sending the click; a second click is forwarded to a program with mouse reporting on.
-- [ ] Two clients of the same size on one session see the same focus and layout; a smaller second client draws the daemon's layout cropped, without changing PTY sizes until it sends input.
+- [ ] Two clients of the same size on one session see the same focus and layout; a smaller second client sizes the PTYs when it attaches (DECK-01's viewport claim); once the larger client sends input, the smaller one draws the daemon's layout cropped.
 
 ## Tests
 
 - `crates/deck-daemon/tests/`: sizing after add, close and viewport change; `fit` applied when stored ratios do not fit; focus rules; the room refusal.
 - `deck-tui`: `TestBackend` drawing of 2, 3 and 5 terminals with focus styles and titles.
 - `crates/deck/tests/grid.rs`: one scenario per acceptance criterion.
+
+## Notes
+
+- Help overlay: the four focus actions share one row ("Focus the terminal by direction"), and the group headings are dropped when the window is too short for them plus all the rows (24 rows), so the new bindings fit.

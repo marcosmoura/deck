@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::layout::Ratios;
+
 macro_rules! id_type {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
@@ -83,7 +85,11 @@ pub struct Panel {
     pub name: String,
     pub name_source: NameSource,
     pub terminals: Vec<Terminal>,
+    /// The focused terminal; `Some` while the panel has terminals.
     pub focused_terminal: Option<TerminalId>,
+    /// The stored grid ratios, valid for the terminal count (see `layout::fit` for the
+    /// ones drawn).
+    pub ratios: Ratios,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +139,7 @@ pub struct PanelView {
     pub name_source: NameSource,
     pub terminals: Vec<TerminalView>,
     pub focused_terminal: Option<TerminalId>,
+    pub ratios: Ratios,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,7 +172,35 @@ impl Panel {
             name_source: self.name_source,
             terminals: self.terminals.iter().map(Terminal::view).collect(),
             focused_terminal: self.focused_terminal,
+            ratios: self.ratios.clone(),
         }
+    }
+
+    /// Appends a terminal, adapts the ratios to the new count and focuses it.
+    pub fn add_terminal(&mut self, terminal: Terminal) {
+        let old = self.terminals.len();
+        self.focused_terminal = Some(terminal.id);
+        self.terminals.push(terminal);
+        self.ratios = Ratios::adapt(&self.ratios, old, old + 1);
+    }
+
+    /// Removes a terminal and adapts the ratios. When it was focused, focus goes to the
+    /// terminal that took its position, else the previous one.
+    pub fn remove_terminal(&mut self, id: TerminalId) -> Option<Terminal> {
+        let at = self.terminals.iter().position(|t| t.id == id)?;
+        let old = self.terminals.len();
+        let removed = self.terminals.remove(at);
+        if self.focused_terminal == Some(id) {
+            self.focused_terminal = self
+                .terminals
+                .get(at)
+                .or_else(|| at.checked_sub(1).and_then(|i| self.terminals.get(i)))
+                .map(|t| t.id);
+        }
+        if old > 1 {
+            self.ratios = Ratios::adapt(&self.ratios, old, old - 1);
+        }
+        Some(removed)
     }
 }
 
@@ -335,6 +370,7 @@ mod tests {
                     name: "editor".into(),
                     name_source: NameSource::Manual,
                     focused_terminal: Some(TerminalId(4)),
+                    ratios: Ratios::default_for(1),
                     terminals: vec![Terminal {
                         id: TerminalId(4),
                         launch: LaunchSpec {
@@ -366,6 +402,7 @@ mod tests {
             name_source: NameSource::Default,
             terminals: vec![],
             focused_terminal: None,
+            ratios: Ratios::default_for(1),
         }
     }
 
@@ -472,5 +509,67 @@ mod tests {
         assert_eq!(p.next_panel_name(), "2");
         p.panels[0].name = "custom".into();
         assert_eq!(p.next_panel_name(), "1");
+    }
+
+    fn terminal(id: u64) -> Terminal {
+        Terminal {
+            id: TerminalId(id),
+            launch: LaunchSpec {
+                program: None,
+                args: vec![],
+                cwd: "/r".into(),
+                env: vec![],
+            },
+            program: "sh".into(),
+            title: None,
+            cwd: None,
+            exit_status: None,
+        }
+    }
+
+    #[test]
+    fn adding_a_terminal_appends_focuses_and_adapts_the_ratios() {
+        let mut p = panel(1, "p");
+        p.add_terminal(terminal(10));
+        assert_eq!(p.focused_terminal, Some(TerminalId(10)));
+        assert_eq!(p.ratios, Ratios::default_for(1));
+        p.add_terminal(terminal(11));
+        p.add_terminal(terminal(12));
+        let ids: Vec<_> = p.terminals.iter().map(|t| t.id.0).collect();
+        assert_eq!(ids, [10, 11, 12]);
+        assert_eq!(p.focused_terminal, Some(TerminalId(12)));
+        assert_eq!(p.ratios, Ratios::default_for(3));
+        // A custom split survives the count change.
+        let mut p = panel(1, "p");
+        p.add_terminal(terminal(10));
+        p.add_terminal(terminal(11));
+        p.ratios.cols = vec![600, 400];
+        p.add_terminal(terminal(12));
+        assert_eq!(p.ratios.main, Some(600));
+        assert!(p.ratios.is_valid_for(3));
+    }
+
+    #[test]
+    fn removing_the_focused_terminal_focuses_the_one_that_took_its_place() {
+        let mut p = panel(1, "p");
+        for id in [10, 11, 12] {
+            p.add_terminal(terminal(id));
+        }
+        p.focused_terminal = Some(TerminalId(11));
+        assert!(p.remove_terminal(TerminalId(11)).is_some());
+        assert_eq!(p.focused_terminal, Some(TerminalId(12)), "the next one");
+        assert!(p.ratios.is_valid_for(2));
+        assert!(p.remove_terminal(TerminalId(12)).is_some());
+        assert_eq!(p.focused_terminal, Some(TerminalId(10)), "the previous one");
+        assert!(p.remove_terminal(TerminalId(99)).is_none());
+        assert!(p.remove_terminal(TerminalId(10)).is_some());
+        assert_eq!(p.focused_terminal, None);
+        // An unfocused terminal going keeps focus.
+        let mut p = panel(1, "p");
+        for id in [10, 11] {
+            p.add_terminal(terminal(id));
+        }
+        p.remove_terminal(TerminalId(10));
+        assert_eq!(p.focused_terminal, Some(TerminalId(11)));
     }
 }

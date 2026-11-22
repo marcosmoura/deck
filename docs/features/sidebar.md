@@ -57,7 +57,7 @@ When the daemon refuses a name or a directory (empty, too long, a duplicate proj
 
 ## Help
 
-`Option+Space ?` shows every binding in a box, grouped (Session, Panels, Projects, Terminal, Sidebar), from the binding table, so `[keys]` overrides show. `Esc`, `q` or `?` close it.
+`Option+Space ?` shows every binding in a box, grouped (Session, Panels, Projects, Terminal, Sidebar), from the binding table, so `[keys]` overrides show. The four focus keys share one line. In a window too short for the headings, the box lists the bindings without them. `Esc`, `q` or `?` close it.
 
 ## Configuration
 

@@ -12,7 +12,8 @@ use std::time::Duration;
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 use deck_core::action::{Action, ActionError, NameKind, default_project_name, validate_name};
 use deck_core::config::Config;
-use deck_core::layout::panel_area;
+use deck_core::layout::Ratios;
+use deck_core::layout::{self, Rect, panel_area};
 use deck_core::model::{
     LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, Terminal,
     TerminalId,
@@ -95,6 +96,16 @@ impl SessionRt {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The active panel's model.
+    fn active_panel_model(&self) -> Option<&Panel> {
+        let active = self.model.active_panel()?;
+        self.model
+            .projects
+            .iter()
+            .flat_map(|p| &p.panels)
+            .find(|p| p.id == active)
     }
 
     fn is_active(&self, terminal: TerminalId) -> bool {
@@ -206,7 +217,9 @@ impl State {
         let Some(sess) = self.session(sid) else {
             return;
         };
-        let view = sess.model.view(sess.viewport);
+        let view = sess
+            .model
+            .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT)));
         for (_, c) in self.clients_of(sid) {
             c.queue.push_view(view.clone());
         }
@@ -225,6 +238,13 @@ impl State {
         frames
     }
 
+    /// Full frames of the given terminals of the active panel.
+    fn full_frames_of(&self, sid: SessionId, only: &[TerminalId]) -> Vec<Frame> {
+        let mut frames = self.full_frames(sid);
+        frames.retain(|f| only.contains(&f.terminal));
+        frames
+    }
+
     fn push_frame(&self, sid: SessionId, frame: &Frame) {
         for (_, c) in self.clients_of(sid) {
             c.queue.push_frame(frame.clone());
@@ -239,6 +259,27 @@ fn terminal_model(session: &mut Session, id: TerminalId) -> Option<&mut Terminal
         .flat_map(|p| p.panels.iter_mut())
         .flat_map(|p| p.terminals.iter_mut())
         .find(|t| t.id == id)
+}
+
+fn panel_mut(session: &mut Session, id: PanelId) -> Option<&mut Panel> {
+    session
+        .projects
+        .iter_mut()
+        .flat_map(|p| p.panels.iter_mut())
+        .find(|p| p.id == id)
+}
+
+fn panel_of_terminal(session: &mut Session, id: TerminalId) -> Option<&mut Panel> {
+    session
+        .projects
+        .iter_mut()
+        .flat_map(|p| p.panels.iter_mut())
+        .find(|p| p.terminals.iter().any(|t| t.id == id))
+}
+
+/// The size of a panel's only terminal: the whole panel area (no border).
+fn single_size(viewport: (u16, u16)) -> (u16, u16) {
+    clamp_size(viewport.0, viewport.1)
 }
 
 fn project_name(cwd: &Path, env: &Env) -> String {
@@ -261,11 +302,6 @@ fn program_name(program: &str) -> String {
     Path::new(program)
         .file_name()
         .map_or_else(|| program.to_string(), |n| n.to_string_lossy().into_owned())
-}
-
-/// The size of a panel's terminal: the whole panel area (a single terminal has no border).
-fn inner_size(viewport: (u16, u16)) -> (u16, u16) {
-    clamp_size(viewport.0, viewport.1)
 }
 
 pub struct Shared {
@@ -473,7 +509,10 @@ impl Shared {
             queue.push_msg(ServerMsg::Notice { level, text });
         }
         if let Some(sess) = st.session(sid) {
-            queue.push_view(sess.model.view(sess.viewport));
+            queue.push_view(
+                sess.model
+                    .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT))),
+            );
         }
         for frame in st.full_frames(sid) {
             queue.push_frame(frame);
@@ -526,7 +565,7 @@ impl Shared {
         let pid = ProjectId(st.alloc());
         let panel = PanelId(st.alloc());
         let tid = TerminalId(st.alloc());
-        let req = self.spawn_request(&a.env, &a.cwd, viewport, sid, panel, tid);
+        let req = self.spawn_request(&a.env, &a.cwd, single_size(viewport), sid, panel, tid);
         NewSession {
             sid,
             pid,
@@ -537,17 +576,16 @@ impl Shared {
         }
     }
 
-    /// The process of a new terminal: the shell, in `cwd`, sized for `viewport`.
+    /// The process of a new terminal: the shell, in `cwd`, with a PTY of `inner` size.
     fn spawn_request(
         &self,
         session_env: &Env,
         cwd: &Path,
-        viewport: (u16, u16),
+        inner: (u16, u16),
         session: SessionId,
         panel: PanelId,
         terminal: TerminalId,
     ) -> SpawnRequest {
-        let inner = inner_size(viewport);
         let config = self.config();
         let program = config
             .shell
@@ -611,6 +649,7 @@ impl Shared {
                     name: "1".into(),
                     name_source: NameSource::Default,
                     focused_terminal: Some(tid),
+                    ratios: Ratios::default_for(1),
                     terminals: vec![Terminal {
                         id: tid,
                         launch: LaunchSpec {
@@ -759,19 +798,41 @@ impl Shared {
         if sess.viewport == Some(vp) {
             return;
         }
-        let inner = inner_size(vp);
-        for t in sess.active_terminals() {
-            if t.with_emu(|e| e.size()) != Some(inner) {
-                t.resize_pty(inner.0, inner.1);
-            }
-        }
         if let Some(sess) = st.session_mut(sid) {
             sess.viewport = Some(vp);
         }
+        let changed = self.apply_sizes(st, sid);
         st.push_view(sid);
-        for frame in st.full_frames(sid) {
+        for frame in st.full_frames_of(sid, &changed) {
             st.push_frame(sid, &frame);
         }
+    }
+
+    /// Sizes the active panel's PTYs and emulators from its layout in the session's
+    /// viewport; returns the terminals whose size changed.
+    fn apply_sizes(&self, st: &State, sid: SessionId) -> Vec<TerminalId> {
+        let Some(sess) = st.session(sid) else {
+            return Vec::new();
+        };
+        let Some(panel) = sess.active_panel_model() else {
+            return Vec::new();
+        };
+        let (cols, rows) = sess.viewport.unwrap_or(DEFAULT_VIEWPORT);
+        let n = panel.terminals.len();
+        let rects = layout::panel_rects(Rect::new(0, 0, cols, rows), n, &panel.ratios);
+        let mut changed = Vec::new();
+        for (term, rect) in panel.terminals.iter().zip(rects) {
+            let (c, r) = layout::inner(rect, n);
+            let size = clamp_size(c, r);
+            let Some(handle) = sess.terminals.get(&term.id) else {
+                continue;
+            };
+            if handle.with_emu(|e| e.size()) != Some(size) {
+                handle.resize_pty(size.0, size.1);
+                changed.push(term.id);
+            }
+        }
+        changed
     }
 
     /// After the writer dropped frames: the current view and every screen in full.
@@ -784,7 +845,10 @@ impl Shared {
             return;
         };
         if let Some(sess) = st.session(sid) {
-            client.queue.push_view(sess.model.view(sess.viewport));
+            client.queue.push_view(
+                sess.model
+                    .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT))),
+            );
         }
         for frame in st.full_frames(sid) {
             client.queue.push_frame(frame);
@@ -941,18 +1005,9 @@ impl Shared {
         };
         let before = sess.model.active_panel();
         sess.terminals.remove(&h.id);
-        let panel = sess
-            .model
-            .projects
-            .iter_mut()
-            .flat_map(|p| p.panels.iter_mut())
-            .find(|p| p.terminals.iter().any(|t| t.id == h.id));
         let mut emptied = None;
-        if let Some(panel) = panel {
-            panel.terminals.retain(|t| t.id != h.id);
-            if panel.focused_terminal == Some(h.id) {
-                panel.focused_terminal = panel.terminals.first().map(|t| t.id);
-            }
+        if let Some(panel) = panel_of_terminal(&mut sess.model, h.id) {
+            panel.remove_terminal(h.id);
             if panel.terminals.is_empty() {
                 emptied = Some(panel.id);
             }
@@ -985,20 +1040,16 @@ impl Shared {
         let Some(sess) = st.session(sid) else {
             return;
         };
-        let inner = inner_size(sess.viewport.unwrap_or(DEFAULT_VIEWPORT));
         let moved = sess.model.active_panel() != before;
-        if moved {
-            for t in sess.active_terminals() {
-                if t.with_emu(|e| e.size()) != Some(inner) {
-                    t.resize_pty(inner.0, inner.1);
-                }
-            }
-        }
+        let changed = self.apply_sizes(st, sid);
         st.push_view(sid);
-        if moved {
-            for frame in st.full_frames(sid) {
-                st.push_frame(sid, &frame);
-            }
+        let frames = if moved {
+            st.full_frames(sid)
+        } else {
+            st.full_frames_of(sid, &changed)
+        };
+        for frame in frames {
+            st.push_frame(sid, &frame);
         }
     }
 
@@ -1042,6 +1093,7 @@ impl Shared {
                 self.add_panel(sid, PanelTarget::Project { project, name })
                     .await
             }
+            Action::NewTerminal { panel } => self.add_terminal(sid, panel).await,
             Action::KillSession => {
                 let queue = self.st().clients.get(&cid).map(|c| Arc::clone(&c.queue));
                 let answer = || {
@@ -1154,7 +1206,58 @@ impl Shared {
             Action::CyclePanel { delta } => {
                 sess.model.cycle_panel(delta);
             }
-            Action::NewProject { .. } | Action::NewPanel { .. } | Action::KillSession => {
+            Action::CloseTerminal { terminal } => {
+                let panel = panel_of_terminal(&mut sess.model, terminal)
+                    .ok_or(ActionError::NoSuchTerminal(terminal))?;
+                panel.remove_terminal(terminal);
+                let emptied = panel.terminals.is_empty().then_some(panel.id);
+                doomed.extend(sess.terminals.remove(&terminal));
+                if let Some(panel) = emptied {
+                    sess.model.remove_panel(panel);
+                }
+            }
+            Action::FocusTerminal { terminal } => {
+                let panel = panel_of_terminal(&mut sess.model, terminal)
+                    .ok_or(ActionError::NoSuchTerminal(terminal))?;
+                panel.focused_terminal = Some(terminal);
+            }
+            Action::FocusDirection { dir } => {
+                let (cols, rows) = sess.viewport.unwrap_or(DEFAULT_VIEWPORT);
+                let active = sess
+                    .model
+                    .active_panel()
+                    .ok_or(ActionError::NoActivePanel)?;
+                let panel = panel_mut(&mut sess.model, active).ok_or(ActionError::NoActivePanel)?;
+                let rects = layout::panel_rects(
+                    Rect::new(0, 0, cols, rows),
+                    panel.terminals.len(),
+                    &panel.ratios,
+                );
+                let from = panel
+                    .terminals
+                    .iter()
+                    .position(|t| Some(t.id) == panel.focused_terminal);
+                let target = from
+                    .and_then(|from| layout::neighbor(&rects, from, dir))
+                    .and_then(|to| panel.terminals.get(to));
+                if let Some(target) = target {
+                    panel.focused_terminal = Some(target.id);
+                }
+            }
+            Action::SetRatios { panel, n, ratios } => {
+                let p = panel_mut(&mut sess.model, panel).ok_or(ActionError::NoSuchPanel(panel))?;
+                if p.terminals.len() != n {
+                    return Err(ActionError::LayoutChanged);
+                }
+                if !ratios.is_valid_for(n) {
+                    return Err(ActionError::InvalidRatios);
+                }
+                p.ratios = ratios;
+            }
+            Action::NewProject { .. }
+            | Action::NewPanel { .. }
+            | Action::NewTerminal { .. }
+            | Action::KillSession => {
                 unreachable!("handled by `action`")
             }
         }
@@ -1198,7 +1301,7 @@ impl Shared {
             let project_id = existing.unwrap_or_else(|| ProjectId(st.alloc()));
             let panel_id = PanelId(st.alloc());
             let tid = TerminalId(st.alloc());
-            let req = self.spawn_request(&env, &root, viewport, sid, panel_id, tid);
+            let req = self.spawn_request(&env, &root, single_size(viewport), sid, panel_id, tid);
             (project_id, panel_id, tid, req)
         };
 
@@ -1267,6 +1370,7 @@ impl Shared {
             name,
             name_source,
             focused_terminal: Some(tid),
+            ratios: Ratios::default_for(1),
             terminals: vec![Terminal {
                 id: tid,
                 launch: LaunchSpec {
@@ -1283,6 +1387,104 @@ impl Shared {
         });
         sess.model.focus_panel(panel_id);
         self.settle(&mut st, sid, before);
+        Ok(())
+    }
+
+    /// Adds a shell to a panel (the active one by default), refused when the grid for one
+    /// more terminal would leave a terminal below the minimum size.
+    async fn add_terminal(
+        self: &Arc<Self>,
+        sid: SessionId,
+        panel: Option<PanelId>,
+    ) -> Result<(), ActionError> {
+        let room = |sess: &SessionRt, panel: PanelId| -> Result<(usize, (u16, u16)), ActionError> {
+            let p = sess
+                .model
+                .projects
+                .iter()
+                .flat_map(|p| &p.panels)
+                .find(|p| p.id == panel)
+                .ok_or(ActionError::NoSuchPanel(panel))?;
+            let n = p.terminals.len();
+            let (cols, rows) = sess.viewport.unwrap_or(DEFAULT_VIEWPORT);
+            let area = Rect::new(0, 0, cols, rows);
+            if !layout::has_room_for(area, n + 1) {
+                return Err(ActionError::NoRoom);
+            }
+            let adapted = Ratios::adapt(&p.ratios, n, n + 1);
+            let rects = layout::panel_rects(area, n + 1, &adapted);
+            let rect = rects.get(n).copied().ok_or(ActionError::NoRoom)?;
+            let (c, r) = layout::inner(rect, n + 1);
+            Ok((n, clamp_size(c, r)))
+        };
+        let (panel_id, tid, req) = {
+            let mut st = self.st();
+            if st.shutting_down {
+                return Err(ActionError::ShuttingDown);
+            }
+            let sess = st.session(sid).ok_or(ActionError::NotAttached)?;
+            let panel_id = panel
+                .or_else(|| sess.model.active_panel())
+                .ok_or(ActionError::NoActivePanel)?;
+            let (_, size) = room(sess, panel_id)?;
+            let root = sess
+                .model
+                .projects
+                .iter()
+                .find(|p| p.panels.iter().any(|x| x.id == panel_id))
+                .map(|p| p.root.clone())
+                .ok_or(ActionError::NoSuchPanel(panel_id))?;
+            let env = sess.env.clone();
+            let tid = TerminalId(st.alloc());
+            let req = self.spawn_request(&env, &root, size, sid, panel_id, tid);
+            (panel_id, tid, req)
+        };
+
+        let open_req = req.clone();
+        let parts = tokio::task::spawn_blocking(move || terminal::open(&open_req))
+            .await
+            .map_err(|e| ActionError::Spawn(format!("could not start {}: {e}", req.program)))?
+            .map_err(ActionError::Spawn)?;
+
+        let mut st = self.st();
+        // The world may have changed while the process started.
+        let checked = if st.shutting_down {
+            Err(ActionError::ShuttingDown)
+        } else {
+            st.session(sid)
+                .ok_or(ActionError::NotAttached)
+                .and_then(|sess| room(sess, panel_id).map(|_| ()))
+        };
+        if let Err(e) = checked {
+            parts.discard();
+            return Err(e);
+        }
+        let handle = terminal::start(self, tid, sid, &req, parts);
+        let Some(sess) = st.session_mut(sid) else {
+            return Err(ActionError::NotAttached);
+        };
+        sess.terminals.insert(tid, handle);
+        let before = sess.model.active_panel();
+        let term = Terminal {
+            id: tid,
+            launch: LaunchSpec {
+                program: None,
+                args: Vec::new(),
+                cwd: req.cwd.clone(),
+                env: Vec::<(OsString, OsString)>::new(),
+            },
+            program: program_name(&req.program),
+            title: None,
+            cwd: None,
+            exit_status: None,
+        };
+        if let Some(panel) = panel_mut(&mut sess.model, panel_id) {
+            panel.add_terminal(term);
+        }
+        self.settle(&mut st, sid, before);
+        for frame in st.full_frames_of(sid, &[tid]) {
+            st.push_frame(sid, &frame);
+        }
         Ok(())
     }
 

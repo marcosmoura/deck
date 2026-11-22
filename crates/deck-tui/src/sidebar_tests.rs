@@ -740,7 +740,8 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
 
 #[test]
 fn the_help_overlay_lists_every_binding_and_closes() {
-    let mut a = app();
+    // Tall enough for every group.
+    let mut a = app_at(&Config::default(), (100, 40), mockup());
     pfx(&mut a, '?');
     let (t, rows) = screen(&a);
     let all = rows.join("\n");

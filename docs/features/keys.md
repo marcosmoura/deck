@@ -24,24 +24,35 @@ On macOS:
 
 Pressed after the prefix.
 
-| Action               | Default  | What it does                                                         |
-| -------------------- | -------- | -------------------------------------------------------------------- |
-| `detach`             | `d`      | Detach from the session ([sessions](sessions.md))                    |
-| `sessions`           | `s`      | Open the session picker ([sessions](sessions.md#switching-sessions)) |
-| `rename_session`     | `$`      | Rename the session you are in                                        |
-| `scroll`             | `[`      | Enter [scroll mode](#scroll-mode) for the focused terminal           |
-| `new_panel`          | `c`      | New panel in the active project ([sidebar](sidebar.md))              |
-| `next_panel`         | `n`      | Focus the next panel                                                 |
-| `prev_panel`         | `p`      | Focus the previous panel                                             |
-| `panel_1`..`panel_9` | `1`..`9` | Focus the N-th panel of the active project                           |
-| `rename_panel`       | `,`      | Rename the active panel                                              |
-| `close_panel`        | `X`      | Close the active panel, after a confirmation                         |
-| `new_project`        | `P`      | New project: asks a directory, then a name                           |
-| `rename_project`     | `.`      | Rename the active project                                            |
-| `close_project`      | `Q`      | Close the active project, after a confirmation                       |
-| `toggle_sidebar`     | `b`      | Show or hide the sidebar                                             |
-| `focus_sidebar`      | `Tab`    | Move the keyboard into the sidebar                                   |
-| `help`               | `?`      | Show the help overlay                                                |
+| Action               | Default     | What it does                                                           |
+| -------------------- | ----------- | ---------------------------------------------------------------------- |
+| `detach`             | `d`         | Detach from the session ([sessions](sessions.md))                      |
+| `sessions`           | `s`         | Open the session picker ([sessions](sessions.md#switching-sessions))   |
+| `rename_session`     | `$`         | Rename the session you are in                                          |
+| `scroll`             | `[`         | Enter [scroll mode](#scroll-mode) for the focused terminal             |
+| `new_terminal`       | `t`         | New terminal in the active panel ([layout](layout.md))                 |
+| `close_terminal`     | `x`         | Close the focused terminal, after a confirmation                       |
+| `focus_left`         | `Left` `h`  | Focus the terminal on the left                                         |
+| `focus_right`        | `Right` `l` | Focus the terminal on the right                                        |
+| `focus_up`           | `Up` `k`    | Focus the terminal above                                               |
+| `focus_down`         | `Down` `j`  | Focus the terminal below                                               |
+| `resize_left`        | `H`         | Resize the focused terminal to the left ([layout](layout.md#resizing)) |
+| `resize_right`       | `L`         | Resize the focused terminal to the right                               |
+| `resize_up`          | `K`         | Resize the focused terminal upward                                     |
+| `resize_down`        | `J`         | Resize the focused terminal downward                                   |
+| `reset_layout`       | `=`         | Reset the panel's terminal sizes                                       |
+| `new_panel`          | `c`         | New panel in the active project ([sidebar](sidebar.md))                |
+| `next_panel`         | `n`         | Focus the next panel                                                   |
+| `prev_panel`         | `p`         | Focus the previous panel                                               |
+| `panel_1`..`panel_9` | `1`..`9`    | Focus the N-th panel of the active project                             |
+| `rename_panel`       | `,`         | Rename the active panel                                                |
+| `close_panel`        | `X`         | Close the active panel, after a confirmation                           |
+| `new_project`        | `P`         | New project: asks a directory, then a name                             |
+| `rename_project`     | `.`         | Rename the active project                                              |
+| `close_project`      | `Q`         | Close the active project, after a confirmation                         |
+| `toggle_sidebar`     | `b`         | Show or hide the sidebar                                               |
+| `focus_sidebar`      | `Tab`       | Move the keyboard into the sidebar                                     |
+| `help`               | `?`         | Show the help overlay                                                  |
 
 A key you set replaces the same key on any other action's default keys, with a warning (`key "c" of toggle_sidebar replaces new_panel's`). When you set two actions to one key, that is an error naming both actions and the key (`deck config check` shows it, and a running deck keeps the previous config). `detach = []` unbinds an action; the help overlay lists it as `unbound`.
 
@@ -65,13 +76,13 @@ A key you set replaces the same key on any other action's default keys, with a w
 
 ## Mouse and focus
 
-The wheel works over any terminal and never enters scroll mode:
+The wheel works over any terminal, focused or not, and never enters scroll mode:
 
 - A program that asked for mouse reporting (vim, htop, lazygit, the agents' TUIs) gets the wheel.
 - Otherwise, on the alternate screen (`less`, `man`), the wheel sends three `Up` or `Down` presses per notch (the program's own `?1007` setting; with it off the wheel does nothing there).
 - Otherwise the wheel scrolls the history, 3 lines per notch, and shows the indicator. Without history it does nothing.
 
-Clicks, releases, drags and motion inside a terminal go to programs that asked for them, with coordinates relative to the terminal, which fills the panel area (SGR encoding when the program asked for it, X10 otherwise). Events on the sidebar, its separator or the status bar are never sent. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
+A click in an unfocused terminal focuses it and is not sent to the program ([layout](layout.md#focus)); the wheel scrolls the terminal under the pointer. Clicks, releases, drags and motion inside the focused terminal go to programs that asked for them, with coordinates relative to the terminal's screen (inside its border, if it has one; SGR encoding when the program asked for it, X10 otherwise). Events on the sidebar, its separator or the status bar are never sent. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
 
 ## Configuration
 

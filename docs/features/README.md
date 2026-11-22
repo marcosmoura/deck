@@ -6,5 +6,6 @@ One page per feature, written by the work that ships it and kept current by ever
 
 - [Sessions](sessions.md): attach, detach, the default session, `deck new`, `deck ls`, `deck kill-session`, `deck rename-session`, `deck kill-server`, the session picker, the exit messages.
 - [Sidebar](sidebar.md): the sidebar, panels and projects, prompts, confirmations and help.
+- [Layout](layout.md): several terminals in a panel, the grid, adding, closing and focusing terminals.
 - [Keys](keys.md): the prefix, the bindings and how to change them.
 - [Config](config.md): where `config.toml` lives, `deck config default`, `check` and `path`.

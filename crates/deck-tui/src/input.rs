@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use deck_core::config::{Config, DEFAULT_BINDINGS, HelpGroup};
 use deck_core::keys::{KeyCode, KeyEvent, KeySpec, Modifiers};
+use deck_core::layout::Direction;
 use ratatui::crossterm::event as ct;
 
 /// What a bound key does. Later specs add actions here.
@@ -13,6 +14,13 @@ pub enum Action {
     Sessions,
     RenameSession,
     Scroll,
+    NewTerminal,
+    CloseTerminal,
+    /// Moves focus to the terminal in that direction.
+    FocusTerminal(Direction),
+    /// Moves the border of the focused terminal's edge in that direction.
+    Resize(Direction),
+    ResetLayout,
     NewPanel,
     NextPanel,
     PrevPanel,
@@ -35,6 +43,17 @@ impl Action {
             "sessions" => Self::Sessions,
             "rename_session" => Self::RenameSession,
             "scroll" => Self::Scroll,
+            "new_terminal" => Self::NewTerminal,
+            "close_terminal" => Self::CloseTerminal,
+            "focus_left" => Self::FocusTerminal(Direction::Left),
+            "focus_right" => Self::FocusTerminal(Direction::Right),
+            "focus_up" => Self::FocusTerminal(Direction::Up),
+            "focus_down" => Self::FocusTerminal(Direction::Down),
+            "resize_left" => Self::Resize(Direction::Left),
+            "resize_right" => Self::Resize(Direction::Right),
+            "resize_up" => Self::Resize(Direction::Up),
+            "resize_down" => Self::Resize(Direction::Down),
+            "reset_layout" => Self::ResetLayout,
             "new_panel" => Self::NewPanel,
             "next_panel" => Self::NextPanel,
             "prev_panel" => Self::PrevPanel,
@@ -114,6 +133,31 @@ impl Bindings {
         ))
     }
 
+    /// The hints while the resize repeat is on, e.g. `H J K L resize  = reset`.
+    pub fn resize_hints(&self) -> String {
+        let first = |action| {
+            let keys = &self.actions.iter().find(|(a, _)| *a == action)?.1;
+            Some(spec_label(keys.first()?))
+        };
+        let moves: Vec<String> = [
+            Direction::Left,
+            Direction::Down,
+            Direction::Up,
+            Direction::Right,
+        ]
+        .into_iter()
+        .filter_map(|d| first(Action::Resize(d)))
+        .collect();
+        let mut parts = Vec::new();
+        if !moves.is_empty() {
+            parts.push(format!("{} resize", moves.join(" ")));
+        }
+        if let Some(reset) = first(Action::ResetLayout) {
+            parts.push(format!("{reset} reset"));
+        }
+        parts.join("  ")
+    }
+
     /// The hint text of the status bar, e.g. `⌥Space ? help  d detach`.
     pub fn hints(&self) -> String {
         let items: Vec<String> = HINTED
@@ -130,7 +174,8 @@ impl Bindings {
     }
 
     /// Every action with its keys, in the order of the binding table, for the help overlay.
-    /// `panel_1` to `panel_9` share one line.
+    /// `panel_1` to `panel_9` share one line, and so do the four `focus_*` actions and the
+    /// four `resize_*` ones.
     pub fn help_rows(&self) -> Vec<HelpRow> {
         let prefix = self.prefix_label();
         let labels = |name: &str| -> Vec<String> {
@@ -157,7 +202,32 @@ impl Bindings {
                         .join(" ")
                 };
                 (keys, "Focus panel N".to_string())
-            } else if def.name.starts_with("panel_") {
+            } else if def.name == "focus_left" {
+                let all: Vec<String> = ["left", "right", "up", "down"]
+                    .iter()
+                    .map(|d| labels(&format!("focus_{d}")).join("/"))
+                    .collect();
+                (all.join(" "), "Focus the terminal by direction".to_string())
+            } else if def.name == "resize_left" {
+                let all: Vec<String> = ["left", "right", "up", "down"]
+                    .iter()
+                    .map(|d| labels(&format!("resize_{d}")).join("/"))
+                    .collect();
+                (
+                    all.join(" "),
+                    "Resize the terminal by direction".to_string(),
+                )
+            } else if def.name.starts_with("panel_")
+                || matches!(
+                    def.name,
+                    "focus_right"
+                        | "focus_up"
+                        | "focus_down"
+                        | "resize_right"
+                        | "resize_up"
+                        | "resize_down"
+                )
+            {
                 continue;
             } else {
                 (labels(def.name).join("/"), def.help.to_string())
@@ -376,6 +446,18 @@ mod tests {
             Some(Action::ClosePanel)
         );
         assert_eq!(b.lookup(&key('?')), Some(Action::Help));
+        assert_eq!(b.lookup(&key('t')), Some(Action::NewTerminal));
+        assert_eq!(b.lookup(&key('x')), Some(Action::CloseTerminal));
+        for (c, code, dir) in [
+            ('h', KeyCode::Left, Direction::Left),
+            ('l', KeyCode::Right, Direction::Right),
+            ('k', KeyCode::Up, Direction::Up),
+            ('j', KeyCode::Down, Direction::Down),
+        ] {
+            let want = Some(Action::FocusTerminal(dir));
+            assert_eq!(b.lookup(&key(c)), want);
+            assert_eq!(b.lookup(&KeyEvent::new(code, Modifiers::NONE)), want);
+        }
         assert_eq!(b.lookup(&key('s')), Some(Action::Sessions));
         assert_eq!(b.lookup(&key('$')), Some(Action::RenameSession));
         assert_eq!(
@@ -387,7 +469,7 @@ mod tests {
         assert!(rows.iter().any(|r| r.keys == format!("{p} 1-9")));
         assert!(rows.iter().all(|r| !r.text.is_empty()));
         assert!(!rows.iter().any(|r| r.keys.ends_with(" 2")));
-        assert_eq!(rows.len(), DEFAULT_BINDINGS.len() - 8);
+        assert_eq!(rows.len(), DEFAULT_BINDINGS.len() - 14);
         // An unbound action stays listed as unbound.
         let config = Config::parse("[keys]\ndetach = []").unwrap().config;
         let rows = Bindings::from_config(&config).help_rows();

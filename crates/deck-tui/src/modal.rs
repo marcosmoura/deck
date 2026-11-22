@@ -2,10 +2,11 @@
 //! else, and the one-line editor of the prompts.
 
 use std::path::{Component, Path, PathBuf};
+use std::time::Instant;
 
 use deck_core::action::{Action as Act, ActionError, default_project_name};
 use deck_core::keys::{KeyCode, KeyEvent};
-use deck_core::model::{PanelId, ProjectId};
+use deck_core::model::{PanelId, ProjectId, TerminalId};
 use deck_core::protocol::{ClientMsg, Request};
 
 use crate::app::{App, Out};
@@ -16,6 +17,8 @@ use crate::picker::Req;
 pub enum Target {
     Panel(PanelId, String),
     Project(ProjectId, String),
+    /// A terminal and its 1-based index in the panel.
+    Terminal(TerminalId, usize),
     /// A session, by name; it is not tracked while the dialog is open.
     Session(String),
 }
@@ -229,6 +232,22 @@ impl App {
         self.modal = Some(Modal::Confirm(Confirm { target, question }));
     }
 
+    /// Asks before closing the focused terminal of the active panel.
+    pub(crate) fn confirm_close_terminal(&mut self, now: Instant) {
+        let found = self.mirror.active_panel().and_then(|panel| {
+            let focused = panel.focused_terminal?;
+            let index = panel.terminals.iter().position(|t| t.id == focused)?;
+            Some((focused, index))
+        });
+        let Some((focused, index)) = found else {
+            self.set_flash("no terminal to close".into(), now, false);
+            return;
+        };
+        let question = format!("Close terminal {}? (y/n)", index + 1);
+        let target = Target::Terminal(focused, index + 1);
+        self.modal = Some(Modal::Confirm(Confirm { target, question }));
+    }
+
     pub(crate) fn confirm_close_project(&mut self, project: ProjectId) {
         let Some(p) = self.mirror.find_project(project) else {
             return;
@@ -269,6 +288,7 @@ impl App {
                     let action = match confirm.target {
                         Target::Panel(panel, _) => Act::ClosePanel { panel },
                         Target::Project(project, _) => Act::CloseProject { project },
+                        Target::Terminal(terminal, _) => Act::CloseTerminal { terminal },
                         Target::Session(name) => {
                             if self.mirror.session_name() == Some(name.as_str()) {
                                 Act::KillSession
@@ -380,7 +400,13 @@ impl App {
 
     /// Sends an action; its answer comes back in order, with `retry` to reopen on an error.
     pub(crate) fn act(&mut self, action: Act, retry: Option<Retry>) -> Out {
-        self.pending.push_back(retry);
+        self.pending.push_back((retry, false));
+        Out::Send(ClientMsg::Action(action))
+    }
+
+    /// Like [`App::act`], for an action whose refusal is not shown.
+    pub(crate) fn act_silent(&mut self, action: Act) -> Out {
+        self.pending.push_back((None, true));
         Out::Send(ClientMsg::Action(action))
     }
 
@@ -390,8 +416,11 @@ impl App {
         result: Result<(), ActionError>,
         now: std::time::Instant,
     ) {
-        let retry = self.pending.pop_front().flatten();
+        let (retry, silent) = self.pending.pop_front().unwrap_or((None, false));
         let Err(error) = result else { return };
+        if silent {
+            return;
+        }
         self.set_flash(error.to_string(), now, true);
         if let (Some(retry), None) = (retry, &self.modal) {
             let path_problem = matches!(
@@ -404,6 +433,16 @@ impl App {
             };
             self.modal = Some(Modal::Prompt(prompt));
         }
+    }
+
+    fn has_terminal(&self, id: TerminalId) -> bool {
+        self.mirror.view().is_some_and(|v| {
+            v.projects
+                .iter()
+                .flat_map(|p| &p.panels)
+                .flat_map(|p| &p.terminals)
+                .any(|t| t.id == id)
+        })
     }
 
     /// Closes a dialog whose panel or project is gone, with a flash.
@@ -419,6 +458,9 @@ impl App {
             }
             Some(Target::Project(id, name)) if self.mirror.find_project(id).is_none() => {
                 format!("project \"{name}\" was closed")
+            }
+            Some(Target::Terminal(id, index)) if !self.has_terminal(id) => {
+                format!("terminal {index} was closed")
             }
             _ => return,
         };

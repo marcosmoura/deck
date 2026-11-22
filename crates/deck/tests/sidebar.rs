@@ -337,7 +337,8 @@ fn the_sidebar_hides_in_a_narrow_window_and_comes_back() {
 
 #[test]
 fn the_help_overlay_lists_the_bindings_and_shows_overrides() {
-    let mut h = attached();
+    // Tall enough for every group.
+    let mut h = attached_with((100, 40), &[]);
     prefixed(&mut h, "?");
     h.wait_for_text("This help", TIMEOUT);
     h.capture("help");

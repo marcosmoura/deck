@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 03 — Resizing
@@ -46,3 +46,8 @@ While repeating a resize, in the status bar:
 - `crates/deck-daemon/tests/`: `SetRatios` validation and sizing.
 - `deck-tui`: repeat timing (with an injected clock), drag state machine, `RESIZE` badge drawing.
 - `crates/deck/tests/resize.rs`: one scenario per acceptance criterion.
+
+## Notes
+
+- `=` (`reset_layout`) also acts during the repeat, because the status-bar mock lists it, and it ends the repeat.
+- The repeat starts on any resize key of a panel with two or more terminals, even when nothing moves (no room), so a key held at the limit never reaches the terminal. A single terminal has no border: its resize keys do nothing and start no repeat.

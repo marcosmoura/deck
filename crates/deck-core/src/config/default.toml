@@ -28,6 +28,17 @@ detach = "d" # Detach from the session
 sessions = "s" # Switch, create or kill sessions
 rename_session = "$" # Rename the session
 scroll = "[" # Scroll back through the history
+new_terminal = "t" # New terminal in the panel
+close_terminal = "x" # Close the focused terminal
+focus_left = ["Left", "h"] # Focus the terminal on the left
+focus_right = ["Right", "l"] # Focus the terminal on the right
+focus_up = ["Up", "k"] # Focus the terminal above
+focus_down = ["Down", "j"] # Focus the terminal below
+resize_left = "H" # Resize the focused terminal to the left
+resize_right = "L" # Resize the focused terminal to the right
+resize_up = "K" # Resize the focused terminal upward
+resize_down = "J" # Resize the focused terminal downward
+reset_layout = "=" # Reset the panel's terminal sizes
 new_panel = "c" # New panel
 next_panel = "n" # Next panel
 prev_panel = "p" # Previous panel

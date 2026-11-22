@@ -18,10 +18,12 @@ use deck_core::theme::Theme;
 use ratatui::crossterm::event as ct;
 
 use crate::Exit;
+use crate::grid::Grid;
 use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
-use crate::mirror::{Mirror, TermMirror};
+use crate::mirror::Mirror;
 use crate::modal::{Modal, PromptKind, Retry};
 use crate::picker::{Picker, Req};
+use crate::resize::Drag;
 use crate::sidebar::Sel;
 
 /// Below this many columns or rows the client shows only a message.
@@ -90,15 +92,22 @@ pub struct App {
     configured: bool,
     /// Keys and pastes for a terminal that is not there yet, sent when it is.
     queued: Vec<Queued>,
-    dirty: bool,
+    pub(crate) dirty: bool,
     /// The prompt, confirmation or help overlay that has the keyboard.
     pub modal: Option<Modal>,
     /// What to reopen for each action sent whose answer is still to come, oldest first.
-    pub(crate) pending: VecDeque<Option<Retry>>,
+    /// The second field: a refusal is not shown.
+    pub(crate) pending: VecDeque<(Option<Retry>, bool)>,
     /// The session picker, open over everything but the prompts it starts.
     pub picker: Option<Picker>,
     /// What each request sent whose answer is still to come was for, oldest first.
     pub(crate) requests: VecDeque<Req>,
+    /// A click focused a terminal; the rest of that click (drag, release) is not forwarded.
+    swallow_release: bool,
+    /// Until when the resize keys act without the prefix.
+    pub(crate) resize_until: Option<Instant>,
+    /// The border being dragged with the mouse.
+    pub(crate) drag: Option<Drag>,
     /// The user hid the sidebar (it also hides when the window is narrow).
     pub sidebar_hidden: bool,
     pub sidebar_width: u16,
@@ -110,6 +119,15 @@ pub struct App {
     /// Where the client was started, for new projects' directories.
     pub(crate) cwd: PathBuf,
     pub(crate) home: Option<PathBuf>,
+}
+
+/// A mouse cell on a terminal of the grid.
+struct Hit {
+    /// The terminal's index in the grid.
+    i: usize,
+    grid: Grid,
+    /// The 0-based cell of its screen, `None` on its border.
+    cell: Option<(u16, u16)>,
 }
 
 /// Something the user sent to the focused terminal, encoded when it is sent.
@@ -143,6 +161,9 @@ impl App {
             pending: VecDeque::new(),
             picker: None,
             requests: VecDeque::new(),
+            swallow_release: false,
+            resize_until: None,
+            drag: None,
             sidebar_hidden: !config.sidebar,
             sidebar_width: config.sidebar_width,
             sidebar_focus: false,
@@ -256,6 +277,9 @@ impl App {
         self.armed = false;
         self.scroll_mode = None;
         self.bottom_expected = false;
+        self.swallow_release = false;
+        self.resize_until = None;
+        self.drag = None;
         self.queued.clear();
         self.sidebar_focus = false;
         self.selection = None;
@@ -298,12 +322,24 @@ impl App {
         self.flash.as_ref().map(|(_, until)| *until)
     }
 
+    /// The next moment `tick` has something to do: a flash ends or the resize repeat does.
+    pub fn wake_deadline(&self) -> Option<Instant> {
+        [self.flash_deadline(), self.resize_until]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
     pub fn take_dirty(&mut self) -> bool {
         self.configured && std::mem::take(&mut self.dirty)
     }
 
     /// Drops an expired flash message.
     pub fn tick(&mut self, now: Instant) {
+        if self.resize_until.is_some_and(|until| now >= until) {
+            self.resize_until = None;
+            self.dirty = true;
+        }
         if self.flash.as_ref().is_some_and(|(_, until)| now >= *until) {
             self.flash = None;
             self.flash_error = false;
@@ -341,37 +377,75 @@ impl App {
                 }
                 vec![self.viewport_msg()]
             }
-            ct::Event::Mouse(mouse) => self.on_mouse(mouse),
+            ct::Event::Mouse(mouse) => self.on_mouse(mouse, now),
             ct::Event::FocusGained => self.on_focus(true),
             ct::Event::FocusLost => self.on_focus(false),
         }
     }
 
-    /// The part of the focused terminal's inner area under a cell of the outer window, as
-    /// a 0-based cell of that area.
-    fn inner_cell(&self, term: &TermMirror, column: u16, row: u16) -> Option<(u16, u16)> {
+    /// The terminal under a cell of the outer window, its index in the grid, and the
+    /// 0-based cell of its screen when the cell is on it (not on a border).
+    fn terminal_at(&self, column: u16, row: u16) -> Option<Hit> {
         let (panel_cols, panel_rows) = (self.size.0, self.size.1.saturating_sub(1));
-        let col = column.checked_sub(self.sidebar_cols())?;
-        let inside =
-            col < term.size.0 && row < term.size.1 && column < panel_cols && row < panel_rows;
-        (!too_small(self.size) && inside).then_some((col, row))
+        let x = column.checked_sub(self.sidebar_cols())?;
+        if too_small(self.size) || column >= panel_cols || row >= panel_rows {
+            return None;
+        }
+        let grid = Grid::of(self)?;
+        let i = grid.hit(x, row)?;
+        let inner = grid.inner(i);
+        let on_screen = x >= inner.x
+            && row >= inner.y
+            && x - inner.x < inner.width
+            && row - inner.y < inner.height;
+        let cell = on_screen.then(|| (x - inner.x, row - inner.y));
+        Some(Hit { i, grid, cell })
     }
 
-    fn on_mouse(&mut self, event: ct::MouseEvent) -> Vec<Out> {
+    fn on_mouse(&mut self, event: ct::MouseEvent, now: Instant) -> Vec<Out> {
+        // A release ends the swallowed click wherever it lands.
+        let swallowed = self.swallow_release;
+        if matches!(event.kind, ct::MouseEventKind::Up(_)) {
+            self.swallow_release = false;
+        }
         if self.overlay_open() || too_small(self.size) {
+            self.drag = None;
             return Vec::new();
+        }
+        // A border drag is ours from its press to its release, never a program's.
+        if let Some(outs) = self.drag_mouse(event, now) {
+            return outs;
         }
         if event.column < self.sidebar_cols() {
             self.dirty = true;
             return self.sidebar_mouse(event);
         }
-        let Some(terminal) = self.ready() else {
+        let Some(Hit { i, grid, cell }) = self.terminal_at(event.column, event.row) else {
             return Vec::new();
         };
+        let Some(&terminal) = grid.ids.get(i) else {
+            return Vec::new();
+        };
+        let wheel = matches!(
+            event.kind,
+            ct::MouseEventKind::ScrollUp | ct::MouseEventKind::ScrollDown
+        );
+        // The rest of a click that focused a terminal never reaches a program.
+        if swallowed && !wheel {
+            return Vec::new();
+        }
+        if grid.focused != Some(i) && !wheel {
+            // A click in an unfocused terminal focuses it and is not forwarded.
+            if matches!(event.kind, ct::MouseEventKind::Down(_)) {
+                self.swallow_release = true;
+                return vec![self.act(Act::FocusTerminal { terminal }, None)];
+            }
+            return Vec::new();
+        }
         let Some(term) = self.mirror.terminal(terminal) else {
             return Vec::new();
         };
-        let Some((col, row)) = self.inner_cell(term, event.column, event.row) else {
+        let Some((col, row)) = cell.filter(|(c, r)| *c < term.size.0 && *r < term.size.1) else {
             return Vec::new();
         };
         let modes = term.modes;
@@ -420,7 +494,7 @@ impl App {
         modes: Modes,
     ) -> Vec<Out> {
         let input = |bytes: Vec<u8>| vec![Out::Send(ClientMsg::Input { terminal, bytes })];
-        if self.scroll_mode.is_none() {
+        if self.scroll_mode != Some(terminal) {
             if mouse::reporting(modes) {
                 let kind = if up {
                     MouseKind::WheelUp
@@ -453,6 +527,7 @@ impl App {
 
     /// Focus-in and focus-out of the outer terminal, for programs that asked for them.
     fn on_focus(&mut self, gained: bool) -> Vec<Out> {
+        self.end_repeat();
         if self.overlay_open() {
             return Vec::new();
         }
@@ -555,6 +630,16 @@ impl App {
             return self.picker_key(key);
         }
         if !self.armed {
+            if let Some(until) = self.resize_until.take() {
+                // The resize keys act without the prefix for a while; any other key ends it.
+                let action = (now < until)
+                    .then(|| self.bindings.lookup(&key))
+                    .flatten()
+                    .filter(|a| matches!(a, Action::Resize(_) | Action::ResetLayout));
+                if let Some(action) = action {
+                    return self.run_action(action, now);
+                }
+            }
             if self.bindings.is_prefix(&key) {
                 self.armed = true;
                 return Vec::new();
@@ -581,6 +666,9 @@ impl App {
             Some(action) => {
                 let outs = self.run_action(action, now);
                 self.ensure_visible();
+                if self.overlay_open() {
+                    self.drag = None;
+                }
                 outs
             }
             None => {
@@ -618,6 +706,27 @@ impl App {
                 }
                 Vec::new()
             }
+            Action::NewTerminal => {
+                if active_panel.is_some() {
+                    vec![self.act(Act::NewTerminal { panel: None }, None)]
+                } else {
+                    self.set_flash("no panel to add a terminal to".into(), now, false);
+                    Vec::new()
+                }
+            }
+            Action::CloseTerminal => {
+                self.confirm_close_terminal(now);
+                Vec::new()
+            }
+            Action::FocusTerminal(dir) => {
+                if active_panel.is_some() {
+                    vec![self.act(Act::FocusDirection { dir }, None)]
+                } else {
+                    Vec::new()
+                }
+            }
+            Action::Resize(dir) => self.resize_key(dir, now),
+            Action::ResetLayout => self.reset_layout(),
             Action::NewPanel => match active_project {
                 Some(project) => vec![self.act(
                     Act::NewPanel {
@@ -700,6 +809,7 @@ impl App {
 
     fn on_paste(&mut self, text: String) -> Vec<Out> {
         self.dirty = true;
+        self.end_repeat();
         if self.modal.is_some() {
             self.modal_paste(&text);
             return Vec::new();
@@ -713,6 +823,13 @@ impl App {
             return Vec::new();
         }
         self.send_or_queue(Queued::Paste(text))
+    }
+
+    /// Ends the resize repeat.
+    fn end_repeat(&mut self) {
+        if self.resize_until.take().is_some() {
+            self.dirty = true;
+        }
     }
 
     /// The focused terminal, once its screen has arrived.
@@ -939,8 +1056,8 @@ mod tests {
         let mut a = app();
         let now = Instant::now();
         a.on_event(prefix(), now);
-        assert!(a.on_event(ch('x'), now).is_empty());
-        assert_eq!(a.flash.as_ref().unwrap().0, "no binding for x");
+        assert!(a.on_event(ch('z'), now).is_empty());
+        assert_eq!(a.flash.as_ref().unwrap().0, "no binding for z");
         a.tick(now + Duration::from_millis(1999));
         assert!(a.flash.is_some());
         a.take_dirty();
@@ -1229,8 +1346,8 @@ mod tests {
 
         let mut a = in_scroll_mode();
         a.on_event(prefix(), now);
-        assert!(a.on_event(ch('x'), now).is_empty());
-        assert_eq!(a.flash.as_ref().unwrap().0, "no binding for x");
+        assert!(a.on_event(ch('z'), now).is_empty());
+        assert_eq!(a.flash.as_ref().unwrap().0, "no binding for z");
         assert_eq!(a.scroll_mode, Some(TerminalId(4)));
 
         // The prefix twice sends the prefix key itself, which leaves the mode.

@@ -96,6 +96,72 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
         HelpGroup::Terminal,
         "Scroll back through the history",
     ),
+    def(
+        "new_terminal",
+        &["t"],
+        HelpGroup::Terminal,
+        "New terminal in the panel",
+    ),
+    def(
+        "close_terminal",
+        &["x"],
+        HelpGroup::Terminal,
+        "Close the focused terminal",
+    ),
+    def(
+        "focus_left",
+        &["Left", "h"],
+        HelpGroup::Terminal,
+        "Focus the terminal on the left",
+    ),
+    def(
+        "focus_right",
+        &["Right", "l"],
+        HelpGroup::Terminal,
+        "Focus the terminal on the right",
+    ),
+    def(
+        "focus_up",
+        &["Up", "k"],
+        HelpGroup::Terminal,
+        "Focus the terminal above",
+    ),
+    def(
+        "focus_down",
+        &["Down", "j"],
+        HelpGroup::Terminal,
+        "Focus the terminal below",
+    ),
+    def(
+        "resize_left",
+        &["H"],
+        HelpGroup::Terminal,
+        "Resize the focused terminal to the left",
+    ),
+    def(
+        "resize_right",
+        &["L"],
+        HelpGroup::Terminal,
+        "Resize the focused terminal to the right",
+    ),
+    def(
+        "resize_up",
+        &["K"],
+        HelpGroup::Terminal,
+        "Resize the focused terminal upward",
+    ),
+    def(
+        "resize_down",
+        &["J"],
+        HelpGroup::Terminal,
+        "Resize the focused terminal downward",
+    ),
+    def(
+        "reset_layout",
+        &["="],
+        HelpGroup::Terminal,
+        "Reset the panel's terminal sizes",
+    ),
     def("new_panel", &["c"], HelpGroup::Panels, "New panel"),
     def("next_panel", &["n"], HelpGroup::Panels, "Next panel"),
     def("prev_panel", &["p"], HelpGroup::Panels, "Previous panel"),
@@ -545,7 +611,7 @@ mod tests {
             scrollback_lines = 5
             [keys]
             detach = "q"
-            scroll = ["Up", "k"]
+            scroll = ["F5", "z"]
             "#,
         )
         .unwrap();
@@ -555,16 +621,16 @@ mod tests {
         assert!(p.config.shell_args.is_empty());
         assert_eq!(p.config.scrollback_lines, 5);
         assert_eq!(p.config.keys["detach"], [spec("q")]);
-        assert_eq!(p.config.keys["scroll"], [spec("Up"), spec("k")]);
+        assert_eq!(p.config.keys["scroll"], [spec("F5"), spec("z")]);
     }
 
     #[test]
     fn unknown_names_warn() {
-        let p = Config::parse("colour = 1\n[keys]\nteleport = \"t\"\ndetach = \"x\"").unwrap();
+        let p = Config::parse("colour = 1\n[keys]\nteleport = \"t\"\ndetach = \"w\"").unwrap();
         assert_eq!(p.warnings.len(), 2, "{:?}", p.warnings);
         assert!(p.warnings.iter().any(|w| w.contains("colour")));
         assert!(p.warnings.iter().any(|w| w.contains("keys.teleport")));
-        assert_eq!(p.config.keys["detach"], [spec("x")]);
+        assert_eq!(p.config.keys["detach"], [spec("w")]);
         assert!(!p.config.keys.contains_key("teleport"));
     }
 
@@ -604,12 +670,12 @@ mod tests {
 
     #[test]
     fn the_sidebar_keys_and_the_binding_table() {
-        let p = Config::parse("sidebar = false\nsidebar_width = 60\n[keys]\nnew_panel = \"t\"")
+        let p = Config::parse("sidebar = false\nsidebar_width = 60\n[keys]\nnew_panel = \"T\"")
             .unwrap();
         assert!(p.warnings.is_empty());
         assert!(!p.config.sidebar);
         assert_eq!(p.config.sidebar_width, 60);
-        assert_eq!(p.config.keys["new_panel"], [spec("t")]);
+        assert_eq!(p.config.keys["new_panel"], [spec("T")]);
         assert_eq!(
             Config::parse("sidebar_width = 20")
                 .unwrap()

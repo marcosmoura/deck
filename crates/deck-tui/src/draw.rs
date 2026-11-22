@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::app::{App, too_small};
 pub(crate) use crate::convert::{color, downsample, style};
+use crate::grid::Grid;
 use crate::input::Action;
 use crate::mirror::TermMirror;
 use crate::modal::{Modal, Prompt};
@@ -150,12 +151,17 @@ fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     let heading = Style::new()
         .fg(color(theme.accent))
         .add_modifier(Modifier::BOLD);
+    // The group headings go when the window is too short for them and every binding.
+    let room = usize::from(area.height.saturating_sub(2));
+    let headings = rows.len() + HelpGroup::ALL.len() <= room;
     for group in HelpGroup::ALL {
         let mut in_group = rows.iter().filter(|r| r.group == group).peekable();
         if in_group.peek().is_none() {
             continue;
         }
-        lines.push((format!(" {}", group.title()), heading));
+        if headings {
+            lines.push((format!(" {}", group.title()), heading));
+        }
         for r in in_group {
             let pad = " ".repeat(usize::from(key_w - width(&r.keys)));
             lines.push((format!("  {}{pad}  {}", r.keys, r.text), Style::new()));
@@ -236,7 +242,17 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
         .and_then(|id| app.mirror.terminal(id));
 
     let mut tmp = Buffer::empty(Rect::new(0, 0, vw, vh));
-    draw_terminal(&mut tmp, term);
+    let grid = Grid::of(app).filter(Grid::bordered);
+    let cursor = match &grid {
+        Some(grid) => draw_grid(&mut tmp, grid, app),
+        None => {
+            let area = tmp.area;
+            draw_terminal(&mut tmp, area, term);
+            term.map(|t| t.cursor)
+                .filter(|c| c.visible)
+                .map(|c| Position::new(c.col, c.row))
+        }
+    };
 
     let (cw, ch) = (vw.min(panel.width), vh.min(panel.height));
     for y in 0..ch {
@@ -251,26 +267,81 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
         }
     }
 
-    let cursor = term?.cursor;
-    if !cursor.visible {
-        return None;
-    }
-    let (x, y) = (cursor.col, cursor.row);
+    let Position { x, y } = cursor?;
     (x < cw && y < ch).then_some(Position::new(panel.x + x, panel.y + y))
 }
 
-/// The focused terminal's lines, from the top left of `buf`.
-fn draw_terminal(buf: &mut Buffer, term: Option<&TermMirror>) {
+/// Every terminal of a grid of two or more in its rect, with its own border and title;
+/// returns where the focused terminal's cursor is, when visible.
+fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
+    let theme = &app.theme;
+    let panel = app.mirror.active_panel()?;
+    let mut cursor = None;
+    for (i, rect) in grid.rects.iter().enumerate() {
+        if rect.width < 2 || rect.height < 2 {
+            continue;
+        }
+        let focused = grid.focused == Some(i);
+        let (border, title_color) = if focused {
+            (theme.border_focused, theme.accent)
+        } else {
+            (theme.border, theme.title)
+        };
+        let Some(view) = panel.terminals.get(i) else {
+            continue;
+        };
+        let name = view
+            .title
+            .clone()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| view.program.clone());
+        // One border cell, then the title: `╭─ 1 · nvim ───╮`.
+        let label = truncate(&format!("{} · {name}", i + 1), rect.width.saturating_sub(6));
+        let area = Rect::new(rect.x, rect.y, rect.width, rect.height);
+        Block::bordered()
+            .border_type(border_type(theme.border_style))
+            .border_style(Style::new().fg(color(border)))
+            .render(area, buf);
+        buf.set_stringn(
+            rect.x + 2,
+            rect.y,
+            format!(" {label} "),
+            usize::from(rect.width.saturating_sub(3)),
+            Style::new().fg(color(title_color)),
+        );
+        let inner = grid.inner(i);
+        let inner = Rect::new(inner.x, inner.y, inner.width, inner.height);
+        let term = app.mirror.terminal(view.id);
+        draw_terminal(buf, inner, term);
+        if let Some(c) = term.map(|t| t.cursor).filter(|c| focused && c.visible)
+            && c.col < inner.width
+            && c.row < inner.height
+        {
+            cursor = Some(Position::new(inner.x + c.col, inner.y + c.row));
+        }
+    }
+    // The border being dragged is drawn in the accent colour.
+    if let Some(drag) = &app.drag {
+        for (x, y) in grid.boundary_cells(drag.boundary) {
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_fg(color(theme.accent));
+            }
+        }
+    }
+    cursor
+}
+
+/// A terminal's lines, from the top left of `area` and not past it.
+fn draw_terminal(buf: &mut Buffer, area: Rect, term: Option<&TermMirror>) {
     let Some(term) = term else { return };
-    let area = buf.area;
     for (row, line) in term.lines.iter().enumerate().take(usize::from(area.height)) {
-        let y = u16::try_from(row).unwrap_or(0);
+        let y = area.y + u16::try_from(row).unwrap_or(0);
         for run in &line.runs {
             if run.col >= area.width {
                 break;
             }
             buf.set_stringn(
-                run.col,
+                area.x + run.col,
                 y,
                 &run.text,
                 usize::from(area.width - run.col),
@@ -335,28 +406,32 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
     }
 
     let name = app.mirror.session_name().unwrap_or("");
-    let (badge, badge_style) = if app.armed || app.scroll_mode.is_some() || app.sidebar_focus {
-        let label = if app.armed {
-            " PREFIX "
-        } else if app.scroll_mode.is_some() {
-            " SCROLL "
+    let resizing = app.resize_until.is_some();
+    let (badge, badge_style) =
+        if app.armed || app.scroll_mode.is_some() || app.sidebar_focus || resizing {
+            let label = if app.armed {
+                " PREFIX "
+            } else if resizing && app.scroll_mode.is_none() && !app.sidebar_focus {
+                " RESIZE "
+            } else if app.scroll_mode.is_some() {
+                " SCROLL "
+            } else {
+                " SIDEBAR "
+            };
+            (
+                label.to_string(),
+                Style::new()
+                    .fg(color(theme.warning))
+                    .add_modifier(Modifier::REVERSED),
+            )
         } else {
-            " SIDEBAR "
+            (
+                format!(" {name} "),
+                Style::new()
+                    .fg(color(theme.accent))
+                    .add_modifier(Modifier::BOLD),
+            )
         };
-        (
-            label.to_string(),
-            Style::new()
-                .fg(color(theme.warning))
-                .add_modifier(Modifier::REVERSED),
-        )
-    } else {
-        (
-            format!(" {name} "),
-            Style::new()
-                .fg(color(theme.accent))
-                .add_modifier(Modifier::BOLD),
-        )
-    };
     let project = app.mirror.project_name().unwrap_or("");
     let location = match app.mirror.active_panel() {
         Some(panel) => format!("{project} › {}", panel.name),
@@ -391,6 +466,10 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         ),
         None if app.sidebar_focus && app.scroll_mode.is_none() => (
             SIDEBAR_HINTS.to_string(),
+            Style::new().fg(color(theme.muted)),
+        ),
+        None if resizing => (
+            app.bindings.resize_hints(),
             Style::new().fg(color(theme.muted)),
         ),
         // The hints wait for the session, like the name and the project.
