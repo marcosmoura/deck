@@ -54,6 +54,7 @@ fn shell(id: u64) -> TerminalState {
         cwd: None,
         keep: false,
         exited: None,
+        agent: None,
     }
 }
 

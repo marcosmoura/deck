@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 05 — Resume agents after a restart
@@ -47,3 +47,13 @@ After `deck kill-server` or a reboot, every terminal that had an agent running c
 - `deck-core`: template parsing, rendering and rejection; session-id validation.
 - `crates/deck-daemon/tests/`: save of agent info, including across the shutdown hang-up with a late `AgentEvent`; both relaunch paths.
 - `crates/deck/tests/resume.rs`: the end-to-end criteria with fake agent scripts on `PATH`.
+
+## Notes
+
+- Checked on 23 Nov 2026: `claude --help` lists `-c, --continue` and `-r, --resume [value]` (a session id), `codex resume --help` shows `codex resume [SESSION_ID]` and `--last`, and the OpenCode docs (Context7, `/anomalyco/opencode`, CLI flags of the TUI) list `--continue` and `--session <id>`; running `opencode --help` in the sandbox failed because it writes under `~/.local/share/opencode`, so its flags rest on the docs. All six defaults of the table are right as written.
+- Requirement 3 is implemented more strictly than the spec: besides quotes, backslash and `$`, a template word (other than a whole `{session_id}`) may not hold a backtick or any of `; & | < > ( ) * ? [ ] { } # ~ !` or a control character, `{session_id}` cannot be the program, `resume_latest` cannot hold `{session_id}`, and an empty template is an error. `resume_command` checks the template again at relaunch, so a config built in code cannot reach the shell unchecked.
+- `Config` gained `resume_agents` and `AgentConfig.resume` / `resume_latest`, which the clients receive, so `PROTOCOL_VERSION` went from 10 to 11.
+- A terminal that resumes its agent gets its agent state (process source, `quiet`, the saved kind and session id) when the state is restored, before any save, and `program_name` looks through deck's own `sh -c '<command>; exec "$0" "$@"'` wrapper (which has no job control, so the agent stays in `sh`'s process group) so detection keeps finding it. Only that wrapper form is looked through: other `sh -c` scripts keep the shell as their program, as sub-spec 01's tests require.
+- The late-`SessionEnd` ordering between `request_shutdown` and the final save cannot be driven from a test without a production hook, so no test fails by itself without the `shutting_down` guard; the guard is covered by the E2E trap test and by reading.
+- The `deck new-terminal` CLI has no directory option: the terminal starts in its project's directory, which is the "original cwd" the e2e test checks.
+- The shutdown test in `crates/deck-daemon/tests/resume.rs` sends the late `SessionEnd` after the clients got `Bye`; the daemon may already have closed the connection, and either way the saved agent must stay. The end-to-end test with a trapped `SIGHUP` that runs `deck agent-event` covers the hang-up itself.

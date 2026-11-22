@@ -52,9 +52,14 @@ Pressed after the prefix.
 | `close_project`      | `Q`         | Close the active project, after a confirmation                         |
 | `toggle_sidebar`     | `b`         | Show or hide the sidebar                                               |
 | `focus_sidebar`      | `Tab`       | Move the keyboard into the sidebar                                     |
+| `next_attention`     | `a`         | Jump to the next agent that needs you ([agents](agents.md#attention))  |
 | `help`               | `?`         | Show the help overlay                                                  |
 
 A key you set replaces the same key on any other action's default keys, with a warning (`key "c" of toggle_sidebar replaces new_panel's`). When you set two actions to one key, that is an error naming both actions and the key (`deck config check` shows it, and a running deck keeps the previous config). `detach = []` unbinds an action; the help overlay lists it as `unbound`.
+
+## Help overlay
+
+`Option+Space ?` lists every binding. When the window is too short to show all of them, `Up` / `k`, `Down` / `j`, `PageUp`, `PageDown`, `Home` and `End` scroll the list, and the bottom border says how many lines are hidden (`↓ 1 more · esc close`, and `↑ n more` once scrolled). `Esc`, `q` and `?` close it. These keys are fixed; they are not under `[keys]`.
 
 ## Scroll mode
 

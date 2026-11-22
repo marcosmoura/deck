@@ -11,3 +11,4 @@ One page per feature, written by the work that ships it and kept current by ever
 - [Keys](keys.md): the prefix, the bindings and how to change them.
 - [Config](config.md): where `config.toml` lives, `deck config default`, `check` and `path`.
 - [Control API](control-api.md): `deck ls --json`, `new-project`, `new-panel`, `new-terminal`, `focus`, `close`, `rename-panel`, `--keep` and the `DECK_*` targets.
+- [Agents](agents.md): the agent states and glyphs, detection by process, `[agents.<kind>] process`, hook events.

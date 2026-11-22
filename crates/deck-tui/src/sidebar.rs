@@ -10,6 +10,7 @@ use ratatui::crossterm::event as ct;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
+use crate::agent;
 use crate::app::{App, Out};
 use crate::draw::{color, selection, truncate, width};
 
@@ -370,12 +371,35 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 } else {
                     (String::new(), 0)
                 };
-                let room = w.saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 });
+                // `!n` after the name of a collapsed project with n waiting panels.
+                let waiting = if p.collapsed {
+                    agent::waiting_panels(p)
+                } else {
+                    0
+                };
+                let badge = (waiting > 0).then(|| format!("{}{waiting}", theme.glyphs.waiting));
+                let badge_w = badge.as_deref().map_or(0, |b| width(b) + 1);
+                let room = w
+                    .saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 })
+                    .saturating_sub(badge_w);
                 let mut style = row_style;
                 if view.active_project == Some(id) {
                     style = style.add_modifier(Modifier::BOLD);
                 }
-                put(buf, y, 3, &truncate(&p.name, room), style);
+                let name = truncate(&p.name, room);
+                put(buf, y, 3, &name, style);
+                if let Some(badge) = badge {
+                    let warning = Style::new()
+                        .fg(color(theme.warning))
+                        .add_modifier(Modifier::BOLD);
+                    put(
+                        buf,
+                        y,
+                        4 + width(&name),
+                        &badge,
+                        keep(row_style.patch(warning)),
+                    );
+                }
                 if count_w > 0 {
                     put(
                         buf,
@@ -402,13 +426,39 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     );
                     style = keep(style.patch(accent)).add_modifier(Modifier::BOLD);
                 }
+                // The status column: the panel's most urgent agent.
+                if let Some((text, glyph_style)) =
+                    agent::glyph(agent::panel_status(p), app.spin, theme)
+                {
+                    put(buf, y, 1, &text, keep(row_style.patch(glyph_style)));
+                }
                 let (count, count_w) = if p.terminals.len() > 1 {
                     side(p.terminals.len().to_string())
                 } else {
                     (String::new(), 0)
                 };
-                let room = w.saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 });
-                put(buf, y, 3, &truncate(&p.name, room), style);
+                let marker_w = if p.unseen {
+                    width(&theme.glyphs.unseen) + 1
+                } else {
+                    0
+                };
+                let room = w
+                    .saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 })
+                    .saturating_sub(marker_w);
+                if p.unseen {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                let name = truncate(&p.name, room);
+                put(buf, y, 3, &name, style);
+                if p.unseen {
+                    put(
+                        buf,
+                        y,
+                        4 + width(&name),
+                        &theme.glyphs.unseen,
+                        keep(row_style.patch(accent)),
+                    );
+                }
                 if count_w > 0 {
                     put(
                         buf,

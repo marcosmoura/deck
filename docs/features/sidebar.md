@@ -16,7 +16,7 @@ A session holds projects, a project holds panels, and a panel shows one terminal
 ```
 
 - The header is the session name. Each project is a row with `▾` (expanded) or `▸` (collapsed), its name and, when collapsed, its panel count at the right. Each panel of an expanded project is a row with its name and, when it holds more than one terminal, the terminal count at the right. A project with no panels shows a muted `no panels`. Names that do not fit end in `…`.
-- The active panel is drawn in the accent colour, bold, with a `▌` in the left gutter; the active project's name is bold. The cell before each name is reserved for the agent status.
+- The active panel is drawn in the accent colour, bold, with a `▌` in the left gutter; the active project's name is bold. The cell before each name shows the agent status of the panel's most urgent terminal (see [agents](agents.md)). A panel whose agent needed you while you were not looking is bold with a `•` after its name, and a collapsed project shows `!<n>` for its waiting panels ([attention](agents.md#attention)).
 - With more rows than fit, the list scrolls to keep the active panel (or, in sidebar focus, the selection) in view. The wheel scrolls it too, three rows a notch.
 - The sidebar takes `sidebar_width` columns (default 28) and a separator; the panels get the rest. When the window is narrower than `sidebar_width + 21` columns the sidebar hides, so the panel area never drops below 20 columns, and it comes back when the window grows, unless you hid it with `toggle_sidebar`.
 - The active project, active panel and which projects are collapsed are shared by every client attached to the session. The selection, sidebar focus, prompts and overlays are each client's own.

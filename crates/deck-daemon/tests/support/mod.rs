@@ -99,6 +99,11 @@ impl TestDaemon {
         Self::start_in(home, config(), options).await
     }
 
+    /// A daemon on an existing home with the given config and options.
+    pub async fn start_on_config(home: TempDir, config: Config, options: Options) -> Self {
+        Self::start_in(home, config, options).await
+    }
+
     /// Stops the daemon like `SIGTERM` does and returns its home.
     pub async fn stop_keep(mut self) -> TempDir {
         self.stop_inner().await.expect("a clean stop");

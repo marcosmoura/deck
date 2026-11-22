@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 03 — Hooks for Claude Code and Codex
@@ -14,30 +14,30 @@ After `deck hooks install claude codex`, deck knows exactly when Claude Code and
 1. **`deck agent-event --agent <claude|codex|opencode> [--event <name>]`** (hidden from the main help, documented in `docs/features/agents.md`): reads the hook's JSON payload from stdin (at most 1 MiB), takes the event name from `--event` or the payload's `hook_event_name`, maps it (requirement 2; for `opencode`, sub-spec 04 sends the raw event instead), and sends `AgentEvent` for `DECK_TERMINAL_ID` over `DECK_SOCKET`. It never writes to stdout, always exits 0, and gives up after 500 ms in total, reading stdin included. It does nothing when `DECK_TERMINAL_ID` is unset or the socket is unreachable, and never starts a daemon.
 2. **Mapping** (pure, in `deck-core::agents`, unit-tested). Both agents' payloads carry `hook_event_name` and `session_id`; prompts come from `prompt`.
 
-   | Agent  | Event                                                                           | Status    | Also records           |
-   | ------ | ------------------------------------------------------------------------------- | --------- | ---------------------- |
-   | Claude | `SessionStart`                                                                  | `idle`    | `session_id`           |
-   | Claude | `UserPromptSubmit`                                                              | `working` | `session_id`, `prompt` |
-   | Claude | `PostToolUse`                                                                   | `working` |                        |
-   | Claude | `PermissionRequest`                                                             | `waiting` |                        |
-   | Claude | `Notification`, `notification_type` `permission_prompt` or `elicitation_dialog` | `waiting` |                        |
-   | Claude | `Notification`, `notification_type` `idle_prompt`                               | `idle`    |                        |
-   | Claude | `Stop`                                                                          | `idle`    |                        |
-   | Claude | `SessionEnd`                                                                    | `none`    |                        |
-   | Codex  | `SessionStart`                                                                  | `idle`    | `session_id`           |
-   | Codex  | `UserPromptSubmit`                                                              | `working` | `session_id`, `prompt` |
-   | Codex  | `PostToolUse`                                                                   | `working` |                        |
-   | Codex  | `PermissionRequest`                                                             | `waiting` |                        |
-   | Codex  | `Stop`, `Interrupt`                                                             | `idle`    |                        |
-   | Codex  | `SessionEnd`                                                                    | `none`    |                        |
+   | Agent  | Event                                                                           | Status    |
+   | ------ | ------------------------------------------------------------------------------- | --------- |
+   | Claude | `SessionStart`                                                                  | `idle`    |
+   | Claude | `UserPromptSubmit`                                                              | `working` |
+   | Claude | `PostToolUse`                                                                   | `working` |
+   | Claude | `PermissionRequest`                                                             | `waiting` |
+   | Claude | `Notification`, `notification_type` `permission_prompt` or `elicitation_dialog` | `waiting` |
+   | Claude | `Notification`, `notification_type` `idle_prompt`                               | `idle`    |
+   | Claude | `Stop`                                                                          | `idle`    |
+   | Claude | `SessionEnd`                                                                    | `none`    |
+   | Codex  | `SessionStart`                                                                  | `idle`    |
+   | Codex  | `UserPromptSubmit`                                                              | `working` |
+   | Codex  | `PostToolUse`                                                                   | `working` |
+   | Codex  | `PermissionRequest`                                                             | `waiting` |
+   | Codex  | `Stop`, `Interrupt`                                                             | `idle`    |
+   | Codex  | `SessionEnd`                                                                    | `none`    |
 
-   Other events and other `notification_type` values are ignored. A missing payload field is not recorded. `PreToolUse` is not used: `PostToolUse` keeps the state fresh at half the cost per tool call. An answered permission prompt turns back to `working` through sub-spec 01's input rule. Field names were taken from the agents' docs on 22 Nov 2026; the worker checks them again (Notes).
+   Every event records the payload's `session_id`; only `UserPromptSubmit` also records the `prompt`. Other events and other `notification_type` values are ignored. A missing payload field is not recorded. `PreToolUse` is not used: `PostToolUse` keeps the state fresh at half the cost per tool call. An answered permission prompt turns back to `working` through sub-spec 01's input rule. Field names were taken from the agents' docs on 22 Nov 2026; the worker checks them again (Notes).
 
 3. **`deck hooks install <agent>... [--print]`**, **`deck hooks uninstall <agent>...`**, **`deck hooks status`** (OpenCode is added by sub-spec 04):
    - **Claude Code**: `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`), `hooks` key: one entry per event of the table (no matcher, so nothing is filtered; `Notification` included), each running `deck agent-event --agent claude`, marked to run asynchronously when Claude Code's hook schema supports it so the agent never waits for deck.
    - **Codex**: `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`), always written there. Its schema (Codex rejects unknown fields): `{ "description": "…" (optional), "hooks": { "<Event>": [ { "matcher": "", "hooks": [ { "type": "command", "command": "deck agent-event --agent codex", "timeout": 2 } ] } ] } }`, with one entry per Codex event of the table (`SessionEnd` and `Interrupt` included). `status` also reports deck entries found under `[hooks]` in `$CODEX_HOME/config.toml` (Codex loads both and warns about duplicates). When Codex needs a trust or enable step for user hooks, `install` prints it.
    - **Writing safely**: the target path is canonicalized first (a file symlinked into a dotfiles repo is written in place, and the symlink survives); the new content is written to a temp file in the target's own directory and renamed over it. Before any write, the current file is copied to `$XDG_STATE_HOME/deck/backups/<agent>-<file>-<unix-seconds>`. JSON is parsed and rewritten with `serde_json` with the `preserve_order` feature (key order kept) and 2-space indentation; other keys and hooks are kept. The first install may still reformat the file; the docs say so.
-   - **Idempotent**: deck's entries are recognised by their `deck agent-event` command and replaced, never duplicated. `--print` prints what would be written and writes nothing. `uninstall` removes only deck's entries. `status` prints one line per agent: `installed`, `not installed`, `needs a step` (Codex trust) or `stale` (an installed command points at a `deck` binary that no longer exists).
+   - **Idempotent**: deck's entries are recognised by their `deck agent-event` command and replaced, never duplicated. `--print` prints what would be written and writes nothing. `uninstall` removes only deck's entries. `status` prints one line per agent: `installed`, `not installed`, or `stale`; Codex's trust cannot be checked, so Codex reads `installed (trust them in /hooks if Codex asks)` (an installed command points at a `deck` binary that no longer exists).
    - The `deck` path in the hook commands is `deck` when the running binary is the one found on `PATH`, else its absolute path, and `install` then warns that a rebuild or move will make the hooks stale.
 
 ## Acceptance criteria

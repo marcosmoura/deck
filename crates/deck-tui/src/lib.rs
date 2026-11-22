@@ -1,5 +1,8 @@
 //! The attach client: screen mirror, rendering, input handling and key bindings.
 
+mod agent;
+#[cfg(test)]
+mod agent_tests;
 mod app;
 mod colors;
 mod convert;
@@ -251,7 +254,7 @@ async fn run_async(mut options: Options) -> Exit {
                         Err(exit) => break 'run exit,
                     }
                 }
-                Out::Clipboard(bytes) => {
+                Out::Clipboard(bytes) | Out::Notify(bytes) => {
                     let mut stdout = io::stdout();
                     let _ = stdout.write_all(&bytes);
                     let _ = stdout.flush();
@@ -385,8 +388,16 @@ async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, String>
                     msg => {
                         let first = matches!(msg, ServerMsg::SessionView(_));
                         for out in app.on_server(msg) {
-                            if let Out::Send(msg) = out {
-                                let _ = link.out_tx.send(msg);
+                            match out {
+                                Out::Send(msg) => {
+                                    let _ = link.out_tx.send(msg);
+                                }
+                                Out::Clipboard(bytes) | Out::Notify(bytes) => {
+                                    let mut stdout = io::stdout();
+                                    let _ = stdout.write_all(&bytes);
+                                    let _ = stdout.flush();
+                                }
+                                _ => {}
                             }
                         }
                         if first {
@@ -513,7 +524,7 @@ mod tests {
             let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
             assert!(!code.contains(&constructor), "{name} builds a colour");
             assert!(!code.contains("Color as"), "{name} aliases Color");
-            for glyph in ["▾", "▸", "▌"] {
+            for glyph in ["▾", "▸", "▌", "⠋", "⠹"] {
                 assert!(!code.contains(glyph), "{name} has the glyph {glyph}");
             }
             checked += 1;

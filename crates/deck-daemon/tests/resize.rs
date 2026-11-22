@@ -90,7 +90,17 @@ fn expected(c: &Client, viewport: (u16, u16)) -> Vec<(u16, u16)> {
 async fn assert_sizes(c: &mut Client, viewport: (u16, u16), tag: &str) {
     let want = expected(c, viewport);
     for (i, id) in ids(c).into_iter().enumerate() {
-        let got = stty(c, id, &format!("{tag}{i}")).await;
+        // The PTYs are resized one after the other, so ask again until this one has been.
+        let mut attempt = 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let got = loop {
+            let got = stty(c, id, &format!("{tag}{i}r{attempt}")).await;
+            attempt += 1;
+            if got == want[i] || std::time::Instant::now() > deadline {
+                break got;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        };
         assert_eq!(got, want[i], "terminal {} of {}", i + 1, want.len());
     }
 }

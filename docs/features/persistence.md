@@ -21,7 +21,7 @@ deck follows each terminal's working directory, so a restored shell comes back w
 ## What does not
 
 - Scrollback and what was on the screen. A restored terminal starts at 80×24 until a client attaches.
-- Whatever ran inside a shell (an editor, a dev server): only the shell itself, or an explicit program, is started again.
+- Whatever ran inside a shell (an editor, a dev server): only the shell itself, or an explicit program, is started again. A coding agent is the exception: it is reopened on its conversation, see [agents](agents.md#resume).
 - Environment variables of the `deck` that created a session. Restored terminals get the environment of the `deck` that started the new daemon, plus any variables their launch added; `DECK_*` variables are regenerated. The state file never holds your environment.
 
 ## The file

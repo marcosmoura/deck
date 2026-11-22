@@ -18,6 +18,7 @@ use deck_core::theme::Theme;
 use ratatui::crossterm::event as ct;
 
 use crate::Exit;
+use crate::agent;
 use crate::grid::Grid;
 use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
 use crate::mirror::Mirror;
@@ -55,6 +56,8 @@ pub enum Out {
     Send(ClientMsg),
     /// Bytes for the outer terminal (an OSC 52 copy).
     Clipboard(Vec<u8>),
+    /// Bytes for the outer terminal that notify the user (OSC 9 or a bell).
+    Notify(Vec<u8>),
     Exit(Exit),
     /// Attach this client to another session.
     Switch(String),
@@ -119,6 +122,16 @@ pub struct App {
     /// Where the client was started, for new projects' directories.
     pub(crate) cwd: PathBuf,
     pub(crate) home: Option<PathBuf>,
+    /// The spinner's frame counter, advanced every [`SPIN_EVERY`] while a terminal spins.
+    pub(crate) spin: usize,
+    /// When the spinner moves next; `None` while nothing spins (no timer runs then).
+    spin_at: Option<Instant>,
+    /// The outer terminal has focus, as far as its focus events told.
+    focused: bool,
+    /// The first line of the help overlay shown.
+    pub help_scroll: usize,
+    /// A focus event came: the focus is re-reported on every attach.
+    focus_seen: bool,
 }
 
 /// A mouse cell on a terminal of the grid.
@@ -171,6 +184,11 @@ impl App {
             sidebar_offset: 0,
             cwd: PathBuf::from("/"),
             home: None,
+            spin: 0,
+            spin_at: None,
+            focused: true,
+            help_scroll: 0,
+            focus_seen: false,
         }
     }
 
@@ -284,6 +302,7 @@ impl App {
         self.sidebar_focus = false;
         self.selection = None;
         self.sidebar_offset = 0;
+        self.spin_at = None;
         self.dirty = true;
     }
 
@@ -322,9 +341,10 @@ impl App {
         self.flash.as_ref().map(|(_, until)| *until)
     }
 
-    /// The next moment `tick` has something to do: a flash ends or the resize repeat does.
+    /// The next moment `tick` has something to do: a flash ends, the resize repeat does or
+    /// the spinner moves.
     pub fn wake_deadline(&self) -> Option<Instant> {
-        [self.flash_deadline(), self.resize_until]
+        [self.flash_deadline(), self.resize_until, self.spin_at]
             .into_iter()
             .flatten()
             .min()
@@ -334,8 +354,21 @@ impl App {
         self.configured && std::mem::take(&mut self.dirty)
     }
 
-    /// Drops an expired flash message.
+    /// Starts the spinner's timer when a terminal spins and none runs yet.
+    fn arm_spinner(&mut self, now: Instant) {
+        if self.spin_at.is_none() && self.mirror.view().is_some_and(agent::view_spins) {
+            self.spin_at = Some(now + agent::SPIN_EVERY);
+        }
+    }
+
+    /// Moves the spinner and drops an expired flash message.
     pub fn tick(&mut self, now: Instant) {
+        if self.spin_at.is_some_and(|at| now >= at) {
+            self.spin = self.spin.wrapping_add(1);
+            self.spin_at = None;
+            self.arm_spinner(now);
+            self.dirty = true;
+        }
         if self.resize_until.is_some_and(|until| now >= until) {
             self.resize_until = None;
             self.dirty = true;
@@ -527,6 +560,15 @@ impl App {
 
     /// Focus-in and focus-out of the outer terminal, for programs that asked for them.
     fn on_focus(&mut self, gained: bool) -> Vec<Out> {
+        self.focused = gained;
+        self.focus_seen = true;
+        let mut outs = vec![Out::Send(ClientMsg::Focus(gained))];
+        outs.extend(self.forward_focus(gained));
+        outs
+    }
+
+    /// The focus report for the focused terminal, if its program asked for them.
+    fn forward_focus(&mut self, gained: bool) -> Vec<Out> {
         self.end_repeat();
         if self.overlay_open() {
             return Vec::new();
@@ -797,8 +839,19 @@ impl App {
                     Vec::new()
                 }
             }
+            Action::NextAttention => match self.mirror.view().and_then(agent::next_attention) {
+                Some((panel, terminal)) => vec![
+                    self.act(Act::FocusPanel { panel }, None),
+                    self.act(Act::FocusTerminal { terminal }, None),
+                ],
+                None => {
+                    self.set_flash("no agent needs you".into(), now, false);
+                    Vec::new()
+                }
+            },
             Action::Help => {
                 self.modal = Some(Modal::Help);
+                self.help_scroll = 0;
                 Vec::new()
             }
         }
@@ -909,6 +962,9 @@ impl App {
         match msg {
             ServerMsg::Welcome { config, .. } => {
                 let mut outs = self.apply_config(*config);
+                if self.focus_seen {
+                    outs.push(Out::Send(ClientMsg::Focus(self.focused)));
+                }
                 if !self.configured {
                     self.configured = true;
                     outs.extend(self.start(Instant::now()));
@@ -916,6 +972,19 @@ impl App {
                 outs
             }
             ServerMsg::Config(config) => self.apply_config(*config),
+            ServerMsg::AgentAlert {
+                kind,
+                status,
+                project,
+                panel,
+            } => {
+                let bytes = agent::alert_bytes(self.config.notify, kind, status, &project, &panel);
+                if bytes.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![Out::Notify(bytes)]
+                }
+            }
             ServerMsg::Notice { level, text } => {
                 self.push_notice(level, text, Instant::now());
                 Vec::new()
@@ -931,6 +1000,7 @@ impl App {
                     .view()
                     .map(|v| (v.active_project, v.active_panel));
                 self.mirror.set_view(view);
+                self.arm_spinner(Instant::now());
                 self.check_scroll_target();
                 self.check_modal_target(Instant::now());
                 self.normalize_selection();
@@ -1535,16 +1605,27 @@ mod tests {
         );
     }
 
+    fn focus(focused: bool) -> Out {
+        Out::Send(ClientMsg::Focus(focused))
+    }
+
     #[test]
     fn focus_events_reach_a_program_that_asked_for_them() {
         let now = Instant::now();
         let mut a = app();
         show(&mut a, 0, 0, 0);
-        assert!(a.on_event(ct::Event::FocusGained, now).is_empty());
-        assert!(a.on_event(ct::Event::FocusLost, now).is_empty());
+        // The daemon is told either way; the program only when it asked.
+        assert_eq!(a.on_event(ct::Event::FocusGained, now), [focus(true)]);
+        assert_eq!(a.on_event(ct::Event::FocusLost, now), [focus(false)]);
         show(&mut a, Modes::FOCUS_REPORTING, 0, 0);
-        assert_eq!(a.on_event(ct::Event::FocusGained, now), [input(b"\x1b[I")]);
-        assert_eq!(a.on_event(ct::Event::FocusLost, now), [input(b"\x1b[O")]);
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, now),
+            [focus(true), input(b"\x1b[I")]
+        );
+        assert_eq!(
+            a.on_event(ct::Event::FocusLost, now),
+            [focus(false), input(b"\x1b[O")]
+        );
     }
 
     #[test]
@@ -1552,8 +1633,143 @@ mod tests {
         let mut a = in_scroll_mode();
         show(&mut a, Modes::FOCUS_REPORTING, 5, 100);
         let now = Instant::now();
-        assert_eq!(a.on_event(ct::Event::FocusLost, now), [input(b"\x1b[O")]);
+        assert_eq!(
+            a.on_event(ct::Event::FocusLost, now),
+            [focus(false), input(b"\x1b[O")]
+        );
         assert_eq!(a.scroll_mode, Some(TerminalId(4)));
+    }
+
+    #[test]
+    fn the_focus_is_reported_again_on_every_attach_once_it_was_seen() {
+        let welcome = || ServerMsg::Welcome {
+            session: deck_core::model::SessionId(1),
+            config: Box::new(no_sidebar()),
+        };
+        // Never reported: the daemon counts the client as focused.
+        let mut a = app();
+        assert!(a.on_server(welcome()).is_empty());
+        let now = Instant::now();
+        a.on_event(ct::Event::FocusLost, now);
+        assert_eq!(a.on_server(welcome()), [focus(false)]);
+        a.on_event(ct::Event::FocusGained, now);
+        assert_eq!(a.on_server(welcome()), [focus(true)]);
+    }
+
+    fn alert(status: deck_core::agents::AgentStatus, project: &str, panel: &str) -> ServerMsg {
+        ServerMsg::AgentAlert {
+            kind: deck_core::agents::AgentKind::Claude,
+            status,
+            project: project.into(),
+            panel: panel.into(),
+        }
+    }
+
+    #[test]
+    fn an_alert_notifies_through_the_outer_terminal_as_configured() {
+        use deck_core::agents::AgentStatus;
+        let waiting = alert(AgentStatus::Waiting, "proj", "review");
+        let mut a = app();
+        assert_eq!(
+            a.on_server(waiting.clone()),
+            [Out::Notify(
+                "\x1b]9;claude needs you · proj › review\x07"
+                    .as_bytes()
+                    .to_vec()
+            )]
+        );
+        assert_eq!(
+            a.on_server(alert(AgentStatus::Idle, "proj", "docs")),
+            [Out::Notify(
+                "\x1b]9;claude finished · proj › docs\x07"
+                    .as_bytes()
+                    .to_vec()
+            )]
+        );
+        // Control characters never reach the outer terminal: an ESC or BEL in a name would
+        // end the sequence early.
+        assert_eq!(
+            a.on_server(alert(AgentStatus::Waiting, "p\x07\x1b[2Jq", "a\nb\u{9b}c")),
+            [Out::Notify(
+                "\x1b]9;claude needs you · p[2Jq › abc\x07"
+                    .as_bytes()
+                    .to_vec()
+            )]
+        );
+        for (text, bytes) in [("bell", Some(b"\x07".to_vec())), ("none", None)] {
+            let config = Config::parse(&format!("notify = \"{text}\""))
+                .unwrap()
+                .config;
+            let mut a = App::new(&config, (80, 24), &[]);
+            let outs = a.on_server(waiting.clone());
+            assert_eq!(outs, bytes.map(Out::Notify).into_iter().collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn next_attention_cycles_waiting_then_unseen_idle_then_flashes() {
+        use deck_core::agents::{AgentKind, AgentSource, AgentState, AgentStatus};
+        use deck_core::model::PanelId;
+        let set = |view: &mut deck_core::model::SessionView, terminal: u64, status| {
+            let t = view
+                .projects
+                .iter_mut()
+                .flat_map(|p| &mut p.panels)
+                .flat_map(|p| &mut p.terminals)
+                .find(|t| t.id == TerminalId(terminal))
+                .unwrap();
+            t.agent = Some(AgentState {
+                kind: AgentKind::Claude,
+                status,
+                source: AgentSource::Hooks,
+                session_id: None,
+                first_prompt: None,
+                since: Duration::ZERO,
+            });
+        };
+        let mut v = crate::mirror::tests::mockup();
+        set(&mut v, 41, AgentStatus::Waiting);
+        set(&mut v, 61, AgentStatus::Waiting);
+        set(&mut v, 91, AgentStatus::Idle);
+        v.projects[3].panels[0].unseen = true;
+        let mut a = App::new(&Config::default(), (100, 24), &[]);
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        let now = Instant::now();
+        let jump = |a: &mut App| {
+            a.on_event(prefix(), now);
+            a.on_event(ch('a'), now)
+        };
+        let focus_to = |panel: u64, terminal: u64| {
+            vec![
+                Out::Send(ClientMsg::Action(Act::FocusPanel {
+                    panel: PanelId(panel),
+                })),
+                Out::Send(ClientMsg::Action(Act::FocusTerminal {
+                    terminal: TerminalId(terminal),
+                })),
+            ]
+        };
+        // From the editor panel (3): the waiting ones in sidebar order, wrapping.
+        assert_eq!(jump(&mut a), focus_to(4, 41));
+        v.active_panel = Some(PanelId(4));
+        v.projects[0].active_panel = Some(PanelId(4));
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        assert_eq!(jump(&mut a), focus_to(6, 61));
+        v.active_panel = Some(PanelId(6));
+        v.active_project = Some(deck_core::model::ProjectId(2));
+        v.projects[1].active_panel = Some(PanelId(6));
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        assert_eq!(jump(&mut a), focus_to(4, 41));
+        // Nobody waits: the unseen idle one, in a collapsed project too.
+        set(&mut v, 41, AgentStatus::Working);
+        set(&mut v, 61, AgentStatus::Working);
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        assert_eq!(jump(&mut a), focus_to(9, 91));
+        // Seen, it no longer counts.
+        v.projects[3].panels[0].unseen = false;
+        a.on_server(ServerMsg::SessionView(v));
+        assert!(jump(&mut a).is_empty());
+        assert_eq!(a.flash.as_ref().unwrap().0, "no agent needs you");
     }
 
     #[test]

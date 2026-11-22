@@ -1,6 +1,7 @@
-//! The daemon: socket server, sessions, PTYs, terminal emulation, frames and persistence.
-//! Agent status comes with a later spec.
+//! The daemon: socket server, sessions, PTYs, terminal emulation, frames, persistence and
+//! the status of the coding agents running in terminals.
 
+mod agents;
 mod clock;
 mod config_file;
 mod conn;
@@ -23,6 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use deck_core::config::Config;
+use deck_core::model::TerminalId;
 use deck_core::protocol::{NoticeLevel, PROTOCOL_VERSION};
 use tokio::net::UnixListener;
 
@@ -81,6 +83,39 @@ impl std::fmt::Debug for CwdQuery {
     }
 }
 
+/// The hidden variable that sets how often terminals' foreground processes are looked at
+/// for coding agents, in milliseconds.
+pub const TEST_AGENT_POLL_VAR: &str = "DECK_TEST_AGENT_POLL_MS";
+
+/// How often the foreground process of every terminal is looked at.
+const AGENT_POLL: Duration = Duration::from_secs(1);
+
+/// How the daemon asks for the argv of a terminal's foreground process: the operating
+/// system, unless a test puts something else in its place.
+#[derive(Clone, Default)]
+pub struct ForegroundQuery(Option<Arc<ArgvFn>>);
+
+type ArgvFn = dyn Fn(TerminalId) -> Option<Vec<String>> + Send + Sync;
+
+impl ForegroundQuery {
+    pub fn new(query: impl Fn(TerminalId) -> Option<Vec<String>> + Send + Sync + 'static) -> Self {
+        Self(Some(Arc::new(query)))
+    }
+
+    pub(crate) fn ask(&self, terminal: &terminal::TermHandle) -> Option<Vec<String>> {
+        match &self.0 {
+            Some(query) => query(terminal.id),
+            None => terminal.foreground().map(|(_, argv)| argv),
+        }
+    }
+}
+
+impl std::fmt::Debug for ForegroundQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ForegroundQuery").finish_non_exhaustive()
+    }
+}
+
 /// How often the config file is looked at.
 const CONFIG_POLL: Duration = Duration::from_secs(1);
 
@@ -96,6 +131,9 @@ pub struct Options {
     /// How often the directories of terminals that never reported one are looked up.
     pub cwd_poll: Duration,
     pub cwd_query: CwdQuery,
+    /// How often the foreground process of every terminal is looked at for an agent.
+    pub agent_poll: Duration,
+    pub foreground_query: ForegroundQuery,
     /// Counts the pending `wait` requests, for tests that check none is left behind.
     pub waiters: Arc<AtomicUsize>,
 }
@@ -109,6 +147,8 @@ impl Default for Options {
             config_poll: CONFIG_POLL,
             cwd_poll: CWD_POLL,
             cwd_query: CwdQuery::default(),
+            agent_poll: AGENT_POLL,
+            foreground_query: ForegroundQuery::default(),
             waiters: Arc::default(),
         }
     }
@@ -131,6 +171,9 @@ impl Options {
         }
         if let Some(ms) = env(TEST_CWD_POLL_VAR).and_then(|v| v.parse::<u64>().ok()) {
             options.cwd_poll = Duration::from_millis(ms.max(10));
+        }
+        if let Some(ms) = env(TEST_AGENT_POLL_VAR).and_then(|v| v.parse::<u64>().ok()) {
+            options.agent_poll = Duration::from_millis(ms.max(10));
         }
         options
     }
@@ -228,7 +271,10 @@ impl Daemon {
             notices,
             options.clock,
             options.protocol_version,
-            options.cwd_query,
+            server::Probes {
+                cwd: options.cwd_query,
+                foreground: options.foreground_query,
+            },
             options.waiters,
         );
         let launches = match loaded {
@@ -257,6 +303,7 @@ impl Daemon {
         let watcher = watched
             .map(|file| tokio::spawn(watch_config(Arc::clone(&shared), file, options.config_poll)));
         let tracker = tokio::spawn(Arc::clone(&shared).track_cwds(options.cwd_poll));
+        let agents = tokio::spawn(Arc::clone(&shared).track_agents(options.agent_poll));
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
@@ -282,6 +329,7 @@ impl Daemon {
             watcher.abort();
         }
         tracker.abort();
+        agents.abort();
         shared.finish_shutdown().await;
         // It stops at the shutdown flag; an open that was in flight is discarded and reaped.
         if let Some(launching) = launching {

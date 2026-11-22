@@ -13,6 +13,7 @@ use deck_core::osc7::Osc7Scanner;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::{Notify, oneshot};
 
+use crate::agents::AgentRt;
 use crate::clock::Drain;
 use crate::emu::Emu;
 use crate::env::Env;
@@ -21,6 +22,13 @@ use crate::server::Shared;
 
 /// At most one frame per terminal in this interval.
 pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+
+/// Waits (each after the one before) until a resized PTY's real size is checked again.
+const PTY_RECHECKS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(200),
+    Duration::from_millis(750),
+];
 /// A terminal whose process is gone is dropped after this much silence on its PTY.
 pub const DRAIN_SILENCE: Duration = Duration::from_millis(200);
 
@@ -64,8 +72,12 @@ pub struct TermHandle {
     eof: AtomicBool,
     exited: AtomicBool,
     closed: AtomicBool,
+    /// Counts `resize_pty` calls, so a recheck knows a newer resize replaced it.
+    resizes: AtomicU64,
     /// The shell reported its directory with OSC 7 at least once.
     reports_cwd: AtomicBool,
+    /// What the agent state machine remembers between events and ticks.
+    pub(crate) agent_rt: Mutex<AgentRt>,
 }
 
 impl std::fmt::Debug for TermHandle {
@@ -102,6 +114,17 @@ impl TermHandle {
     }
 
     pub fn resize_pty(&self, cols: u16, rows: u16) {
+        // The emulator lock is held throughout, so `sync_pty` never sees the PTY resized
+        // and the emulator not yet.
+        let mut emu = lock(&self.emu);
+        self.resizes.fetch_add(1, Ordering::AcqRel);
+        self.set_pty_size(cols, rows);
+        if let Some(e) = emu.as_mut() {
+            e.resize(cols, rows);
+        }
+    }
+
+    fn set_pty_size(&self, cols: u16, rows: u16) {
         let size = PtySize {
             rows,
             cols,
@@ -111,7 +134,46 @@ impl TermHandle {
         if let Err(e) = lock(&self.master).resize(size) {
             tracing::warn!(terminal = %self.id, "cannot resize the PTY: {e}");
         }
-        self.with_emu(|e| e.resize(cols, rows));
+    }
+
+    /// The size the kernel holds for the PTY (`TIOCGWINSZ`).
+    pub fn pty_size(&self) -> Option<(u16, u16)> {
+        lock(&self.master).get_size().ok().map(|s| (s.cols, s.rows))
+    }
+
+    /// Checks the PTY's real size shortly after the last resize and sets it again when
+    /// it differs. On macOS under load a resize can be lost or undone although the ioctl
+    /// succeeded, which would leave the program with a stale size for good. A newer
+    /// resize restarts the schedule; there is no timer while the size is steady.
+    pub fn recheck_pty(self: &Arc<Self>, rt: &tokio::runtime::Handle) {
+        let h = Arc::clone(self);
+        let n = self.resizes.load(Ordering::Acquire);
+        rt.spawn(async move {
+            for wait in PTY_RECHECKS {
+                tokio::time::sleep(wait).await;
+                if h.is_closed() || h.resizes.load(Ordering::Acquire) != n {
+                    return;
+                }
+                h.sync_pty();
+            }
+        });
+    }
+
+    /// Sets the PTY to the emulator's size when they differ.
+    fn sync_pty(&self) {
+        let emu = lock(&self.emu);
+        let Some(e) = emu.as_ref() else {
+            return;
+        };
+        let (cols, rows) = e.size();
+        if self.pty_size() != Some((cols, rows)) {
+            self.set_pty_size(cols, rows);
+        }
+    }
+
+    /// The foreground process of the PTY: its pid and argv.
+    pub fn foreground(&self) -> Option<(u32, Vec<String>)> {
+        crate::platform::foreground_process(lock(&self.master).as_ref())
     }
 
     /// Runs `f` on the emulator; `None` once the terminal was released.
@@ -346,7 +408,9 @@ pub fn start(
         eof: AtomicBool::new(false),
         exited: AtomicBool::new(false),
         closed: AtomicBool::new(false),
+        resizes: AtomicU64::new(0),
         reports_cwd: AtomicBool::new(false),
+        agent_rt: Mutex::new(AgentRt::default()),
     });
 
     spawn_writer(parts.writer, input_rx, queued);

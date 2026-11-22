@@ -8,11 +8,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionError};
+use crate::agents::{AgentKind, AgentStatus};
 use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -53,6 +54,8 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
+    /// Whether the outer terminal has focus. A client that never reported counts as focused.
+    Focus(bool),
 }
 
 /// Where to scroll a terminal's display. Positive counts go back into the history (up),
@@ -161,6 +164,18 @@ pub enum Request {
         until: WaitFor,
         timeout_ms: Option<u64>,
     },
+    /// An agent's state, from its hooks (or a test): sets the terminal's agent state with
+    /// `source: Hooks`. `status: None` leaves the status as it is; `raw` is an agent's own
+    /// event, still to be interpreted (OpenCode). Answered by `Ok`, or an error for a
+    /// terminal that does not exist.
+    AgentEvent {
+        terminal: TerminalId,
+        kind: AgentKind,
+        status: Option<AgentStatus>,
+        session_id: Option<String>,
+        prompt: Option<String>,
+        raw: Option<String>,
+    },
 }
 
 /// What a `Request::Wait` waits for.
@@ -251,6 +266,15 @@ pub enum ServerMsg {
     Notice {
         level: NoticeLevel,
         text: String,
+    },
+    /// An agent needs the user or finished its turn while nobody looked: for the client to
+    /// notify through the outer terminal.
+    AgentAlert {
+        kind: AgentKind,
+        /// `Waiting` or `Idle`.
+        status: AgentStatus,
+        project: String,
+        panel: String,
     },
 }
 
@@ -493,6 +517,8 @@ impl FrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::AgentSource;
+    use crate::agents::AgentState;
     use crate::model::{NameSource, PanelId, PanelView, ProjectId, ProjectView, TerminalView};
     use std::os::unix::ffi::OsStringExt;
 
@@ -516,6 +542,7 @@ mod tests {
                     name_source: NameSource::Auto,
                     focused_terminal: Some(TerminalId(4)),
                     ratios: crate::layout::Ratios::default_for(1),
+                    unseen: true,
                     terminals: vec![TerminalView {
                         id: TerminalId(4),
                         program: "sh".into(),
@@ -524,6 +551,14 @@ mod tests {
                         exit_status: Some(1),
                         pid: Some(77),
                         keep: true,
+                        agent: Some(AgentState {
+                            kind: AgentKind::Codex,
+                            status: AgentStatus::Waiting,
+                            source: AgentSource::Hooks,
+                            session_id: Some("s1".into()),
+                            first_prompt: Some("fix".into()),
+                            since: std::time::Duration::from_millis(1500),
+                        }),
                     }],
                 }],
             }],
@@ -623,6 +658,8 @@ mod tests {
                 bytes: vec![0, 1, 0x1b, 255],
             },
             ClientMsg::ReloadViewport { cols: 71, rows: 23 },
+            ClientMsg::Focus(false),
+            ClientMsg::Focus(true),
             ClientMsg::Detach,
             ClientMsg::Request(Request::ListSessions),
             ClientMsg::Request(Request::KillServer),
@@ -720,6 +757,22 @@ mod tests {
                 until: WaitFor::Idle { quiet_ms: 500 },
                 timeout_ms: Some(0),
             }),
+            ClientMsg::Request(Request::AgentEvent {
+                terminal: TerminalId(4),
+                kind: AgentKind::OpenCode,
+                status: Some(AgentStatus::Waiting),
+                session_id: Some("ses_1".into()),
+                prompt: Some("fix the bug".into()),
+                raw: Some("{\"type\":\"x\"}".into()),
+            }),
+            ClientMsg::Request(Request::AgentEvent {
+                terminal: TerminalId(4),
+                kind: AgentKind::Claude,
+                status: None,
+                session_id: None,
+                prompt: None,
+                raw: None,
+            }),
             ClientMsg::Action(Action::KillSession),
             ClientMsg::Scroll {
                 terminal: TerminalId(3),
@@ -758,6 +811,12 @@ mod tests {
             ServerMsg::Notice {
                 level: NoticeLevel::Error,
                 text: String::new(),
+            },
+            ServerMsg::AgentAlert {
+                kind: AgentKind::Claude,
+                status: AgentStatus::Waiting,
+                project: "p ✓".into(),
+                panel: "e".into(),
             },
             ServerMsg::SessionView(view()),
             ServerMsg::Frame(frame()),

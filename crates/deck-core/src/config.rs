@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use toml::Value;
 
+use crate::agents::{AgentKind, check_template};
 use crate::keys::KeySpec;
 use crate::theme::Theme;
 
@@ -206,6 +207,12 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
         HelpGroup::Sidebar,
         "Move focus into the sidebar",
     ),
+    def(
+        "next_attention",
+        &["a"],
+        HelpGroup::Panels,
+        "Jump to the next agent that needs you",
+    ),
     def("help", &["?"], HelpGroup::Sidebar, "This help"),
 ];
 
@@ -217,12 +224,37 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "scrollback_lines",
     "sidebar",
     "sidebar_width",
+    "notify",
+    "resume_agents",
     "keys",
     "theme",
+    "agents",
 ];
 
 /// The sidebar width, in columns, accepted by `sidebar_width`.
 pub const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 20..=60;
+
+/// How the client tells the user, through the outer terminal, that an agent needs them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyMode {
+    /// OSC 9, a desktop notification in terminals that know it.
+    #[default]
+    Osc9,
+    Bell,
+    None,
+}
+
+impl NotifyMode {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "osc9" => Some(Self::Osc9),
+            "bell" => Some(Self::Bell),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
 
 /// The resolved config. This is the wire form too: plain types that postcard encodes. The
 /// TOML shapes that accept a string or an array, or a string or an integer, exist only
@@ -236,9 +268,75 @@ pub struct Config {
     /// Whether the sidebar is shown (unless the window is too narrow).
     pub sidebar: bool,
     pub sidebar_width: u16,
+    pub notify: NotifyMode,
+    /// Reopen each terminal's agent on its conversation after a daemon restart.
+    pub resume_agents: bool,
     /// Action name to its keys; every action of [`DEFAULT_BINDINGS`] is present.
     pub keys: BTreeMap<String, Vec<KeySpec>>,
     pub theme: Theme,
+    pub agents: AgentsConfig,
+}
+
+/// How deck finds one agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Program names (the basename of the command as typed, or of the script an interpreter
+    /// runs, without extension) that mean this agent.
+    pub process: Vec<String>,
+    /// The command that reopens a conversation; `{session_id}` is a whole argument.
+    pub resume: String,
+    /// The command that reopens the most recent conversation, for when no valid session id
+    /// is known.
+    pub resume_latest: String,
+}
+
+/// `[agents.<kind>]`: one table per agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentsConfig {
+    pub claude: AgentConfig,
+    pub codex: AgentConfig,
+    pub opencode: AgentConfig,
+}
+
+impl AgentsConfig {
+    pub fn get(&self, kind: AgentKind) -> &AgentConfig {
+        match kind {
+            AgentKind::Claude => &self.claude,
+            AgentKind::Codex => &self.codex,
+            AgentKind::OpenCode => &self.opencode,
+        }
+    }
+
+    fn get_mut(&mut self, kind: AgentKind) -> &mut AgentConfig {
+        match kind {
+            AgentKind::Claude => &mut self.claude,
+            AgentKind::Codex => &mut self.codex,
+            AgentKind::OpenCode => &mut self.opencode,
+        }
+    }
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        let one = |name: &str, resume: &str, resume_latest: &str| AgentConfig {
+            process: vec![name.to_string()],
+            resume: resume.to_string(),
+            resume_latest: resume_latest.to_string(),
+        };
+        Self {
+            claude: one(
+                "claude",
+                "claude --resume {session_id}",
+                "claude --continue",
+            ),
+            codex: one("codex", "codex resume {session_id}", "codex resume --last"),
+            opencode: one(
+                "opencode",
+                "opencode --session {session_id}",
+                "opencode --continue",
+            ),
+        }
+    }
 }
 
 impl Default for Config {
@@ -265,8 +363,11 @@ impl Default for Config {
             scrollback_lines: 10_000,
             sidebar: true,
             sidebar_width: 28,
+            notify: NotifyMode::default(),
+            resume_agents: true,
             keys,
             theme: Theme::default(),
+            agents: AgentsConfig::default(),
         }
     }
 }
@@ -419,6 +520,17 @@ fn apply(
                 .filter(|w| SIDEBAR_WIDTH_RANGE.contains(w))
                 .ok_or_else(|| bad(key, format!("must be between {min} and {max}, got {n}")))?;
         }
+        "notify" => {
+            config.notify = value
+                .as_str()
+                .and_then(NotifyMode::parse)
+                .ok_or_else(|| bad(key, "expected \"osc9\", \"bell\" or \"none\""))?;
+        }
+        "resume_agents" => {
+            config.resume_agents = value
+                .as_bool()
+                .ok_or_else(|| bad(key, "expected true or false"))?;
+        }
         "keys" => {
             let keys = value
                 .as_table()
@@ -453,6 +565,47 @@ fn apply(
                 .as_table()
                 .ok_or_else(|| bad(key, "expected a table"))?;
             config.theme = Theme::parse(theme, warnings).map_err(|e| bad(&e.key, e.message))?;
+        }
+        "agents" => {
+            let agents = value
+                .as_table()
+                .ok_or_else(|| bad(key, "expected a table"))?;
+            for (name, value) in agents {
+                let path = format!("agents.{name}");
+                let Some(kind) = AgentKind::parse(name) else {
+                    warnings.push(Warning::unknown_key(&path));
+                    continue;
+                };
+                let table = value
+                    .as_table()
+                    .ok_or_else(|| bad(&path, "expected a table"))?;
+                for (field, value) in table {
+                    let path = format!("{path}.{field}");
+                    let agent = config.agents.get_mut(kind);
+                    match field.as_str() {
+                        "process" => {
+                            let items = value
+                                .as_array()
+                                .ok_or_else(|| bad(&path, "expected an array of strings"))?;
+                            agent.process = items
+                                .iter()
+                                .map(|v| string(&path, v))
+                                .collect::<Result<_, _>>()?;
+                        }
+                        "resume" | "resume_latest" => {
+                            let template = string(&path, value)?;
+                            check_template(&template, field == "resume")
+                                .map_err(|e| bad(&path, e))?;
+                            if field == "resume" {
+                                agent.resume = template;
+                            } else {
+                                agent.resume_latest = template;
+                            }
+                        }
+                        _ => warnings.push(Warning::unknown_key(&path)),
+                    }
+                }
+            }
         }
         _ => unreachable!("key checked against TOP_LEVEL_KEYS"),
     }
@@ -596,8 +749,99 @@ mod tests {
         }
         assert!(theme.contains_key("border_style"));
         let glyphs = theme["glyphs"].as_table().unwrap();
-        for name in ["expanded", "collapsed", "active"] {
+        for name in [
+            "expanded",
+            "collapsed",
+            "active",
+            "spinner",
+            "waiting",
+            "idle",
+            "quiet",
+            "unseen",
+        ] {
             assert!(glyphs.contains_key(name), "theme.glyphs.{name} missing");
+        }
+    }
+
+    #[test]
+    fn notify_defaults_to_osc9_and_takes_three_values() {
+        assert_eq!(Config::default().notify, NotifyMode::Osc9);
+        for (text, mode) in [
+            ("osc9", NotifyMode::Osc9),
+            ("bell", NotifyMode::Bell),
+            ("none", NotifyMode::None),
+        ] {
+            let p = Config::parse(&format!("notify = \"{text}\"")).unwrap();
+            assert_eq!(p.config.notify, mode);
+        }
+        for text in ["notify = \"toast\"", "notify = true"] {
+            let err = Config::parse(text).unwrap_err();
+            assert!(err.to_string().contains("`notify`"), "{err}");
+        }
+    }
+
+    #[test]
+    fn resume_templates_and_the_switch_default_and_can_be_set() {
+        let c = Config::default();
+        assert!(c.resume_agents);
+        assert_eq!(c.agents.claude.resume, "claude --resume {session_id}");
+        assert_eq!(c.agents.codex.resume_latest, "codex resume --last");
+        let p = Config::parse(
+            "resume_agents = false\n[agents.claude]\nresume = \"cc -r {session_id}\"\nresume_latest = \"cc -c\"",
+        )
+        .unwrap();
+        assert!(!p.config.resume_agents);
+        assert_eq!(p.config.agents.claude.resume, "cc -r {session_id}");
+        assert_eq!(p.config.agents.claude.resume_latest, "cc -c");
+        assert_eq!(p.config.agents.codex, c.agents.codex);
+        for (text, key) in [
+            (
+                "[agents.claude]\nresume = \"claude 'x'\"",
+                "agents.claude.resume",
+            ),
+            (
+                "[agents.codex]\nresume = \"codex $HOME\"",
+                "agents.codex.resume",
+            ),
+            ("[agents.codex]\nresume = \"\"", "agents.codex.resume"),
+            (
+                "[agents.opencode]\nresume_latest = \"oc \\\\x\"",
+                "agents.opencode.resume_latest",
+            ),
+            (
+                "[agents.opencode]\nresume_latest = \"oc {session_id}\"",
+                "agents.opencode.resume_latest",
+            ),
+            ("[agents.claude]\nresume = 1", "agents.claude.resume"),
+            ("resume_agents = \"yes\"", "resume_agents"),
+        ] {
+            match Config::parse(text) {
+                Err(ConfigError::Value { key: k, .. }) => assert_eq!(k, key, "{text}"),
+                other => panic!("{text}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_agent_process_lists_default_and_can_be_set() {
+        let c = Config::default();
+        assert_eq!(c.agents.claude.process, ["claude"]);
+        assert_eq!(c.agents.codex.process, ["codex"]);
+        assert_eq!(c.agents.opencode.process, ["opencode"]);
+        let p = Config::parse(
+            "[agents.claude]\nprocess = [\"claude\", \"cc\"]\n[agents.vim]\nx = 1\n[agents.codex]\nrun = 1",
+        )
+        .unwrap();
+        assert_eq!(p.config.agents.claude.process, ["claude", "cc"]);
+        assert_eq!(p.config.agents.codex.process, ["codex"]);
+        assert_eq!(p.warnings.len(), 2, "{:?}", p.warnings);
+        for text in [
+            "agents = 1",
+            "[agents]\nclaude = 1",
+            "[agents.claude]\nprocess = \"x\"",
+            "[agents.claude]\nprocess = [1]",
+        ] {
+            assert!(Config::parse(text).is_err(), "{text}");
         }
     }
 
@@ -698,6 +942,7 @@ mod tests {
             ("close_project", "Q"),
             ("toggle_sidebar", "b"),
             ("focus_sidebar", "Tab"),
+            ("next_attention", "a"),
             ("help", "?"),
         ] {
             assert_eq!(c.keys[action], [spec(key)], "{action}");

@@ -1,12 +1,16 @@
 //! Saving the model to `state.json` and rebuilding it at start.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use deck_core::agents::{
+    AgentSource, AgentState, AgentStatus, RESUME_EXEC_TAIL, match_argv, resume_command,
+    valid_session_id,
+};
 use deck_core::model::{LaunchSpec, PanelId, ProjectId, SessionId};
 use deck_core::protocol::NoticeLevel;
 use deck_core::state::{StateFile, TerminalState};
@@ -129,14 +133,44 @@ impl Shared {
                     }));
                 }
             }
+            let mut model = saved.to_model(&display);
+            // A terminal that resumes its agent has it from the start: a save before the
+            // first detection tick must keep the kind and the session id.
+            let now = self.clock.now();
+            for terminal in model
+                .projects
+                .iter_mut()
+                .flat_map(|p| &mut p.panels)
+                .flat_map(|p| &mut p.terminals)
+            {
+                let resumed = saved
+                    .projects
+                    .iter()
+                    .flat_map(|p| &p.panels)
+                    .flat_map(|p| &p.terminals)
+                    .find(|t| t.id == terminal.id)
+                    .filter(|t| self.resume_plan(t, &session_env).is_some())
+                    .and_then(|t| t.agent.as_ref());
+                if let Some(resume) = resumed {
+                    terminal.agent = Some(AgentState {
+                        kind: resume.kind,
+                        status: AgentStatus::Quiet,
+                        source: AgentSource::Process,
+                        session_id: resume.session_id.clone(),
+                        first_prompt: None,
+                        since: now,
+                    });
+                }
+            }
             st.sessions.push(SessionRt {
-                model: saved.to_model(&display),
+                model,
                 env: session_env.clone(),
                 terminals: HashMap::new(),
                 viewport: None,
                 title_throttle: Throttle::new(TITLE_VIEW_INTERVAL),
                 last_attach: ticks.get(&saved.id).copied().unwrap_or(0),
                 startup: None,
+                unseen: HashSet::new(),
             });
         }
         launches
@@ -152,13 +186,62 @@ impl Shared {
         }
     }
 
+    /// The program and arguments a restored terminal is started with: the resume command
+    /// when it resumes its agent (see [`Shared::resume_plan`]), else what was saved. The
+    /// terminal's launch spec in the model stays what it was.
+    fn restored_command(&self, saved: &TerminalState, env: &Env) -> (Option<String>, Vec<String>) {
+        self.resume_plan(saved, env)
+            .unwrap_or_else(|| (saved.program.clone(), saved.args.clone()))
+    }
+
+    /// How a terminal that had an agent resumes it (`resume_agents`), `None` when it does
+    /// not: a shell terminal runs the resume command and then replaces `sh` with the shell,
+    /// an explicit agent command is replaced by the resume command. Only a validated
+    /// template and session id reach the command line.
+    fn resume_plan(
+        &self,
+        saved: &TerminalState,
+        env: &Env,
+    ) -> Option<(Option<String>, Vec<String>)> {
+        let config = self.config();
+        let resume = saved.agent.as_ref().filter(|_| config.resume_agents)?;
+        if let Some(id) = resume.session_id.as_deref()
+            && !valid_session_id(id)
+        {
+            tracing::warn!("the saved session id of terminal {} is not used", saved.id);
+        }
+        let Some(command) = resume_command(&config.agents, resume) else {
+            tracing::warn!("no valid resume command for terminal {}", saved.id);
+            return None;
+        };
+        match &saved.program {
+            None => {
+                let script = format!("{}{RESUME_EXEC_TAIL}", command.join(" "));
+                let mut args = vec!["-c".to_string(), script, shell_program(&config, env)];
+                args.extend(config.shell_args.iter().cloned());
+                Some((Some("/bin/sh".to_string()), args))
+            }
+            Some(program) => {
+                let argv: Vec<String> = std::iter::once(program.clone())
+                    .chain(saved.args.iter().cloned())
+                    .collect();
+                if match_argv(&argv, &config.agents) != Some(resume.kind) {
+                    return None;
+                }
+                let mut words = command.into_iter();
+                Some((words.next(), words.collect()))
+            }
+        }
+    }
+
     /// The process of a restored terminal, in `dir`, with the daemon's start environment
     /// plus the additions of its launch spec.
     fn restored_request(&self, launch: &Launch, dir: &std::path::Path) -> SpawnRequest {
         let env: Env = std::env::vars_os().collect();
+        let (program, args) = self.restored_command(&launch.saved, &env);
         let spec = LaunchSpec {
-            program: launch.saved.program.clone(),
-            args: launch.saved.args.clone(),
+            program,
+            args,
             cwd: dir.to_path_buf(),
             env: launch
                 .saved

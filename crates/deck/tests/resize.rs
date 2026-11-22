@@ -228,7 +228,7 @@ fn dragging_a_border_moves_it_with_the_pointer_and_the_program_sees_none_of_it()
     focus_of_three(&mut h, 1);
     // Terminal 1's program asks for the mouse and waits for one 9-byte click.
     h.send_keys(
-        "printf '\\033[?1000h\\033[?1002h\\033[?1006h'; stty raw -echo; printf 'REA%s\\r\\n' DY; \
+        "set +m; printf '\\033[?1000h\\033[?1002h\\033[?1006h'; stty raw -echo; printf 'REA%s\\r\\n' DY; \
          x=$(dd bs=1 count=9 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'); \
          stty sane; printf 'GOT:%s\\r\\n' \"$x\"; sleep 30\r",
     );

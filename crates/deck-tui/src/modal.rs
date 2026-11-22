@@ -286,6 +286,20 @@ impl App {
                 let close = plain && matches!(key.code, KeyCode::Esc | KeyCode::Char('q' | '?'));
                 if !close {
                     self.modal = Some(Modal::Help);
+                    let (room, total) = crate::draw::help_room(self);
+                    let max = total.saturating_sub(room);
+                    let page = room.max(1);
+                    let at = self.help_scroll;
+                    self.help_scroll = match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => at.saturating_sub(1),
+                        KeyCode::Down | KeyCode::Char('j') => at + 1,
+                        KeyCode::PageUp => at.saturating_sub(page),
+                        KeyCode::PageDown => at + page,
+                        KeyCode::Home => 0,
+                        KeyCode::End => max,
+                        _ => at,
+                    }
+                    .min(max);
                 }
                 Vec::new()
             }

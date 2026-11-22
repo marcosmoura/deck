@@ -73,4 +73,13 @@ Replace `<repo>` with the path of your clone. For an agent without skill support
 deck guide
 ```
 
+To see what Claude Code, Codex and OpenCode are doing in the sidebar (working, waiting for you, done), install their hooks once:
+
+```sh
+deck hooks install claude codex opencode
+deck hooks status
+```
+
+This edits `~/.claude/settings.json` and `~/.codex/hooks.json` (or `$CLAUDE_CONFIG_DIR` and `$CODEX_HOME`) after keeping a backup, and writes the plugin `~/.config/opencode/plugins/deck.js` (or under `$OPENCODE_CONFIG_DIR`). `deck hooks uninstall` removes only deck's entries and that plugin. See [agents](docs/features/agents.md#hooks).
+
 The socket is open to every process of your user, so an agent can type into any of your terminals: it has the power of your shell. Agent sandboxes (Claude Code, Codex) may block the Unix socket. The agent then sees `no deck daemon running` or a permission error, and the sandbox has to allow the socket path (`$DECK_SOCKET` inside deck).

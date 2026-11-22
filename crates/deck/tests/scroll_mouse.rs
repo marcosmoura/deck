@@ -190,7 +190,7 @@ fn the_wheel_moves_through_a_file_in_less() {
 /// line does not contain it) once it is waiting for input.
 fn start_reader(h: &mut Harness, setup: &str, count: usize) {
     h.send_keys(&format!(
-        "{setup}; stty raw -echo; printf 'REA%s\\r\\n' DY; \
+        "set +m; {setup}; stty raw -echo; printf 'REA%s\\r\\n' DY; \
          x=$(dd bs=1 count={count} 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'); \
          stty sane; printf 'GOT:%s\\r\\n' \"$x\"; sleep 30\r"
     ));

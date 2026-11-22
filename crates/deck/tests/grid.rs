@@ -301,7 +301,7 @@ fn the_wheel_scrolls_an_unfocused_terminal_without_moving_focus() {
 /// them in hex after `GOT:`.
 fn start_reader(h: &mut Harness, setup: &str, count: usize) {
     h.send_keys(&format!(
-        "{setup}; stty raw -echo; printf 'REA%s\\r\\n' DY; \
+        "set +m; {setup}; stty raw -echo; printf 'REA%s\\r\\n' DY; \
          x=$(dd bs=1 count={count} 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'); \
          stty sane; printf 'GOT:%s\\r\\n' \"$x\"; sleep 30\r"
     ));

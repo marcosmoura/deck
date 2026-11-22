@@ -2,6 +2,7 @@
 //! parsing and paths. No I/O beyond `std::path`, no threads, no async.
 
 pub mod action;
+pub mod agents;
 pub mod base64;
 pub mod config;
 pub mod keys;

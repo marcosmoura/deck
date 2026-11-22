@@ -195,6 +195,10 @@ fn a_kept_terminal_stays_with_its_exit_code_and_closes_without_asking() {
     wait_until("the terminal to be gone", TIMEOUT, || {
         terminal(h.home(), id).is_none()
     });
+    // The client must have the new view before the next key, or it still acts on the exited one.
+    wait_until("the exited terminal to leave the screen", TIMEOUT, || {
+        !h.screen_text().contains("exited 3")
+    });
     assert!(!h.screen_text().contains("Close terminal"));
     prefixed(&mut h, "x");
     h.wait_for_text("Close terminal", TIMEOUT);

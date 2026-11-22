@@ -12,5 +12,6 @@ workspace = true
 serde = { workspace = true, features = ["derive"] }
 postcard = { workspace = true, features = ["use-std"] }
 toml = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 unicode-width = { workspace = true }

@@ -121,7 +121,20 @@ pub struct Glyphs {
     pub expanded: String,
     pub collapsed: String,
     pub active: String,
+    /// The frames of the spinner of a working agent, one cell wide each.
+    pub spinner: Vec<String>,
+    /// An agent that needs the user.
+    pub waiting: String,
+    /// An agent that finished its turn.
+    pub idle: String,
+    /// An agent found by its process that is not printing.
+    pub quiet: String,
+    /// Marks a panel whose agent needed the user or finished while nobody looked.
+    pub unseen: String,
 }
+
+/// The default spinner: braille frames.
+const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 impl Default for Glyphs {
     fn default() -> Self {
@@ -129,8 +142,39 @@ impl Default for Glyphs {
             expanded: "▾".into(),
             collapsed: "▸".into(),
             active: "▌".into(),
+            spinner: SPINNER.iter().map(ToString::to_string).collect(),
+            waiting: "!".into(),
+            idle: "●".into(),
+            quiet: "○".into(),
+            unseen: "•".into(),
         }
     }
+}
+
+/// A glyph: a string one cell wide.
+fn one_cell(path: &str, value: &toml::Value) -> Result<String, ThemeError> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| bad(path, "expected a string"))?;
+    let cells = text.width();
+    if cells != 1 {
+        return Err(bad(
+            path,
+            format!("a glyph must be one cell wide, `{text}` is {cells}"),
+        ));
+    }
+    Ok(text.to_string())
+}
+
+/// The spinner: a non-empty array of glyphs.
+fn spinner_frames(path: &str, value: &toml::Value) -> Result<Vec<String>, ThemeError> {
+    let items = value
+        .as_array()
+        .ok_or_else(|| bad(path, "expected an array of glyphs"))?;
+    if items.is_empty() {
+        return Err(bad(path, "the spinner needs at least one frame"));
+    }
+    items.iter().map(|v| one_cell(path, v)).collect()
 }
 
 /// A `[theme]` value that cannot be used; `key` is its full name, e.g. `theme.accent`.
@@ -292,26 +336,24 @@ impl Theme {
                         .ok_or_else(|| bad(&path, "expected a table"))?;
                     for (name, value) in table {
                         let path = format!("{path}.{name}");
+                        if name == "spinner" {
+                            glyphs.spinner = spinner_frames(&path, value)?;
+                            continue;
+                        }
                         let slot = match name.as_str() {
                             "expanded" => &mut glyphs.expanded,
                             "collapsed" => &mut glyphs.collapsed,
                             "active" => &mut glyphs.active,
+                            "waiting" => &mut glyphs.waiting,
+                            "idle" => &mut glyphs.idle,
+                            "quiet" => &mut glyphs.quiet,
+                            "unseen" => &mut glyphs.unseen,
                             _ => {
                                 warnings.push(Warning::unknown_key(&path));
                                 continue;
                             }
                         };
-                        let text = value
-                            .as_str()
-                            .ok_or_else(|| bad(&path, "expected a string"))?;
-                        let cells = text.width();
-                        if cells != 1 {
-                            return Err(bad(
-                                &path,
-                                format!("a glyph must be one cell wide, `{text}` is {cells}"),
-                            ));
-                        }
-                        *slot = text.to_string();
+                        *slot = one_cell(&path, value)?;
                     }
                 }
                 _ => warnings.push(Warning::unknown_key(&path)),

@@ -86,9 +86,74 @@ fn expected(c: &Client, viewport: (u16, u16)) -> Vec<(u16, u16)> {
 async fn assert_sizes(c: &mut Client, viewport: (u16, u16), tag: &str) {
     let want = expected(c, viewport);
     for (i, id) in ids(c).into_iter().enumerate() {
-        let got = stty(c, id, &format!("{tag}{i}")).await;
+        // The PTYs are resized one after the other, so ask again until this one has been.
+        let mut attempt = 0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let got = loop {
+            let got = stty(c, id, &format!("{tag}{i}r{attempt}")).await;
+            attempt += 1;
+            if got == want[i] || std::time::Instant::now() > deadline {
+                break got;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        };
         assert_eq!(got, want[i], "terminal {} of {}", i + 1, want.len());
     }
+}
+
+/// A program that changes its own window size (`stty cols 50`) is put back to the layout's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pty_changed_behind_the_daemon_returns_to_the_layout_size_at_the_next_pass() {
+    let daemon = TestDaemon::start().await;
+    let mut c = attach(&daemon, 100, 25).await;
+    // Past the rechecks that follow the sizing at attach.
+    tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
+    let id = ids(&c)[0];
+    c.send(&ClientMsg::Input {
+        terminal: id,
+        bytes: b"stty cols 50\n".to_vec(),
+    })
+    .await;
+    // The emulator still says 100 columns, the PTY now has 50.
+    let mut got = (0, 0);
+    for n in 0..100 {
+        got = stty(&mut c, id, &format!("S{n}")).await;
+        if got.0 == 50 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(got.0, 50, "the program resized its PTY");
+    // A pass that changes no size (a rename) still compares the real PTY size.
+    let p = panel(&c).id;
+    c.action(Action::RenamePanel {
+        panel: p,
+        name: "renamed".into(),
+    })
+    .await
+    .unwrap();
+    assert_sizes(&mut c, (100, 24), "T").await;
+    daemon.stop().await.unwrap();
+}
+
+/// The same, with the change landing after a resize: the rechecks within a second undo it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pty_changed_just_after_a_resize_is_put_back_by_the_rechecks() {
+    let daemon = TestDaemon::start().await;
+    let mut c = attach(&daemon, 100, 25).await;
+    let id = ids(&c)[0];
+    c.send(&ClientMsg::Input {
+        terminal: id,
+        bytes: b"sleep 0.4; stty cols 50\n".to_vec(),
+    })
+    .await;
+    c.send(&ClientMsg::Viewport { cols: 90, rows: 24 }).await;
+    c.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((90, 24)))
+        .await;
+    // The change lands at 400 ms; the recheck at 1 s sets the layout size again.
+    tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
+    assert_sizes(&mut c, (90, 24), "U").await;
+    daemon.stop().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

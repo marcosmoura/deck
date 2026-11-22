@@ -887,3 +887,63 @@ fn toggling_a_sidebar_that_is_too_narrow_to_show_says_so() {
         "sidebar hidden (window too narrow)"
     );
 }
+
+#[test]
+fn a_help_taller_than_the_window_scrolls_and_says_how_much_is_hidden() {
+    let screen = |a: &App| {
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| draw(f, a)).unwrap();
+        let buf = t.backend().buffer().clone();
+        (0..24u16)
+            .map(|y| (0..80u16).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+    };
+    let mut a = app_at(&Config::default(), (80, 24), mockup());
+    run(&mut a, &[prefix(), ch('?')]);
+    let rows = screen(&a);
+    assert!(!rows.iter().any(|r| r.contains("This help")), "{rows:#?}");
+    let hidden = rows
+        .iter()
+        .find_map(|r| r.split("↓ ").nth(1))
+        .and_then(|t| t.split(' ').next()?.parse::<usize>().ok())
+        .expect("a hidden count on the bottom border");
+    assert!(
+        rows.iter()
+            .any(|r| r.contains("↓ ") && r.contains("esc close"))
+    );
+    assert!(!rows.iter().any(|r| r.contains('↑')));
+
+    // Down scrolls one line at a time; End shows the last row.
+    run(&mut a, &[key(ct::KeyCode::Down)]);
+    assert!(screen(&a).iter().any(|r| r.contains("↑ 1 more")));
+    run(&mut a, &[key(ct::KeyCode::End)]);
+    let rows = screen(&a);
+    assert!(rows.iter().any(|r| r.contains("This help")), "{rows:#?}");
+    assert!(rows.iter().any(|r| r.contains(&format!("↑ {hidden} more"))));
+    assert!(!rows.iter().any(|r| r.contains('↓')));
+    // It stops at the end, and Home, PageUp and k go back.
+    run(&mut a, &[ch('j'), key(ct::KeyCode::PageDown)]);
+    assert!(screen(&a).iter().any(|r| r.contains("This help")));
+    run(&mut a, &[ch('k')]);
+    let rows = screen(&a);
+    assert!(rows.iter().any(|r| r.contains("↓ 1 more")), "{rows:#?}");
+    assert_eq!(rows.iter().any(|r| r.contains('↑')), hidden > 1);
+    run(&mut a, &[key(ct::KeyCode::Home)]);
+    assert!(!screen(&a).iter().any(|r| r.contains('↑')));
+    run(
+        &mut a,
+        &[key(ct::KeyCode::PageDown), key(ct::KeyCode::PageUp)],
+    );
+    assert!(!screen(&a).iter().any(|r| r.contains('↑')));
+    // Opening it again starts at the top.
+    run(
+        &mut a,
+        &[
+            key(ct::KeyCode::End),
+            key(ct::KeyCode::Esc),
+            prefix(),
+            ch('?'),
+        ],
+    );
+    assert!(!screen(&a).iter().any(|r| r.contains('↑')));
+}

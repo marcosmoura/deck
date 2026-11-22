@@ -23,7 +23,6 @@ use deck_core::protocol::{
 use tokio::runtime::Handle;
 use tokio::sync::{Notify, watch};
 
-use crate::CwdQuery;
 use crate::clock::{Clock, Fire, Poke, Throttle};
 use crate::config_file::Notice;
 use crate::emu::{EmuEvent, clamp_size, default_palette};
@@ -32,7 +31,9 @@ use crate::lock;
 use crate::queue::Queue;
 use crate::startup::DaemonPaths;
 use crate::terminal::{self, SpawnRequest, TermHandle};
+use crate::{CwdQuery, ForegroundQuery};
 
+mod agents;
 mod control;
 mod cwd;
 mod restore;
@@ -105,6 +106,7 @@ fn new_terminal(
         cwd: None,
         exit_status: None,
         keep,
+        agent: None,
     }
 }
 
@@ -133,6 +135,8 @@ struct SessionRt {
     /// The terminal the session was created with: if it fails at once, the session ends
     /// with that error instead of staying empty.
     startup: Option<TerminalId>,
+    /// Panels whose agent needed the user or finished while nobody looked at them.
+    unseen: HashSet<PanelId>,
 }
 
 impl SessionRt {
@@ -205,6 +209,8 @@ struct Client {
     colors: Option<OuterColors>,
     /// Higher is more recent.
     active: u64,
+    /// The outer terminal has focus; a client that never reported counts as focused.
+    focused: bool,
 }
 
 #[derive(Default)]
@@ -284,6 +290,9 @@ impl State {
             .view(Some(sess.viewport.unwrap_or(DEFAULT_VIEWPORT)));
         view.attached_clients =
             u32::try_from(self.clients_of(sess.model.id).count()).unwrap_or(u32::MAX);
+        for panel in view.projects.iter_mut().flat_map(|p| p.panels.iter_mut()) {
+            panel.unseen = sess.unseen.contains(&panel.id);
+        }
         for t in view
             .projects
             .iter_mut()
@@ -311,7 +320,35 @@ impl State {
         view
     }
 
-    fn push_view(&self, sid: SessionId) {
+    /// Whether a client of the session has its outer terminal focused.
+    fn session_focused(&self, sid: SessionId) -> bool {
+        self.clients_of(sid).any(|(_, c)| c.focused)
+    }
+
+    /// Drops the unseen marks of panels that are gone, and the mark of the active panel
+    /// while a focused client shows it.
+    fn sync_unseen(&mut self, sid: SessionId) {
+        let focused = self.session_focused(sid);
+        let Some(sess) = self.session_mut(sid) else {
+            return;
+        };
+        if sess.unseen.is_empty() {
+            return;
+        }
+        let panels: HashSet<PanelId> = sess
+            .model
+            .projects
+            .iter()
+            .flat_map(|p| p.panels.iter().map(|panel| panel.id))
+            .collect();
+        sess.unseen.retain(|p| panels.contains(p));
+        if focused && let Some(active) = sess.model.active_panel() {
+            sess.unseen.remove(&active);
+        }
+    }
+
+    fn push_view(&mut self, sid: SessionId) {
+        self.sync_unseen(sid);
         let Some(sess) = self.session(sid) else {
             return;
         };
@@ -434,6 +471,13 @@ pub struct Shared {
     /// The machine's host name, for OSC 7.
     pub(crate) hostname: String,
     cwd_query: CwdQuery,
+    foreground_query: ForegroundQuery,
+}
+
+/// What the daemon asks the operating system about its terminals' processes.
+pub struct Probes {
+    pub cwd: CwdQuery,
+    pub foreground: ForegroundQuery,
 }
 
 impl std::fmt::Debug for Shared {
@@ -460,7 +504,7 @@ impl Shared {
         notices: Vec<Notice>,
         clock: Arc<dyn Clock>,
         version: u32,
-        cwd_query: CwdQuery,
+        probes: Probes,
         waiters: Arc<AtomicUsize>,
     ) -> (Arc<Self>, watch::Receiver<bool>) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -479,7 +523,8 @@ impl Shared {
             attaching: tokio::sync::Mutex::new(()),
             save_lock: Mutex::new(()),
             hostname: crate::platform::hostname(),
-            cwd_query,
+            cwd_query: probes.cwd,
+            foreground_query: probes.foreground,
         });
         for notice in notices {
             shared.notify(notice.level, notice.text);
@@ -562,6 +607,7 @@ impl Shared {
                 viewport: None,
                 colors,
                 active,
+                focused: true,
             },
         );
         Some((id, queue))
@@ -635,6 +681,7 @@ impl Shared {
         for (level, text) in std::mem::take(&mut st.notices) {
             queue.push_msg(ServerMsg::Notice { level, text });
         }
+        st.sync_unseen(sid);
         if let Some(sess) = st.session(sid) {
             queue.push_view(st.view_of(sess));
         }
@@ -794,6 +841,7 @@ impl Shared {
             title_throttle: Throttle::new(TITLE_VIEW_INTERVAL),
             last_attach: 0,
             startup: Some(tid),
+            unseen: HashSet::new(),
         });
         self.mark_dirty(st);
         sid
@@ -847,6 +895,10 @@ impl Shared {
             c.active = tick;
         }
         self.follow_viewport(&mut st, cid);
+        // Focus reports are not typing.
+        if !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O") {
+            self.agent_answered(&mut st, &handle);
+        }
         // Typing returns the terminal to the live screen first; focus reports do not.
         let id = handle.id;
         let active = st.session(sid).is_some_and(|s| s.is_active(id));
@@ -891,6 +943,22 @@ impl Shared {
         client.viewport = Some((cols, rows));
         client.active = tick;
         self.follow_viewport(&mut st, cid);
+    }
+
+    /// The outer terminal of a client gained or lost focus.
+    pub fn focus(&self, cid: ClientId, focused: bool) {
+        let mut st = self.st();
+        let Some(client) = st.clients.get_mut(&cid) else {
+            return;
+        };
+        if client.focused == focused {
+            return;
+        }
+        client.focused = focused;
+        // Focus gained: the active panel is seen now.
+        if let Some(sid) = client.session {
+            st.push_view(sid);
+        }
     }
 
     /// A viewport change that came from a config reload: the client's size is recorded, and
@@ -956,8 +1024,10 @@ impl Shared {
             let Some(handle) = sess.terminals.get(&term.id) else {
                 continue;
             };
-            if handle.with_emu(|e| e.size()) != Some(size) {
+            // The PTY too: its size can differ from the emulator's.
+            if handle.with_emu(|e| e.size()) != Some(size) || handle.pty_size() != Some(size) {
                 handle.resize_pty(size.0, size.1);
+                handle.recheck_pty(&self.handle);
                 changed.push(term.id);
             }
         }
@@ -1200,6 +1270,8 @@ impl Shared {
         let before = sess.model.active_panel();
         if let Some(t) = terminal_model(&mut sess.model, h.id) {
             t.exit_status = Some(status);
+            // The agent left with its program.
+            t.agent = None;
         }
         self.settle(st, sid, before);
     }

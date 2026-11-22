@@ -19,6 +19,17 @@ scrollback_lines = 10000
 sidebar = true
 sidebar_width = 28
 
+# How deck tells you, through the outer terminal, that an agent needs you or finished while
+# you were not looking: "osc9" (a desktop notification in iTerm2, Ghostty and WezTerm; other
+# terminals ignore it), "bell", or "none". Inside tmux or over ssh, OSC 9 reaches the desktop
+# only if they pass it through.
+notify = "osc9"
+
+# After a daemon restart (deck kill-server, a reboot), reopen each terminal's coding agent on
+# its conversation: a shell terminal runs the agent's resume command first and then your
+# shell; a terminal started with an explicit agent command runs the resume command instead.
+resume_agents = true
+
 # Key bindings, pressed after the prefix. An action takes one key or a list of keys, and
 # replaces that action's default keys; [] unbinds the action. A key you set for an action
 # is taken from any other action that only has it by default, with a warning; one key set
@@ -58,6 +69,7 @@ rename_project = "." # Rename the project
 close_project = "Q" # Close the project
 toggle_sidebar = "b" # Show or hide the sidebar
 focus_sidebar = "Tab" # Move focus into the sidebar
+next_attention = "a" # Jump to the next agent that needs you
 help = "?" # This help
 
 # Colours and glyphs of deck's own UI; terminal contents keep their programs' colours.
@@ -86,6 +98,36 @@ border_style = "rounded"
 
 # One cell wide each.
 [theme.glyphs]
-expanded = "▾"
-collapsed = "▸"
-active = "▌"
+expanded = "▾" # a project that shows its panels
+collapsed = "▸" # a project that hides its panels
+active = "▌" # the active panel's marker
+spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] # a working agent: frames, 100 ms each
+waiting = "!" # an agent that needs you (warning colour, bold)
+idle = "●" # an agent that finished its turn (ok colour)
+quiet = "○" # an agent found by its process that is not printing (muted)
+unseen = "•" # a panel whose agent needed you or finished while you were not looking (accent)
+
+# How deck recognises each coding agent in a terminal: the program names (the command as
+# typed, or the script that node, bun, deno, sh, bash, zsh or dash runs, without extension)
+# whose process in the foreground of the terminal means that agent.
+#
+# `resume` reopens a conversation and `resume_latest` the most recent one, which is used when
+# the session id is unknown or not a plain id. A template is a program and arguments split on
+# whitespace; `{session_id}` is allowed only as a whole argument of `resume`. Quotes,
+# backslashes, `$`, backticks and other shell syntax are errors: the command is joined with
+# spaces and run by `sh -c`. With several agents of one kind in one directory and no session
+# ids, each one runs `resume_latest`.
+[agents.claude]
+process = ["claude"] # Claude Code
+resume = "claude --resume {session_id}"
+resume_latest = "claude --continue"
+
+[agents.codex]
+process = ["codex"] # Codex
+resume = "codex resume {session_id}"
+resume_latest = "codex resume --last"
+
+[agents.opencode]
+process = ["opencode"] # OpenCode
+resume = "opencode --session {session_id}"
+resume_latest = "opencode --continue"

@@ -199,6 +199,7 @@ pub(crate) mod tests {
             name_source: NameSource::Default,
             focused_terminal: Some(TerminalId(id * 10 + 1)),
             ratios: deck_core::layout::Ratios::default_for(usize::try_from(terminals).unwrap_or(1)),
+            unseen: false,
             terminals: (1..=terminals)
                 .map(|n| TerminalView {
                     id: TerminalId(id * 10 + n),
@@ -208,6 +209,7 @@ pub(crate) mod tests {
                     exit_status: None,
                     pid: None,
                     keep: false,
+                    agent: None,
                 })
                 .collect(),
         }
@@ -276,6 +278,7 @@ pub(crate) mod tests {
                     name_source: NameSource::Default,
                     focused_terminal: Some(TerminalId(4)),
                     ratios: deck_core::layout::Ratios::default_for(1),
+                    unseen: false,
                     terminals: vec![TerminalView {
                         id: TerminalId(4),
                         program: "sh".into(),
@@ -284,6 +287,7 @@ pub(crate) mod tests {
                         exit_status: None,
                         pid: None,
                         keep: false,
+                        agent: None,
                     }],
                 }],
             }],

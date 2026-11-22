@@ -36,6 +36,10 @@ Save the file and, within about a second, the colours, border style, glyphs, key
 
 `[keys]` covers the prefix bindings only. A key you set for an action replaces the same key on another action's default keys, with a warning. A key you set for two actions is an error naming both actions and the key. `detach = []` unbinds an action. See [keys](keys.md).
 
+`notify` (`"osc9"`, the default, `"bell"` or `"none"`) is how the client tells you through the outer terminal that an agent needs you or finished while you were not looking; see [agents](agents.md#attention). `[theme.glyphs] unseen` is the marker of such a panel.
+
+`[agents.<kind>] process` lists the program names deck takes for an agent (`claude`, `codex`, `opencode`); `[agents.<kind>] resume` and `resume_latest` are the commands that reopen its conversation after a restart, and `resume_agents` (default `true`) turns that off; see [agents](agents.md#resume).
+
 ## The reference
 
 `crates/deck-core/src/config/default.toml` is the reference and is embedded in the binary. A test keeps it equal to the defaults and requires every key and action to appear in it, so each new key is documented there.

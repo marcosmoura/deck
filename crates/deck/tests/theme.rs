@@ -72,6 +72,8 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     assert_ne!(h.cell(8, 60).bg, Color::Indexed(236));
 
     prefixed(&mut h, "?");
+    // At 24 rows the last row is scrolled out of view: End brings it.
+    h.send_bytes(b"\x1b[F");
     h.wait_for_text("This help", TIMEOUT);
     let (row, col) = find_char(&h, '┌');
     assert_eq!(h.cell(row, col).fg, ACCENT);
@@ -112,6 +114,8 @@ fn with_truecolor_programs_keep_their_rgb_colours() {
 fn a_double_border_style_reaches_the_help_overlay_and_the_session_picker() {
     let mut h = themed(r#"{ border_style = "double" }"#, &[]);
     prefixed(&mut h, "?");
+    // At 24 rows the last row is scrolled out of view: End brings it.
+    h.send_bytes(b"\x1b[F");
     h.wait_for_text("This help", TIMEOUT);
     // The last text row can be on screen before the bottom border.
     wait_until("the help box's bottom border", TIMEOUT, || {

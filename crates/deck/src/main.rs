@@ -1,9 +1,11 @@
 //! The `deck` binary: CLI, daemon start-up, control commands and wiring.
 
+mod agent_event;
 mod config_cmd;
 mod control;
 mod daemon_cmd;
 mod guide;
+mod hooks;
 mod platform;
 mod terminal_io;
 mod tree;
@@ -93,6 +95,14 @@ enum Command {
         #[command(subcommand)]
         command: config_cmd::ConfigCommand,
     },
+    /// Installs, removes and checks the hooks that tell deck what Claude Code and Codex do.
+    Hooks {
+        #[command(subcommand)]
+        command: hooks::HooksCommand,
+    },
+    /// Reports an agent's hook event from inside deck; used by the hooks, never prints.
+    #[command(name = "agent-event", hide = true)]
+    AgentEvent(agent_event::AgentEventArgs),
     /// Starts the daemon if needed, attaches and detaches again (for tests).
     #[command(name = "_probe", hide = true)]
     Probe {
@@ -105,6 +115,18 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // A hook must never fail: any parse error of `agent-event` is silent and exits 0.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|a| a == "agent-event")
+    {
+        return match <agent_event::AgentEventArgs as Parser>::try_parse_from(
+            std::env::args_os().skip(1),
+        ) {
+            Ok(args) => agent_event::run(&args),
+            Err(_) => ExitCode::SUCCESS,
+        };
+    }
     let cli = Cli::parse();
     let result = match cli.command {
         Some(Command::Daemon) => daemon_cmd::run(),
@@ -131,6 +153,8 @@ fn main() -> ExitCode {
         Some(Command::Guide) => Ok(guide::run()),
         Some(Command::KillServer { forget }) => control::kill_server(forget),
         Some(Command::Config { command }) => config_cmd::run(command),
+        Some(Command::Hooks { command }) => hooks::run(command),
+        Some(Command::AgentEvent(args)) => Ok(agent_event::run(&args)),
         Some(Command::Probe { session }) => control::probe(session),
     };
     result.unwrap_or_else(|e| {

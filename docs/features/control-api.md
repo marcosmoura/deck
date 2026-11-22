@@ -93,7 +93,8 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
                   "pid": 4242,
                   "focused": true,
                   "exited": null,
-                  "keep": false
+                  "keep": false,
+                  "agent": null
                 }
               ]
             }
@@ -106,6 +107,10 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
 ```
 
 `pid` is null for a terminal that has exited; `exited` is the exit code (a death by signal `n` is `128 + n`) or null. `cwd` is the directory the program reported (OSC 7), else the one the daemon finds by polling the process every 5 s, else the directory it was launched in.
+
+## Agent events
+
+`deck agent-event --agent <claude|codex|opencode> [--event <name>]` is the command the agents' hooks run to report an event (payload on stdin) for `DECK_TERMINAL_ID`. It is hidden from `deck --help`, prints nothing, exits 0 whatever happens and does nothing outside deck or when no daemon runs. See [agents](agents.md#hooks), which also covers `deck hooks`.
 
 ## Kept terminals
 

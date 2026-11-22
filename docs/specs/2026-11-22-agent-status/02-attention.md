@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 02 — Attention, notifications and jump
@@ -53,7 +53,7 @@ When an agent the user is not looking at needs them or finishes, its panel is ma
 - `deck-core`: protocol round trips, config and binding defaults.
 - `crates/deck-daemon/tests/`: unseen rules, focus handling, one alert per transition to the right client.
 - `deck-tui`: unseen rows, collapsed badges, status-bar count, notification encoding, focus re-report on attach, jump order.
-- `crates/deck/tests/attention.rs`: the end-to-end criteria.
+- `crates/deck/tests/agents.rs` (end-to-end criteria, with captures) and `crates/deck-daemon/tests/attention.rs`.
 
 ## Notes
 

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::AgentState;
 use crate::layout::Ratios;
 
 macro_rules! id_type {
@@ -107,6 +108,8 @@ pub struct Terminal {
     pub exit_status: Option<i32>,
     /// Stays after its process exits (`deck new-terminal --keep`).
     pub keep: bool,
+    /// The coding agent running in the terminal, when there is one.
+    pub agent: Option<AgentState>,
 }
 
 /// A serializable snapshot of one session for clients. It carries no launch specs or
@@ -144,6 +147,9 @@ pub struct PanelView {
     pub terminals: Vec<TerminalView>,
     pub focused_terminal: Option<TerminalId>,
     pub ratios: Ratios,
+    /// An agent in the panel needed the user or finished while nobody looked at it (filled
+    /// by the daemon).
+    pub unseen: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +165,7 @@ pub struct TerminalView {
     /// The process id while it runs (filled by the daemon).
     pub pid: Option<u32>,
     pub keep: bool,
+    pub agent: Option<AgentState>,
 }
 
 impl Terminal {
@@ -171,6 +178,7 @@ impl Terminal {
             exit_status: self.exit_status,
             pid: None,
             keep: self.keep,
+            agent: self.agent.clone(),
         }
     }
 }
@@ -184,6 +192,7 @@ impl Panel {
             terminals: self.terminals.iter().map(Terminal::view).collect(),
             focused_terminal: self.focused_terminal,
             ratios: self.ratios.clone(),
+            unseen: false,
         }
     }
 
@@ -396,6 +405,7 @@ mod tests {
                         cwd: None,
                         exit_status: None,
                         keep: false,
+                        agent: None,
                     }],
                 }],
             }],
@@ -538,6 +548,7 @@ mod tests {
             cwd: None,
             exit_status: None,
             keep: false,
+            agent: None,
         }
     }
 

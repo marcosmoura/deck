@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::AgentResume;
 use crate::layout::Ratios;
 use crate::model::{
     LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, Terminal,
@@ -108,6 +109,9 @@ pub struct TerminalState {
     /// restored.
     #[serde(default)]
     pub exited: Option<i32>,
+    /// The agent that was in the foreground, to resume after a restart.
+    #[serde(default)]
+    pub agent: Option<AgentResume>,
 }
 
 fn is_deck_var(key: &[u8]) -> bool {
@@ -135,6 +139,10 @@ impl TerminalState {
             cwd: t.cwd.clone().or_else(|| Some(t.launch.cwd.clone())),
             keep: t.keep,
             exited: t.exit_status.filter(|_| t.keep),
+            agent: t.agent.as_ref().map(|a| AgentResume {
+                kind: a.kind,
+                session_id: a.session_id.clone(),
+            }),
         }
     }
 
@@ -161,6 +169,7 @@ impl TerminalState {
             cwd: None,
             exit_status: None,
             keep: self.keep,
+            agent: None,
         }
     }
 
@@ -414,6 +423,7 @@ mod tests {
             cwd: None,
             exit_status: None,
             keep: false,
+            agent: None,
         }
     }
 
@@ -632,5 +642,32 @@ mod tests {
         assert_eq!(panels[0].focused_terminal, Some(TerminalId(6)));
         assert_eq!(panels[1].terminals.len(), 1);
         assert!(panels[1].terminals[0].keep);
+    }
+
+    #[test]
+    fn the_agent_is_saved_and_old_files_without_it_load() {
+        use crate::agents::{AgentKind, AgentSource, AgentState, AgentStatus};
+        let mut t = terminal(1, None);
+        assert_eq!(TerminalState::from_model(&t).agent, None);
+        t.agent = Some(AgentState {
+            kind: AgentKind::Claude,
+            status: AgentStatus::Idle,
+            source: AgentSource::Hooks,
+            session_id: Some("abc".into()),
+            first_prompt: Some("hi".into()),
+            since: std::time::Duration::ZERO,
+        });
+        let saved = TerminalState::from_model(&t);
+        let resume = AgentResume {
+            kind: AgentKind::Claude,
+            session_id: Some("abc".into()),
+        };
+        assert_eq!(saved.agent, Some(resume));
+        let text = serde_json::to_string(&saved).unwrap();
+        assert_eq!(serde_json::from_str::<TerminalState>(&text).unwrap(), saved);
+
+        let old = r#"{"id":1,"program":null,"args":[],"env":[],"cwd":null}"#;
+        let parsed: TerminalState = serde_json::from_str(old).unwrap();
+        assert_eq!(parsed.agent, None);
     }
 }

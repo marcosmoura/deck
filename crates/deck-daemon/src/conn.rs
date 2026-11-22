@@ -193,6 +193,7 @@ async fn dispatch(
         Ok(ClientMsg::ReloadViewport { cols, rows }) => shared.reload_viewport(cid, cols, rows),
         Ok(ClientMsg::Input { terminal, bytes }) => shared.input(cid, terminal, bytes),
         Ok(ClientMsg::Scroll { terminal, to }) => shared.scroll(cid, terminal, to),
+        Ok(ClientMsg::Focus(focused)) => shared.focus(cid, focused),
         Ok(ClientMsg::Detach) => return false,
         Ok(ClientMsg::Request(Request::ListSessions)) => {
             queue.push_msg(ServerMsg::Response(Response::Sessions(
@@ -253,6 +254,18 @@ async fn dispatch(
                 let response = shared.wait(terminal, until, timeout_ms).await;
                 queue.push_msg(ServerMsg::Response(response));
             });
+        }
+        Ok(ClientMsg::Request(Request::AgentEvent {
+            terminal,
+            kind,
+            status,
+            session_id,
+            prompt,
+            raw,
+        })) => {
+            queue.push_msg(ServerMsg::Response(
+                shared.agent_event(terminal, kind, status, session_id, prompt, raw),
+            ));
         }
         Ok(ClientMsg::Action(action)) => {
             let result = shared.action(cid, action).await;

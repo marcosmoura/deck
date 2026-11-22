@@ -12,6 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
+use crate::agent;
 use crate::app::{App, too_small};
 pub(crate) use crate::convert::{color, downsample, style};
 use crate::grid::Grid;
@@ -145,7 +146,8 @@ fn draw_empty(buf: &mut Buffer, panel: Rect, app: &App, theme: &Theme) {
 }
 
 /// The help overlay: every binding, grouped, in a rounded box in the middle.
-fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+/// The lines of the help overlay for a window area `room` rows tall inside the border.
+pub(crate) fn help_lines(app: &App, theme: &Theme, room: usize) -> Vec<(String, Style)> {
     let rows = app.bindings.help_rows();
     let key_w = rows.iter().map(|r| width(&r.keys)).max().unwrap_or(0);
     let mut lines: Vec<(String, Style)> = Vec::new();
@@ -153,7 +155,6 @@ fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         .fg(color(theme.accent))
         .add_modifier(Modifier::BOLD);
     // The group headings go when the window is too short for them and every binding.
-    let room = usize::from(area.height.saturating_sub(2));
     let headings = rows.len() + HelpGroup::ALL.len() <= room;
     for group in HelpGroup::ALL {
         let mut in_group = rows.iter().filter(|r| r.group == group).peekable();
@@ -168,6 +169,18 @@ fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             lines.push((format!("  {}{pad}  {}", r.keys, r.text), Style::new()));
         }
     }
+    lines
+}
+
+/// Rows of the help list that fit in the overlay, and the lines of its content.
+pub(crate) fn help_room(app: &App) -> (usize, usize) {
+    let room = usize::from(app.size.1.saturating_sub(1)).saturating_sub(2);
+    (room, help_lines(app, &app.theme, room).len())
+}
+
+fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+    let room = usize::from(area.height.saturating_sub(2));
+    let lines = help_lines(app, theme, room);
     let inner_w = lines.iter().map(|(l, _)| width(l)).max().unwrap_or(0) + 2;
     let w = (inner_w + 2).min(area.width);
     let h = (u16::try_from(lines.len())
@@ -183,17 +196,23 @@ fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     Clear.render(rect, buf);
     let base = Style::new().bg(color(theme.overlay_bg));
     buf.set_style(rect, base);
+    let shown = usize::from(h.saturating_sub(2));
+    let top = app.help_scroll.min(lines.len().saturating_sub(shown));
+    let below = lines.len().saturating_sub(top + shown);
+    let mut hint = String::new();
+    if top > 0 {
+        hint.push_str(&format!("↑ {top} more · "));
+    }
+    if below > 0 {
+        hint.push_str(&format!("↓ {below} more · "));
+    }
     Block::bordered()
         .border_type(border_type(theme.border_style))
         .border_style(base.fg(color(theme.accent)))
         .title(" Help ")
-        .title_bottom(" esc close ")
+        .title_bottom(format!(" {hint}esc close "))
         .render(rect, buf);
-    for (i, (line, style)) in lines
-        .iter()
-        .take(usize::from(h.saturating_sub(2)))
-        .enumerate()
-    {
+    for (i, (line, style)) in lines.iter().skip(top).take(shown).enumerate() {
         buf.set_stringn(
             rect.x + 1,
             rect.y + 1 + u16::try_from(i).unwrap_or(0),
@@ -309,20 +328,44 @@ fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
             (theme.border, theme.title)
         };
         let name = terminal_label(view);
-        // One border cell, then the title: `╭─ 1 · nvim ───╮`.
-        let label = truncate(&format!("{} · {name}", i + 1), rect.width.saturating_sub(6));
         let area = Rect::new(rect.x, rect.y, rect.width, rect.height);
         Block::bordered()
             .border_type(border_type(theme.border_style))
             .border_style(Style::new().fg(color(border)))
             .render(area, buf);
-        buf.set_stringn(
-            rect.x + 2,
-            rect.y,
-            format!(" {label} "),
-            usize::from(rect.width.saturating_sub(3)),
-            Style::new().fg(color(title_color)),
-        );
+        let title_style = Style::new().fg(color(title_color));
+        let room = rect.width.saturating_sub(3);
+        match agent::title_mark(view, app.spin, theme) {
+            // An agent's glyph and name take the place of the number: `╭─ <glyph> claude · title ─╮`.
+            Some((glyph, glyph_style, kind)) => {
+                let (x, _) =
+                    buf.set_stringn(rect.x + 2, rect.y, " ", usize::from(room), title_style);
+                let (x, _) = buf.set_stringn(x, rect.y, &glyph, usize::from(room), glyph_style);
+                let used = x.saturating_sub(rect.x + 2);
+                let label = truncate(
+                    &format!("{kind} · {name}"),
+                    rect.width.saturating_sub(6 + width(&glyph)),
+                );
+                buf.set_stringn(
+                    x,
+                    rect.y,
+                    format!(" {label} "),
+                    usize::from(room.saturating_sub(used)),
+                    title_style,
+                );
+            }
+            // One border cell, then the title: `╭─ 1 · nvim ───╮`.
+            None => {
+                let label = truncate(&format!("{} · {name}", i + 1), rect.width.saturating_sub(6));
+                buf.set_stringn(
+                    rect.x + 2,
+                    rect.y,
+                    format!(" {label} "),
+                    usize::from(room),
+                    title_style,
+                );
+            }
+        }
         let inner = grid.inner(i);
         let inner = Rect::new(inner.x, inner.y, inner.width, inner.height);
         let term = app.mirror.terminal(view.id);
@@ -452,10 +495,17 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         None => project.to_string(),
     };
     // The terminal's title, or its program, after the location; not when there is no panel.
+    // An agent's glyph and name come first; the glyph is coloured after the text is drawn.
+    let mut mark = None;
     let location = match app.mirror.focused() {
-        Some(term) if !app.panel_area_empty() => {
-            format!("{location} · {}", terminal_label(term))
-        }
+        Some(term) if !app.panel_area_empty() => match agent::title_mark(term, app.spin, theme) {
+            Some((glyph, glyph_style, kind)) => {
+                let before = format!("{location} · ");
+                mark = Some((width(&before), glyph.clone(), glyph_style));
+                format!("{before}{glyph} {kind} · {}", terminal_label(term))
+            }
+            None => format!("{location} · {}", terminal_label(term)),
+        },
         _ => location,
     };
     // "[offset/history]" while the focused terminal is scrolled back.
@@ -466,6 +516,7 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         .filter(|t| t.display_offset > 0)
         .map(|t| format!(" [{}/{}]", t.display_offset, t.history))
         .unwrap_or_default();
+    let waiting = app.mirror.view().map_or(0, agent::waiting_terminals);
     let (right, right_style) = match &app.flash {
         // A long message (a config error with its location) is cut to the bar.
         Some((text, _)) => (truncate(text, bar.width), flash_style),
@@ -483,8 +534,16 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         ),
         // The hints wait for the session, like the name and the project.
         None if app.mirror.view().is_none() => (String::new(), Style::new()),
-        None => (app.bindings.hints(), Style::new().fg(color(theme.muted))),
+        None => (
+            app.bindings.hints(waiting > 0),
+            Style::new().fg(color(theme.muted)),
+        ),
     };
+    // `n waiting` to the left of the right-hand text, unless a message takes its place.
+    let waiting_text = (waiting > 0 && app.flash.is_none()).then(|| format!("{waiting} waiting"));
+    let waiting_w = waiting_text
+        .as_deref()
+        .map_or(0, |t| width(t) + if right.is_empty() { 0 } else { 2 });
 
     let right_w = width(&right);
     let (x, _) = buf.set_stringn(
@@ -505,7 +564,7 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
     let x = x + indicator_w;
     let room = bar
         .width
-        .saturating_sub(right_w + 1)
+        .saturating_sub(right_w + waiting_w + 1)
         .saturating_sub(x - bar.x);
     if room > 1 && !location.is_empty() {
         let text = format!(" {}", truncate(&location, room - 1));
@@ -515,6 +574,28 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
             &text,
             usize::from(room),
             base.fg(color(theme.muted)),
+        );
+        // One column for the space before the text.
+        if let Some((col, glyph, glyph_style)) = mark {
+            let at = x + 1 + col;
+            if at < x + room
+                && buf
+                    .cell((at, bar.y))
+                    .is_some_and(|cell| cell.symbol() == glyph)
+            {
+                buf.set_stringn(at, bar.y, &glyph, 1, base.patch(glyph_style));
+            }
+        }
+    }
+    if let Some(text) = waiting_text
+        && right_w + waiting_w <= bar.width
+    {
+        buf.set_stringn(
+            bar.x + bar.width - right_w - waiting_w,
+            bar.y,
+            &text,
+            usize::from(waiting_w),
+            base.fg(color(theme.warning)),
         );
     }
     if right_w <= bar.width {

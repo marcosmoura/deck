@@ -9,9 +9,18 @@ mod linux;
 mod macos;
 
 #[cfg(target_os = "linux")]
-pub use linux::process_cwd;
+pub use linux::{process_argv, process_cwd};
 #[cfg(target_os = "macos")]
-pub use macos::process_cwd;
+pub use macos::{process_argv, process_cwd};
+
+/// The foreground process of a PTY: the leader of its foreground process group (`tcgetpgrp`
+/// on the master) and its argv as the kernel holds it. `None` when either cannot be read,
+/// for example when the process just ended.
+pub fn foreground_process(master: &dyn portable_pty::MasterPty) -> Option<(u32, Vec<String>)> {
+    let pid = u32::try_from(master.process_group_leader()?).ok()?;
+    let argv = process_argv(pid)?;
+    (!argv.is_empty()).then_some((pid, argv))
+}
 
 /// The exit code in a raw `waitpid` status: the code of a normal exit, `128 + n` for a death
 /// by signal `n`.

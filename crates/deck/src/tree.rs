@@ -325,6 +325,12 @@ fn terminal_json(panel: &PanelView, index: usize, t: &TerminalView) -> Value {
         "focused": panel.focused_terminal == Some(t.id),
         "exited": t.exit_status,
         "keep": t.keep,
+        "agent": t.agent.as_ref().map(|a| json!({
+            "kind": a.kind.name(),
+            "status": a.status.name(),
+            "source": a.source.name(),
+            "session_id": a.session_id,
+        })),
     })
 }
 
@@ -705,6 +711,7 @@ mod tests {
             exit_status: None,
             pid: Some(100 + u32::try_from(id).unwrap()),
             keep: false,
+            agent: None,
         }
     }
 
@@ -730,6 +737,7 @@ mod tests {
                     terminals: vec![terminal(sid + 3)],
                     focused_terminal: Some(TerminalId(sid + 3)),
                     ratios: Ratios::default_for(1),
+                    unseen: false,
                 }],
             }],
         }
@@ -901,7 +909,38 @@ mod tests {
         assert_eq!(term["pid"], Value::Null);
         assert_eq!(term["cwd"], "/work");
         assert_eq!(term["title"], Value::Null);
+        assert_eq!(term["agent"], Value::Null);
         assert_eq!(tree_json(&[]), json!({"sessions": []}));
+    }
+
+    #[test]
+    fn a_terminal_with_an_agent_shows_its_state() {
+        use deck_core::agents::{AgentKind, AgentSource, AgentState, AgentStatus};
+        let mut s = session(10, "main");
+        let t = s
+            .projects
+            .first_mut()
+            .and_then(|p| p.panels.first_mut())
+            .and_then(|p| p.terminals.first_mut())
+            .unwrap();
+        t.agent = Some(AgentState {
+            kind: AgentKind::OpenCode,
+            status: AgentStatus::Waiting,
+            source: AgentSource::Hooks,
+            session_id: Some("ses_1".into()),
+            first_prompt: Some("hi".into()),
+            since: std::time::Duration::ZERO,
+        });
+        let doc = tree_json(&[s]);
+        assert_eq!(
+            doc["sessions"][0]["projects"][0]["panels"][0]["terminals"][0]["agent"],
+            json!({
+                "kind": "opencode",
+                "status": "waiting",
+                "source": "hooks",
+                "session_id": "ses_1",
+            })
+        );
     }
 
     #[test]

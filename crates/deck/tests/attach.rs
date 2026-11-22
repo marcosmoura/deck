@@ -123,7 +123,7 @@ fn the_shell_follows_the_window_size() {
 #[test]
 fn the_prefix_twice_sends_it_to_the_shell_as_pressed() {
     let mut h = attached();
-    h.send_keys("stty raw -echo; printf 'REA%s\\r\\n' DY; od -An -tx1 -N3 | tr -d ' '\r");
+    h.send_keys("set +m; stty raw -echo; printf 'REA%s\\r\\n' DY; od -An -tx1 -N3 | tr -d ' '\r");
     h.wait_for_text("READY", TIMEOUT);
     // Option+Space (ESC and a space) twice, then `a`: the second one reaches the shell.
     h.send_bytes(b"\x1b \x1b ");
@@ -138,7 +138,7 @@ fn the_non_breaking_space_arms_the_prefix_and_twice_sends_its_own_bytes() {
     h.wait_for_text("PREFIX", TIMEOUT);
     h.send_keys("z");
     h.wait_for_text("no binding for z", TIMEOUT);
-    h.send_keys("stty raw -echo; printf 'REA%s\\r\\n' DY; od -An -tx1 -N3 | tr -d ' '\r");
+    h.send_keys("set +m; stty raw -echo; printf 'REA%s\\r\\n' DY; od -An -tx1 -N3 | tr -d ' '\r");
     h.wait_for_text("READY", TIMEOUT);
     h.send_bytes(b"\xc2\xa0\xc2\xa0");
     h.send_keys("a");
@@ -153,7 +153,7 @@ fn the_non_breaking_space_arms_the_prefix_and_twice_sends_its_own_bytes() {
 #[test]
 fn an_unbound_key_after_the_prefix_flashes_and_sends_nothing() {
     let mut h = attached();
-    h.send_keys("stty raw -echo; od -An -tx1 -N1 | tr -d ' '\r");
+    h.send_keys("set +m; stty raw -echo; od -An -tx1 -N1 | tr -d ' '\r");
     prefixed(&mut h, "z");
     h.wait_for_text("no binding for z", TIMEOUT);
     h.send_keys("a");
@@ -170,7 +170,7 @@ fn every_byte_reaches_a_program_in_raw_mode_unchanged() {
     for (n, chunk) in bytes.chunks(16).enumerate() {
         let count = chunk.len();
         h.send_keys(&format!(
-            "stty raw -echo; echo REA''DY{n}; printf 'H:'; \
+            "set +m; stty raw -echo; echo REA''DY{n}; printf 'H:'; \
              dd bs=1 count={count} 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'; \
              stty sane; echo ' DO''NE{n}'\r"
         ));
@@ -332,7 +332,7 @@ fn wide_and_accented_characters_keep_their_columns() {
 
 #[test]
 fn programs_get_the_outer_terminals_colours() {
-    let query = "stty -icanon -echo; printf '\\033]11;?\\007'; \
+    let query = "set +m; stty -icanon -echo; printf '\\033]11;?\\007'; \
                  dd bs=1 count=24 2>/dev/null | tr -d '\\033\\007'; echo\r";
     let mut h = Harness::builder(SIZE)
         .colors((0, 0, 0), (255, 255, 255))

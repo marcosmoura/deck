@@ -33,6 +33,8 @@ pub enum Action {
     CloseProject,
     ToggleSidebar,
     FocusSidebar,
+    /// Jumps to the next agent that needs the user.
+    NextAttention,
     Help,
 }
 
@@ -64,6 +66,7 @@ impl Action {
             "close_project" => Self::CloseProject,
             "toggle_sidebar" => Self::ToggleSidebar,
             "focus_sidebar" => Self::FocusSidebar,
+            "next_attention" => Self::NextAttention,
             "help" => Self::Help,
             other => {
                 let n: usize = other.strip_prefix("panel_")?.parse().ok()?;
@@ -158,10 +161,14 @@ impl Bindings {
         parts.join("  ")
     }
 
-    /// The hint text of the status bar, e.g. `⌥Space ? help  d detach`.
-    pub fn hints(&self) -> String {
-        let items: Vec<String> = HINTED
+    /// The hint text of the status bar, e.g. `⌥Space ? help  d detach`, with the jump to the
+    /// next waiting agent first when `attention`.
+    pub fn hints(&self, attention: bool) -> String {
+        let jump = [(Action::NextAttention, "next")];
+        let items: Vec<String> = jump
             .iter()
+            .filter(|_| attention)
+            .chain(HINTED.iter())
             .filter_map(|(action, label)| {
                 let keys = &self.actions.iter().find(|(a, _)| a == action)?.1;
                 Some(format!("{} {label}", spec_label(keys.first()?)))
@@ -428,7 +435,7 @@ mod tests {
         } else {
             "M-Space"
         };
-        assert_eq!(b.hints(), format!("{prefix} ? help  d detach"));
+        assert_eq!(b.hints(false), format!("{prefix} ? help  d detach"));
     }
 
     #[test]

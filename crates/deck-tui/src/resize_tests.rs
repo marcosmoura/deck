@@ -200,7 +200,8 @@ fn another_key_a_paste_or_a_focus_event_ends_the_repeat() {
             ct::Event::Key(_) if a.armed => {}
             ct::Event::Key(_) => assert_eq!(out, [input(31, b"x")]),
             ct::Event::Paste(_) => assert_eq!(out, [input(31, b"\x1b[200~pasted\x1b[201~")]),
-            _ => assert!(out.is_empty()),
+            // A focus event is told to the daemon only.
+            _ => assert_eq!(out, [Out::Send(ClientMsg::Focus(false))]),
         }
         a.armed = false;
         assert_eq!(at(&mut a, t0 + MS(200), &[shifted('L')]), [input(31, b"L")]);
