@@ -5,6 +5,7 @@ pub mod action;
 pub mod base64;
 pub mod config;
 pub mod keys;
+pub mod layout;
 pub mod model;
 pub mod mouse;
 pub mod paths;

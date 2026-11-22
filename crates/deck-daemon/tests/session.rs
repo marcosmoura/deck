@@ -111,7 +111,7 @@ async fn the_pty_follows_the_client_that_was_active_last() {
         &daemon.paths.socket,
         Attach {
             cols: 60,
-            rows: 18,
+            rows: 19,
             ..Attach::default()
         },
     )
@@ -370,6 +370,7 @@ async fn a_thousand_title_changes_cause_few_views_and_the_last_title_arrives() {
         Options {
             clock: clock.clone(),
             protocol_version: deck_core::protocol::PROTOCOL_VERSION,
+            ..Options::default()
         },
     )
     .await;
@@ -464,6 +465,7 @@ async fn session_selection_follows_the_attach_rules() {
         Options {
             clock: system_clock(),
             protocol_version: deck_core::protocol::PROTOCOL_VERSION,
+            ..Options::default()
         },
     )
     .await;

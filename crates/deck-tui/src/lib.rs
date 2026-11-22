@@ -2,15 +2,20 @@
 
 mod app;
 mod colors;
+mod convert;
 mod draw;
 mod input;
 mod mirror;
 mod modal;
 mod picker;
+#[cfg(test)]
+mod reload_tests;
 mod sidebar;
 #[cfg(test)]
 mod sidebar_tests;
 mod term;
+#[cfg(test)]
+mod theme_tests;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -55,7 +60,6 @@ pub struct Options {
     pub session: Option<String>,
     /// Create the session when it does not exist (`deck` without a name).
     pub create: bool,
-    pub config: Config,
     pub read_stdin: ReadStdin,
 }
 
@@ -125,7 +129,9 @@ async fn run_async(mut options: Options) -> Exit {
     let home = std::env::var_os("HOME")
         .filter(|h| !h.is_empty())
         .map(PathBuf::from);
-    let mut app = App::new(&options.config, size, &probe.leftover).with_dirs(cwd.clone(), home);
+    let mut app = App::new(&Config::default(), size, &probe.leftover).with_dirs(cwd.clone(), home);
+    app.truecolor = convert::truecolor(std::env::var("COLORTERM").ok().as_deref());
+    app.hold_until_configured();
 
     let ctx = Ctx {
         socket: options.socket.clone(),
@@ -172,7 +178,8 @@ async fn run_async(mut options: Options) -> Exit {
     let mut drawn_once = false;
 
     let mut last_draw = Instant::now() - REDRAW;
-    let mut early = app.start(Instant::now());
+    // What was typed ahead runs once the daemon's config has arrived (`Welcome`).
+    let mut early: Vec<Out> = Vec::new();
 
     let exit = 'run: loop {
         // No timer runs while the screen is idle: one is armed for the next draw (at most
@@ -264,14 +271,14 @@ struct Ctx {
 
 impl Ctx {
     fn hello(&self, app: &App, session: Option<String>, create: bool) -> ClientMsg {
-        let (cols, rows) = app.viewport();
+        let (cols, rows) = app.size;
         ClientMsg::Hello {
             version: PROTOCOL_VERSION,
             role: Role::Attach {
                 session,
                 create,
                 cols: cols.max(app::MIN_SIZE.0),
-                rows: rows.max(app::MIN_SIZE.1 - 1),
+                rows: rows.max(app::MIN_SIZE.1),
             },
             cwd: self.cwd.clone(),
             env: std::env::vars_os().collect(),
@@ -473,4 +480,32 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
         .await
         .ok()
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    /// Colours and theme glyphs of deck's own UI come from the theme: no `Color` constructor
+    /// outside the conversion module and no theme glyph outside `deck-core`.
+    #[test]
+    fn no_colour_or_theme_glyph_literals_in_the_drawing_code() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let constructor = ["Color", "::"].concat();
+        let mut checked = 0;
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || name == "convert.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
+            assert!(!code.contains(&constructor), "{name} builds a colour");
+            assert!(!code.contains("Color as"), "{name} aliases Color");
+            for glyph in ["▾", "▸", "▌"] {
+                assert!(!code.contains(glyph), "{name} has the glyph {glyph}");
+            }
+            checked += 1;
+        }
+        assert!(checked >= 8);
+    }
 }

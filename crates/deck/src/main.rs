@@ -1,5 +1,6 @@
 //! The `deck` binary: CLI, daemon start-up, control commands and wiring.
 
+mod config_cmd;
 mod control;
 mod daemon_cmd;
 mod platform;
@@ -57,6 +58,11 @@ enum Command {
     Ls,
     /// Stops the daemon.
     KillServer,
+    /// Prints the default config, checks a config file or shows where it lives.
+    Config {
+        #[command(subcommand)]
+        command: config_cmd::ConfigCommand,
+    },
     /// Starts the daemon if needed, attaches and detaches again (for tests).
     #[command(name = "_probe", hide = true)]
     Probe {
@@ -83,6 +89,7 @@ fn main() -> ExitCode {
         Some(Command::RenameSession { old, new }) => control::rename_session(old, new),
         Some(Command::Ls) => control::ls(),
         Some(Command::KillServer) => control::kill_server(),
+        Some(Command::Config { command }) => config_cmd::run(command),
         Some(Command::Probe { session }) => control::probe(session),
     };
     result.unwrap_or_else(|e| {

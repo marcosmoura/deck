@@ -8,9 +8,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionError};
+use crate::config::Config;
 use crate::model::{SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -45,6 +46,12 @@ pub enum ClientMsg {
     },
     /// An action on the attached session, answered by `ServerMsg::ActionResult` in order.
     Action(Action),
+    /// Like `Viewport`, but sent because a config reload moved the sidebar: it records the
+    /// size without making this client the one the terminals follow.
+    ReloadViewport {
+        cols: u16,
+        rows: u16,
+    },
 }
 
 /// Where to scroll a terminal's display. Positive counts go back into the history (up),
@@ -99,6 +106,8 @@ pub struct OuterColors {
 pub enum ServerMsg {
     Welcome {
         session: SessionId,
+        /// The daemon's config: the only one a client uses.
+        config: Box<Config>,
     },
     SessionView(SessionView),
     Frame(Frame),
@@ -113,6 +122,20 @@ pub enum ServerMsg {
     Response(Response),
     /// The outcome of the client's `Action`s, one per action, in order.
     ActionResult(Result<(), ActionError>),
+    /// The daemon reloaded its config.
+    Config(Box<Config>),
+    /// A message for the user, shown in the status bar.
+    Notice {
+        level: NoticeLevel,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NoticeLevel {
+    Info,
+    Warning,
+    Error,
 }
 
 /// `VersionMismatch` keeps its shape in every version.
@@ -465,6 +488,7 @@ mod tests {
                 terminal: TerminalId(9),
                 bytes: vec![0, 1, 0x1b, 255],
             },
+            ClientMsg::ReloadViewport { cols: 71, rows: 23 },
             ClientMsg::Detach,
             ClientMsg::Request(Request::ListSessions),
             ClientMsg::Request(Request::KillServer),
@@ -505,6 +529,20 @@ mod tests {
         vec![
             ServerMsg::Welcome {
                 session: SessionId(5),
+                config: Box::default(),
+            },
+            ServerMsg::Config(Box::default()),
+            ServerMsg::Notice {
+                level: NoticeLevel::Info,
+                text: "config reloaded".into(),
+            },
+            ServerMsg::Notice {
+                level: NoticeLevel::Warning,
+                text: "config.toml:2:10: x ✓".into(),
+            },
+            ServerMsg::Notice {
+                level: NoticeLevel::Error,
+                text: String::new(),
             },
             ServerMsg::SessionView(view()),
             ServerMsg::Frame(frame()),

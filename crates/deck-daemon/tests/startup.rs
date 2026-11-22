@@ -153,6 +153,7 @@ async fn a_daemon_of_another_version_says_so_to_a_normal_client() {
         Options {
             clock: system_clock(),
             protocol_version: 999,
+            ..Options::default()
         },
     )
     .await;

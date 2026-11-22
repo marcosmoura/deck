@@ -3,9 +3,11 @@
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Deserialize, Serialize};
+
 use crate::protocol::Modes;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum KeyCode {
     /// A character key; the space bar is `Char(' ')`.
     Char(char),
@@ -27,7 +29,7 @@ pub enum KeyCode {
     F(u8),
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Modifiers {
     pub ctrl: bool,
     pub alt: bool,
@@ -71,7 +73,7 @@ impl KeyEvent {
 }
 
 /// A key as written in the config: a code and modifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct KeySpec {
     pub code: KeyCode,
     pub mods: Modifiers,

@@ -11,10 +11,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
 use crate::app::{App, Out};
-use crate::draw::{color, truncate, width};
+use crate::draw::{color, selection, truncate, width};
 
-/// The panel area never gets narrower than this; the sidebar hides instead.
-pub const MIN_PANEL_COLS: u16 = 20;
 /// The session name and a blank row above the project rows.
 pub const HEADER_ROWS: u16 = 2;
 /// Rows the wheel scrolls per notch.
@@ -321,7 +319,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     };
 
     let header = truncate(&view.name, w.saturating_sub(2));
-    put(buf, area.y, 1, &header, base.add_modifier(Modifier::BOLD));
+    put(buf, area.y, 1, &header, accent.add_modifier(Modifier::BOLD));
 
     let rows = rows(view);
     let height = usize::from(area.height.saturating_sub(HEADER_ROWS));
@@ -338,8 +336,17 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     {
         let y = area.y + HEADER_ROWS + u16::try_from(line).unwrap_or(0);
         let mut row_style = base;
-        if row.sel().is_some() && row.sel() == selected {
-            row_style = row_style.add_modifier(Modifier::REVERSED);
+        let is_selected = row.sel().is_some() && row.sel() == selected;
+        // The accent and muted patches must not replace a custom selection colour.
+        let keep = |style: Style| {
+            if is_selected && theme.selection_fg != Default::default() {
+                style.fg(color(theme.selection_fg))
+            } else {
+                style
+            }
+        };
+        if is_selected {
+            row_style = selection(theme, row_style);
             buf.set_style(Rect::new(area.x, y, w, 1), row_style);
         }
         // The right-aligned count, if any, takes its room off the name.
@@ -357,7 +364,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 } else {
                     &theme.glyphs.expanded
                 };
-                put(buf, y, 1, glyph, row_style.patch(muted));
+                put(buf, y, 1, glyph, keep(row_style.patch(muted)));
                 let (count, count_w) = if p.collapsed {
                     side(p.panels.len().to_string())
                 } else {
@@ -375,7 +382,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                         y,
                         w.saturating_sub(count_w + 1),
                         &count,
-                        row_style.patch(muted),
+                        keep(row_style.patch(muted)),
                     );
                 }
             }
@@ -386,8 +393,14 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 let active = view.active_panel == Some(id);
                 let mut style = row_style;
                 if active {
-                    put(buf, y, 0, &theme.glyphs.active, row_style.patch(accent));
-                    style = style.patch(accent).add_modifier(Modifier::BOLD);
+                    put(
+                        buf,
+                        y,
+                        0,
+                        &theme.glyphs.active,
+                        keep(row_style.patch(accent)),
+                    );
+                    style = keep(style.patch(accent)).add_modifier(Modifier::BOLD);
                 }
                 let (count, count_w) = if p.terminals.len() > 1 {
                     side(p.terminals.len().to_string())
@@ -402,11 +415,11 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                         y,
                         w.saturating_sub(count_w + 1),
                         &count,
-                        row_style.patch(muted),
+                        keep(row_style.patch(muted)),
                     );
                 }
             }
-            Row::NoPanels => put(buf, y, 3, "no panels", row_style.patch(muted)),
+            Row::NoPanels => put(buf, y, 3, "no panels", keep(row_style.patch(muted))),
         }
     }
 }

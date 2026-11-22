@@ -8,10 +8,9 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::Context;
 use deck_core::config::Config;
 use deck_core::paths;
-use deck_daemon::{Daemon, DaemonError, DaemonPaths};
+use deck_daemon::{Daemon, DaemonError, DaemonPaths, Options};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::platform;
@@ -64,9 +63,10 @@ fn serve(
     daemon_paths: DaemonPaths,
     original_stderr: &Arc<Mutex<Option<fs::File>>>,
 ) -> Result<(), String> {
-    let config = paths::config_file(env)
-        .map_err(|e| format!("deck daemon: {e}"))
-        .and_then(|path| load_config(&path).map_err(|e| format!("deck daemon: {e:#}")))?;
+    // The daemon reads the file itself, at start and on every change.
+    let config_path = paths::config_file(env).map_err(|e| format!("deck daemon: {e}"))?;
+    let mut options = Options::from_env();
+    options.config_path = Some(config_path);
     let parent = std::env::var(PARENT_PID_VAR)
         .ok()
         .and_then(|v| v.parse::<i32>().ok());
@@ -94,7 +94,16 @@ fn serve(
             *original_stderr.lock().unwrap_or_else(|e| e.into_inner()) = Some(original);
             Ok(())
         };
-        Ok::<_, io::Error>(Daemon::run_locked(daemon_paths, config, shutdown, on_locked).await)
+        Ok::<_, io::Error>(
+            Daemon::run_locked(
+                daemon_paths,
+                Config::default(),
+                shutdown,
+                options,
+                on_locked,
+            )
+            .await,
+        )
     });
     match result {
         Err(e) => Err(format!("deck daemon: cannot install signal handlers: {e}")),
@@ -131,19 +140,6 @@ async fn parent_gone(pid: Option<i32>) {
             return;
         }
     }
-}
-
-pub(crate) fn load_config(path: &Path) -> anyhow::Result<Config> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Config::default()),
-        Err(e) => return Err(e).with_context(|| format!("cannot read {}", path.display())),
-    };
-    let parsed = Config::parse(&text).with_context(|| format!("in {}", path.display()))?;
-    for warning in &parsed.warnings {
-        tracing::warn!("{}: {warning}", path.display());
-    }
-    Ok(parsed.config)
 }
 
 /// Moves a log over [`LOG_LIMIT`] to `<log>.1`, replacing an older one.
@@ -184,20 +180,5 @@ mod tests {
         rotate_log(&log).unwrap();
         assert!(!log.exists());
         assert_eq!(fs::metadata(&old).unwrap().len(), LOG_LIMIT + 1);
-    }
-
-    #[test]
-    fn a_missing_config_is_the_default_and_a_bad_one_names_its_key() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        assert_eq!(load_config(&path).unwrap(), Config::default());
-        fs::write(&path, "shell_args = 3").unwrap();
-        let err = format!("{:#}", load_config(&path).unwrap_err());
-        assert!(err.contains("shell_args"), "{err}");
-        fs::write(&path, "shell = \"/bin/zsh\"").unwrap();
-        assert_eq!(
-            load_config(&path).unwrap().shell.as_deref(),
-            Some("/bin/zsh")
-        );
     }
 }

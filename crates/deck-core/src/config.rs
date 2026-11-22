@@ -2,9 +2,15 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use toml::Value;
 
 use crate::keys::KeySpec;
+use crate::theme::Theme;
+
+mod validate;
+
+pub use validate::{Finding, Report, Severity, validate};
 
 /// The documented defaults, printed by `deck config default` (DECK-08).
 pub const DEFAULT_CONFIG_TOML: &str = include_str!("config/default.toml");
@@ -146,12 +152,16 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "sidebar",
     "sidebar_width",
     "keys",
+    "theme",
 ];
 
 /// The sidebar width, in columns, accepted by `sidebar_width`.
 pub const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 20..=60;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The resolved config. This is the wire form too: plain types that postcard encodes. The
+/// TOML shapes that accept a string or an array, or a string or an integer, exist only
+/// while loading (`apply`), where they are converted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub prefix: KeySpec,
     pub shell: Option<String>,
@@ -162,6 +172,7 @@ pub struct Config {
     pub sidebar_width: u16,
     /// Action name to its keys; every action of [`DEFAULT_BINDINGS`] is present.
     pub keys: BTreeMap<String, Vec<KeySpec>>,
+    pub theme: Theme,
 }
 
 impl Default for Config {
@@ -185,6 +196,7 @@ impl Default for Config {
             sidebar: true,
             sidebar_width: 28,
             keys,
+            theme: Theme::default(),
         }
     }
 }
@@ -194,6 +206,22 @@ impl Default for Config {
 pub struct ParsedConfig {
     pub config: Config,
     pub warnings: Vec<String>,
+}
+
+/// Something wrong but harmless in the file; `key` is its full name, e.g. `keys.teleport`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    pub key: String,
+    pub message: String,
+}
+
+impl Warning {
+    pub(crate) fn unknown_key(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            message: format!("unknown config key `{key}`"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -222,101 +250,176 @@ fn key_spec(key: &str, value: &Value) -> Result<KeySpec, ConfigError> {
     KeySpec::parse(&string(key, value)?).map_err(|e| bad(key, e.to_string()))
 }
 
+/// Everything found in a config table: the config and every error and warning.
+#[derive(Debug)]
+pub(crate) struct Loaded {
+    pub config: Config,
+    pub errors: Vec<ConfigError>,
+    pub warnings: Vec<Warning>,
+}
+
 impl Config {
-    /// Parses config text; every key is optional.
+    /// Parses config text; every key is optional. The first error is returned.
     pub fn parse(text: &str) -> Result<ParsedConfig, ConfigError> {
         let table: toml::Table = text
             .parse()
             .map_err(|e: toml::de::Error| ConfigError::Syntax(e.to_string()))?;
-        let mut config = Config::default();
-        let mut warnings = Vec::new();
-        let mut explicit: Vec<String> = Vec::new();
-        for (key, value) in &table {
-            if !TOP_LEVEL_KEYS.contains(&key.as_str()) {
-                warnings.push(format!("unknown config key `{key}`"));
-                continue;
-            }
-            match key.as_str() {
-                "prefix" => config.prefix = key_spec(key, value)?,
-                "shell" => config.shell = Some(string(key, value)?),
-                "shell_args" => {
-                    let items = value
-                        .as_array()
-                        .ok_or_else(|| bad(key, "expected an array of strings"))?;
-                    config.shell_args = items
-                        .iter()
-                        .map(|v| string(key, v))
-                        .collect::<Result<_, _>>()?;
-                }
-                "scrollback_lines" => {
-                    let n = value
-                        .as_integer()
-                        .ok_or_else(|| bad(key, "expected an integer"))?;
-                    config.scrollback_lines = usize::try_from(n)
-                        .map_err(|_| bad(key, format!("must not be negative, got {n}")))?;
-                }
-                "sidebar" => {
-                    config.sidebar = value
-                        .as_bool()
-                        .ok_or_else(|| bad(key, "expected true or false"))?;
-                }
-                "sidebar_width" => {
-                    let n = value
-                        .as_integer()
-                        .ok_or_else(|| bad(key, "expected an integer"))?;
-                    let (min, max) = (*SIDEBAR_WIDTH_RANGE.start(), *SIDEBAR_WIDTH_RANGE.end());
-                    config.sidebar_width = u16::try_from(n)
-                        .ok()
-                        .filter(|w| SIDEBAR_WIDTH_RANGE.contains(w))
-                        .ok_or_else(|| {
-                            bad(key, format!("must be between {min} and {max}, got {n}"))
-                        })?;
-                }
-                "keys" => {
-                    let keys = value
-                        .as_table()
-                        .ok_or_else(|| bad(key, "expected a table"))?;
-                    for (action, value) in keys {
-                        let path = format!("keys.{action}");
-                        if !DEFAULT_BINDINGS.iter().any(|a| a.name == action) {
-                            warnings.push(format!("unknown action `{path}`"));
-                            continue;
-                        }
-                        let specs = match value {
-                            Value::Array(items) => items
-                                .iter()
-                                .map(|v| key_spec(&path, v))
-                                .collect::<Result<Vec<_>, _>>()?,
-                            single => vec![key_spec(&path, single)?],
-                        };
-                        config.keys.insert(action.clone(), specs);
-                        explicit.push(action.clone());
-                    }
-                }
-                _ => unreachable!("key checked against TOP_LEVEL_KEYS"),
-            }
+        let loaded = load(&table);
+        if let Some(error) = loaded.errors.into_iter().next() {
+            return Err(error);
         }
-        resolve_conflicts(&mut config, &explicit, &mut warnings);
-        Ok(ParsedConfig { config, warnings })
+        Ok(ParsedConfig {
+            config: loaded.config,
+            warnings: loaded.warnings.into_iter().map(|w| w.message).collect(),
+        })
     }
 }
 
+/// Reads a whole config table, collecting every error instead of stopping at the first.
+pub(crate) fn load(table: &toml::Table) -> Loaded {
+    let mut config = Config::default();
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut explicit: Vec<String> = Vec::new();
+    for (key, value) in table {
+        if !TOP_LEVEL_KEYS.contains(&key.as_str()) {
+            warnings.push(Warning::unknown_key(key));
+            continue;
+        }
+        if let Err(e) = apply(
+            &mut config,
+            key,
+            value,
+            &mut explicit,
+            &mut errors,
+            &mut warnings,
+        ) {
+            errors.push(e);
+        }
+    }
+    resolve_conflicts(&mut config, &explicit, &mut errors, &mut warnings);
+    Loaded {
+        config,
+        errors,
+        warnings,
+    }
+}
+
+/// Reads one top-level key. Errors of single entries in `[keys]` go to `errors` so the
+/// others are still read.
+fn apply(
+    config: &mut Config,
+    key: &str,
+    value: &Value,
+    explicit: &mut Vec<String>,
+    errors: &mut Vec<ConfigError>,
+    warnings: &mut Vec<Warning>,
+) -> Result<(), ConfigError> {
+    match key {
+        "prefix" => config.prefix = key_spec(key, value)?,
+        "shell" => config.shell = Some(string(key, value)?),
+        "shell_args" => {
+            let items = value
+                .as_array()
+                .ok_or_else(|| bad(key, "expected an array of strings"))?;
+            config.shell_args = items
+                .iter()
+                .map(|v| string(key, v))
+                .collect::<Result<_, _>>()?;
+        }
+        "scrollback_lines" => {
+            let n = value
+                .as_integer()
+                .ok_or_else(|| bad(key, "expected an integer"))?;
+            config.scrollback_lines = usize::try_from(n)
+                .map_err(|_| bad(key, format!("must not be negative, got {n}")))?;
+        }
+        "sidebar" => {
+            config.sidebar = value
+                .as_bool()
+                .ok_or_else(|| bad(key, "expected true or false"))?;
+        }
+        "sidebar_width" => {
+            let n = value
+                .as_integer()
+                .ok_or_else(|| bad(key, "expected an integer"))?;
+            let (min, max) = (*SIDEBAR_WIDTH_RANGE.start(), *SIDEBAR_WIDTH_RANGE.end());
+            config.sidebar_width = u16::try_from(n)
+                .ok()
+                .filter(|w| SIDEBAR_WIDTH_RANGE.contains(w))
+                .ok_or_else(|| bad(key, format!("must be between {min} and {max}, got {n}")))?;
+        }
+        "keys" => {
+            let keys = value
+                .as_table()
+                .ok_or_else(|| bad(key, "expected a table"))?;
+            for (action, value) in keys {
+                let path = format!("keys.{action}");
+                if !DEFAULT_BINDINGS.iter().any(|a| a.name == action) {
+                    warnings.push(Warning {
+                        key: path.clone(),
+                        message: format!("unknown action `{path}`"),
+                    });
+                    continue;
+                }
+                let specs = match value {
+                    Value::Array(items) => items
+                        .iter()
+                        .map(|v| key_spec(&path, v))
+                        .collect::<Result<Vec<_>, _>>(),
+                    single => key_spec(&path, single).map(|spec| vec![spec]),
+                };
+                match specs {
+                    Ok(specs) => {
+                        config.keys.insert(action.clone(), specs);
+                        explicit.push(action.clone());
+                    }
+                    Err(e) => errors.push(e),
+                }
+            }
+        }
+        "theme" => {
+            let theme = value
+                .as_table()
+                .ok_or_else(|| bad(key, "expected a table"))?;
+            config.theme = Theme::parse(theme, warnings).map_err(|e| bad(&e.key, e.message))?;
+        }
+        _ => unreachable!("key checked against TOP_LEVEL_KEYS"),
+    }
+    Ok(())
+}
+
 /// Makes every key belong to one action. A key the user set wins over the default keys of
-/// the other actions; between two explicit settings the action that sorts first by name
-/// wins. Each loss is a warning.
-fn resolve_conflicts(config: &mut Config, explicit: &[String], warnings: &mut Vec<String>) {
+/// the other actions, with a warning; a key the user set for two actions is an error.
+fn resolve_conflicts(
+    config: &mut Config,
+    explicit: &[String],
+    errors: &mut Vec<ConfigError>,
+    warnings: &mut Vec<Warning>,
+) {
     let mut explicit: Vec<&String> = explicit.iter().collect();
     explicit.sort();
     explicit.dedup();
-    for (i, winner) in explicit.iter().enumerate() {
+    for (i, first) in explicit.iter().enumerate() {
+        for second in &explicit[i + 1..] {
+            for spec in &config.keys[*first] {
+                if config.keys[*second]
+                    .iter()
+                    .any(|k| k.matches(&spec.to_event()))
+                {
+                    errors.push(bad(
+                        &format!("keys.{second}"),
+                        format!("key \"{spec}\" is bound to both {first} and {second}"),
+                    ));
+                }
+            }
+        }
+    }
+    for winner in &explicit {
         let specs = config.keys[*winner].clone();
         let names: Vec<String> = config.keys.keys().cloned().collect();
         for other in names {
-            if other == **winner {
-                continue;
-            }
-            // An explicit action that sorts before the winner already took its keys.
-            if explicit[..i].contains(&&other) {
+            if other == **winner || explicit.contains(&&other) {
                 continue;
             }
             let list = config.keys.get_mut(&other).expect("listed above");
@@ -324,7 +427,10 @@ fn resolve_conflicts(config: &mut Config, explicit: &[String], warnings: &mut Ve
                 let before = list.len();
                 list.retain(|k| !k.matches(&spec.to_event()));
                 if list.len() != before {
-                    warnings.push(format!("key \"{spec}\" of {winner} replaces {other}'s"));
+                    warnings.push(Warning {
+                        key: format!("keys.{winner}"),
+                        message: format!("key \"{spec}\" of {winner} replaces {other}'s"),
+                    });
                 }
             }
         }
@@ -355,21 +461,54 @@ mod tests {
         assert!(parsed.warnings.is_empty());
     }
 
+    /// Whether `default.toml` has `name` set, as a table, or as a `# name = ...` example.
+    /// `table` is the dotted name of the table the key lives in ("" at the top level); an
+    /// example line only counts inside that table's section of the file.
+    fn documented(parsed: &toml::Table, table: &str, name: &str) -> bool {
+        let mut section = String::new();
+        parsed.contains_key(name)
+            || DEFAULT_CONFIG_TOML.lines().any(|l| {
+                if let Some(header) = l.strip_prefix('[') {
+                    section = header.trim_end_matches(']').to_string();
+                }
+                section == table && l.starts_with(&format!("# {name} ="))
+            })
+    }
+
+    /// Every key of `value` (a serialized default) must be documented in `parsed`.
+    fn assert_documented(prefix: &str, value: &toml::Table, parsed: &toml::Table) {
+        for (key, inner) in value {
+            let path = format!("{prefix}{key}");
+            let table = prefix.trim_end_matches('.');
+            assert!(
+                documented(parsed, table, key),
+                "{path} missing from default.toml"
+            );
+            // Descend only into tables the file also has as tables (`keys`, `theme`).
+            if let (Some(inner), Some(Value::Table(documented))) =
+                (inner.as_table(), parsed.get(key))
+            {
+                assert_documented(&format!("{path}."), inner, documented);
+            }
+        }
+    }
+
     #[test]
     fn default_toml_matches_defaults() {
         let parsed = Config::parse(DEFAULT_CONFIG_TOML).unwrap();
         assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
         assert_eq!(parsed.config, Config::default());
-        for key in TOP_LEVEL_KEYS {
-            let set = DEFAULT_CONFIG_TOML
-                .lines()
-                .any(|l| l.starts_with(&format!("{key} =")) || l.starts_with(&format!("[{key}]")));
-            let example = DEFAULT_CONFIG_TOML
-                .lines()
-                .any(|l| l.starts_with(&format!("# {key} =")));
-            assert!(set || example, "{key} missing from default.toml");
-        }
+
         let table: toml::Table = DEFAULT_CONFIG_TOML.parse().unwrap();
+        // Every key of the defaults, serialized, and the keys that have no default value.
+        let defaults = Value::try_from(Config::default()).unwrap();
+        assert_documented("", defaults.as_table().unwrap(), &table);
+        for key in TOP_LEVEL_KEYS {
+            assert!(
+                documented(&table, "", key),
+                "{key} missing from default.toml"
+            );
+        }
         let keys = table["keys"].as_table().unwrap();
         for action in DEFAULT_BINDINGS {
             assert!(
@@ -377,6 +516,15 @@ mod tests {
                 "{} missing from default.toml",
                 action.name
             );
+        }
+        let theme = table["theme"].as_table().unwrap();
+        for role in crate::theme::ROLES {
+            assert!(theme.contains_key(role), "theme.{role} missing");
+        }
+        assert!(theme.contains_key("border_style"));
+        let glyphs = theme["glyphs"].as_table().unwrap();
+        for name in ["expanded", "collapsed", "active"] {
+            assert!(glyphs.contains_key(name), "theme.glyphs.{name} missing");
         }
     }
 
@@ -431,6 +579,8 @@ mod tests {
             ("sidebar_width = 61", "sidebar_width"),
             ("sidebar_width = -3", "sidebar_width"),
             ("sidebar_width = \"x\"", "sidebar_width"),
+            ("theme = 1", "theme"),
+            ("[theme]\naccent = \"purple\"", "theme.accent"),
         ] {
             let err = Config::parse(text).unwrap_err();
             match &err {
@@ -503,12 +653,50 @@ mod tests {
     }
 
     #[test]
-    fn two_explicit_settings_on_one_key_go_to_the_first_action_by_name() {
-        let p = Config::parse("[keys]\nscroll = \"z\"\ndetach = \"z\"").unwrap();
-        assert_eq!(p.config.keys["detach"], [spec("z")]);
-        assert!(p.config.keys["scroll"].is_empty());
-        assert_eq!(p.warnings, ["key \"z\" of detach replaces scroll's"]);
+    fn two_explicit_settings_on_one_key_are_an_error_naming_both() {
+        let err = Config::parse("[keys]\nscroll = \"z\"\ndetach = \"z\"").unwrap_err();
+        let text = err.to_string();
+        assert!(
+            text.contains("detach") && text.contains("scroll") && text.contains("\"z\""),
+            "{text}"
+        );
+        assert!(matches!(err, ConfigError::Value { ref key, .. } if key == "keys.scroll"));
         // The defaults alone never conflict.
         assert!(Config::parse("").unwrap().warnings.is_empty());
+    }
+
+    #[test]
+    fn a_user_key_taking_a_default_warns_and_wins() {
+        let p = Config::parse("[keys]\ndetach = \"n\"").unwrap();
+        assert_eq!(p.config.keys["detach"], [spec("n")]);
+        assert!(p.config.keys["next_panel"].is_empty());
+        assert_eq!(p.warnings, ["key \"n\" of detach replaces next_panel's"]);
+        // Both set: the user's own choice for next_panel is not taken away.
+        let err = Config::parse("[keys]\ndetach = \"n\"\nnext_panel = \"n\"").unwrap_err();
+        assert!(err.to_string().contains("detach") && err.to_string().contains("next_panel"));
+        // Unbinding.
+        let p = Config::parse("[keys]\ndetach = []").unwrap();
+        assert!(p.config.keys["detach"].is_empty() && p.warnings.is_empty());
+    }
+
+    #[test]
+    fn the_raw_shapes_load_and_the_resolved_config_round_trips_through_postcard() {
+        let one = Config::parse("[keys]\ndetach = \"d\"\n[theme]\naccent = 4").unwrap();
+        let many =
+            Config::parse("[keys]\ndetach = [\"d\", \"q\"]\n[theme]\naccent = \"blue\"").unwrap();
+        assert_eq!(one.config.keys["detach"], [spec("d")]);
+        assert_eq!(many.config.keys["detach"], [spec("d"), spec("q")]);
+        assert_eq!(one.config.theme.accent, many.config.theme.accent);
+        for config in [Config::default(), one.config, many.config] {
+            let bytes = postcard::to_stdvec(&config).unwrap();
+            assert_eq!(postcard::from_bytes::<Config>(&bytes).unwrap(), config);
+        }
+        let themed = Config::parse(
+            "shell = \"/bin/zsh\"\n[theme]\naccent = \"#cba6f7\"\nborder_style = \"plain\"",
+        )
+        .unwrap()
+        .config;
+        let bytes = postcard::to_stdvec(&themed).unwrap();
+        assert_eq!(postcard::from_bytes::<Config>(&bytes).unwrap(), themed);
     }
 }

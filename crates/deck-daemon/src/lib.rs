@@ -2,6 +2,7 @@
 //! and agent status come with later specs.
 
 mod clock;
+mod config_file;
 mod conn;
 mod emu;
 mod env;
@@ -14,6 +15,7 @@ mod terminal;
 use std::fs;
 use std::future::Future;
 use std::io;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -21,7 +23,10 @@ use deck_core::config::Config;
 use deck_core::protocol::PROTOCOL_VERSION;
 use tokio::net::UnixListener;
 
+use config_file::{Change, ConfigFile};
+
 pub use clock::{Clock, Drain, Fire, ManualClock, Poke, SystemClock, Throttle};
+pub use config_file::Notice;
 pub use error::DaemonError;
 pub use startup::{DaemonPaths, check_runtime_dir, effective_uid};
 
@@ -34,11 +39,21 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// tests can run a daemon "of another version".
 pub const TEST_PROTOCOL_VERSION_VAR: &str = "DECK_TEST_PROTOCOL_VERSION";
 
-/// Knobs for tests; the defaults are what `deck daemon` uses.
+/// The hidden variable that sets how often the config file is looked at, in milliseconds.
+pub const TEST_CONFIG_POLL_VAR: &str = "DECK_TEST_CONFIG_POLL_MS";
+
+/// How often the config file is looked at.
+const CONFIG_POLL: Duration = Duration::from_secs(1);
+
+/// Knobs for tests and where the config lives; the defaults are what `deck daemon` uses.
 #[derive(Debug, Clone)]
 pub struct Options {
     pub clock: Arc<dyn Clock>,
     pub protocol_version: u32,
+    /// The config file. When set, the daemon reads it at start (the `config` it is given
+    /// is then ignored) and watches it; when not, the `config` it is given stays.
+    pub config_path: Option<PathBuf>,
+    pub config_poll: Duration,
 }
 
 impl Default for Options {
@@ -46,6 +61,8 @@ impl Default for Options {
         Self {
             clock: Arc::new(SystemClock::new()),
             protocol_version: PROTOCOL_VERSION,
+            config_path: None,
+            config_poll: CONFIG_POLL,
         }
     }
 }
@@ -61,6 +78,9 @@ impl Options {
         let mut options = Self::default();
         if let Some(v) = env(TEST_PROTOCOL_VERSION_VAR).and_then(|v| v.parse().ok()) {
             options.protocol_version = v;
+        }
+        if let Some(ms) = env(TEST_CONFIG_POLL_VAR).and_then(|v| v.parse::<u64>().ok()) {
+            options.config_poll = Duration::from_millis(ms.max(10));
         }
         options
     }
@@ -86,13 +106,14 @@ impl Daemon {
         paths: DaemonPaths,
         config: Config,
         shutdown: F,
+        options: Options,
         on_locked: H,
     ) -> Result<(), DaemonError>
     where
         F: Future<Output = ()>,
         H: FnOnce() -> io::Result<()>,
     {
-        Self::run_inner(paths, config, shutdown, Options::from_env(), on_locked).await
+        Self::run_inner(paths, config, shutdown, options, on_locked).await
     }
 
     pub async fn run_with<F>(
@@ -139,12 +160,22 @@ impl Daemon {
             .map_err(|e| DaemonError::io(format!("cannot bind {}", paths.socket.display()), e))?;
         tracing::info!(socket = %paths.socket.display(), pid = std::process::id(), "deck daemon listening");
 
+        let (config, notices, watched) = match options.config_path {
+            Some(path) => {
+                let (file, started) = ConfigFile::open(path);
+                (started.config, started.notices, Some(file))
+            }
+            None => (config, Vec::new(), None),
+        };
         let (shared, mut shutdown_rx) = server::Shared::new(
             paths.clone(),
             config,
+            notices,
             options.clock,
             options.protocol_version,
         );
+        let watcher = watched
+            .map(|file| tokio::spawn(watch_config(Arc::clone(&shared), file, options.config_poll)));
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
@@ -166,12 +197,38 @@ impl Daemon {
             }
         }
         drop(listener);
+        if let Some(watcher) = watcher {
+            watcher.abort();
+        }
         shared.finish_shutdown().await;
         if let Err(e) = fs::remove_file(&paths.socket) {
             tracing::warn!("cannot remove the socket: {e}");
         }
         drop(locks);
         Ok(())
+    }
+}
+
+/// Looks at the config file every `poll` and hands what changed to the clients.
+async fn watch_config(shared: Arc<server::Shared>, mut file: ConfigFile, poll: Duration) {
+    let mut ticks = tokio::time::interval(poll);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticks.tick().await;
+    loop {
+        ticks.tick().await;
+        // Reading the file may block (a slow disk): not on an async task.
+        let polled = tokio::task::spawn_blocking(move || {
+            let change = file.poll();
+            (file, change)
+        })
+        .await;
+        let Ok((back, change)) = polled else { return };
+        file = back;
+        match change {
+            Some(Change::Reload { config, notices }) => shared.reload(*config, notices),
+            Some(Change::Rejected(notice)) => shared.notify(notice.level, notice.text),
+            None => {}
+        }
     }
 }
 

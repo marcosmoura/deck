@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Theme
@@ -57,7 +57,7 @@ sidebar_bg = 236
  main  terminal-multiplexer › editor · nvim              ⌥Space ? help  d detach
 ```
 
-With the help overlay open (`⌥Space ?`), its corners are plain: `┌─ Help ─…─┐`.
+With the help overlay open (`⌥Space ?`), its corners are plain: `┌ Help ─…─┐`.
 
 - The sidebar's background is palette colour 236; the active row and the session name are `#cba6f7` (or its nearest palette colour without truecolor); overlay corners are plain. A single-terminal panel has no border since DECK-02; terminal borders return with DECK-03 for panels with several terminals and use the same roles and `border_style`.
 

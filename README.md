@@ -27,4 +27,26 @@ deck kill-server    # stop the daemon and every session
 
 Press `Option+Space d` (`⌥Space d`) to detach: the shell keeps running in the daemon, and `deck` brings you back to it exactly as it was. On macOS, Option must act as Alt in your terminal for `Option+Space` (deck also accepts the non-breaking space some terminals send instead), and a launcher such as Raycast or Alfred may claim `Option+Space`: change either one, or set `prefix` in the config ([keys](docs/features/keys.md)).
 
-More: [sessions](docs/features/sessions.md), [keys](docs/features/keys.md).
+## Configuration
+
+deck reads `~/.config/deck/config.toml` (`$XDG_CONFIG_HOME/deck/config.toml` when that is set); every key is optional.
+
+```sh
+deck config default > ~/.config/deck/config.toml   # a commented file with every key
+deck config check                                  # what is wrong in your file, with line and column
+deck config path                                   # which file deck reads
+```
+
+```toml
+prefix = "C-a"
+sidebar_width = 32
+
+[keys]
+detach = ["d", "q"]
+
+[theme]
+accent = "#cba6f7"
+border_style = "plain"
+```
+
+More: [sessions](docs/features/sessions.md), [keys](docs/features/keys.md), [config](docs/features/config.md).

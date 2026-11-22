@@ -2,16 +2,17 @@
 //! Every colour and glyph of deck's own UI comes from the [`Theme`].
 
 use deck_core::config::HelpGroup;
-use deck_core::protocol::{self, CursorShape};
-use deck_core::theme::Theme;
+use deck_core::protocol::{CursorShape, NoticeLevel};
+use deck_core::theme::{BorderStyle, Theme};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::app::{App, too_small};
+pub(crate) use crate::convert::{color, downsample, style};
 use crate::input::Action;
 use crate::mirror::TermMirror;
 use crate::modal::{Modal, Prompt};
@@ -20,52 +21,6 @@ use crate::sidebar::{self, SIDEBAR_HINTS};
 pub const TOO_SMALL: &str = "deck: window too small";
 /// The status-bar hints while scroll mode is on.
 pub const SCROLL_HINTS: &str = "q exit  g top  G bottom";
-
-pub fn color(c: protocol::Color) -> Color {
-    match c {
-        protocol::Color::Default => Color::Reset,
-        protocol::Color::Indexed(n) => match n {
-            0 => Color::Black,
-            1 => Color::Red,
-            2 => Color::Green,
-            3 => Color::Yellow,
-            4 => Color::Blue,
-            5 => Color::Magenta,
-            6 => Color::Cyan,
-            7 => Color::Gray,
-            8 => Color::DarkGray,
-            9 => Color::LightRed,
-            10 => Color::LightGreen,
-            11 => Color::LightYellow,
-            12 => Color::LightBlue,
-            13 => Color::LightMagenta,
-            14 => Color::LightCyan,
-            15 => Color::White,
-            n => Color::Indexed(n),
-        },
-        protocol::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
-    }
-}
-
-pub fn style(s: protocol::Style) -> Style {
-    let flags = [
-        (protocol::Style::BOLD, Modifier::BOLD),
-        (protocol::Style::DIM, Modifier::DIM),
-        (protocol::Style::ITALIC, Modifier::ITALIC),
-        (protocol::Style::UNDERLINE, Modifier::UNDERLINED),
-        (protocol::Style::REVERSE, Modifier::REVERSED),
-        (protocol::Style::STRIKETHROUGH, Modifier::CROSSED_OUT),
-        (protocol::Style::HIDDEN, Modifier::HIDDEN),
-    ];
-    let modifiers = flags
-        .into_iter()
-        .filter(|(flag, _)| s.has(*flag))
-        .fold(Modifier::empty(), |acc, (_, m)| acc | m);
-    Style::new()
-        .fg(color(s.fg))
-        .bg(color(s.bg))
-        .add_modifier(modifiers)
-}
 
 pub(crate) fn width(text: &str) -> u16 {
     u16::try_from(Span::raw(text).width()).unwrap_or(u16::MAX)
@@ -92,7 +47,7 @@ pub(crate) fn truncate(text: &str, max: u16) -> String {
 
 /// Draws the whole screen; the cursor is shown where the focused terminal's cursor is.
 pub fn draw(frame: &mut Frame, app: &App) {
-    let theme = Theme::default();
+    let theme = &app.theme;
     let area = frame.area();
     if too_small((area.width, area.height)) {
         draw_too_small(frame.buffer_mut(), area);
@@ -104,24 +59,24 @@ pub fn draw(frame: &mut Frame, app: &App) {
             frame.buffer_mut(),
             Rect::new(0, 0, side - 1, area.height - 1),
             app,
-            &theme,
+            theme,
         );
     }
     let panel = Rect::new(side, 0, area.width - side, area.height - 1);
     let cursor = if app.panel_area_empty() {
-        draw_empty(frame.buffer_mut(), panel, app, &theme);
+        draw_empty(frame.buffer_mut(), panel, app, theme);
         None
     } else {
         draw_panel(frame.buffer_mut(), panel, app)
     };
     let bar = Rect::new(0, area.height - 1, area.width, 1);
-    draw_status(frame.buffer_mut(), bar, app, &theme);
+    draw_status(frame.buffer_mut(), bar, app, theme);
     if matches!(app.modal, Some(Modal::Help)) {
         draw_help(
             frame.buffer_mut(),
             Rect::new(0, 0, area.width, area.height - 1),
             app,
-            &theme,
+            theme,
         );
     }
     if let Some(picker) = &app.picker {
@@ -130,13 +85,38 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Rect::new(0, 0, area.width, area.height - 1),
             app,
             picker,
-            &theme,
+            theme,
         );
+    }
+    if !app.truecolor {
+        downsample(frame.buffer_mut());
     }
     if !app.overlay_open()
         && let Some(pos) = cursor
     {
         frame.set_cursor_position(pos);
+    }
+}
+
+/// The ratatui border set of a theme's border style.
+pub(crate) fn border_type(style: BorderStyle) -> BorderType {
+    match style {
+        BorderStyle::Rounded => BorderType::Rounded,
+        BorderStyle::Plain => BorderType::Plain,
+        BorderStyle::Thick => BorderType::Thick,
+        BorderStyle::Double => BorderType::Double,
+    }
+}
+
+/// `base` as a selected row: the theme's selection colours, or reversed while both are
+/// `default`.
+pub(crate) fn selection(theme: &Theme, base: Style) -> Style {
+    let none = Default::default();
+    if theme.selection_fg == none && theme.selection_bg == none {
+        base.add_modifier(Modifier::REVERSED)
+    } else {
+        base.fg(color(theme.selection_fg))
+            .bg(color(theme.selection_bg))
     }
 }
 
@@ -197,7 +177,7 @@ fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     let base = Style::new().bg(color(theme.overlay_bg));
     buf.set_style(rect, base);
     Block::bordered()
-        .border_type(BorderType::Rounded)
+        .border_type(border_type(theme.border_style))
         .border_style(base.fg(color(theme.accent)))
         .title(" Help ")
         .title_bottom(" esc close ")
@@ -306,11 +286,14 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         .bg(color(theme.status_bg));
     buf.set_style(bar, base);
 
-    let flash_style = Style::new().fg(color(if app.flash_error {
-        theme.error
-    } else {
-        theme.warning
-    }));
+    let flash_color = match app.flash_level {
+        Some(NoticeLevel::Info) => theme.muted,
+        Some(NoticeLevel::Warning) => theme.warning,
+        Some(NoticeLevel::Error) => theme.error,
+        None if app.flash_error => theme.error,
+        None => theme.warning,
+    };
+    let flash_style = Style::new().fg(color(flash_color));
     let flash = app.flash.as_ref().map(|(text, _)| text.clone());
     match &app.modal {
         Some(Modal::Prompt(prompt)) => {
@@ -400,7 +383,8 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         .map(|t| format!(" [{}/{}]", t.display_offset, t.history))
         .unwrap_or_default();
     let (right, right_style) = match &app.flash {
-        Some((text, _)) => (text.clone(), flash_style),
+        // A long message (a config error with its location) is cut to the bar.
+        Some((text, _)) => (truncate(text, bar.width), flash_style),
         None if app.scroll_mode.is_some() => (
             SCROLL_HINTS.to_string(),
             Style::new().fg(color(theme.muted)),
@@ -540,9 +524,10 @@ mod tests {
     use super::*;
     use crate::mirror::tests::{frame, line, no_sidebar, view};
     use deck_core::model::TerminalId;
-    use deck_core::protocol::{Cursor, Line, Run, ServerMsg};
+    use deck_core::protocol::{self, Cursor, Line, Run, ServerMsg};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
     use std::time::{Duration, Instant};
 
     fn prefix_hint() -> &'static str {

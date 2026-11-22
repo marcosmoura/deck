@@ -7,11 +7,11 @@ use deck_core::protocol::{ClientMsg, Request, Response, SessionSummary};
 use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Clear, Widget};
+use ratatui::style::Style;
+use ratatui::widgets::{Block, Clear, Widget};
 
 use crate::app::{App, Out};
-use crate::draw::{color, width};
+use crate::draw::{border_type, color, selection, width};
 use crate::modal::{Confirm, Editor, Modal, PromptKind, Retry, Target};
 
 /// The picker's hints, on its bottom row.
@@ -35,6 +35,10 @@ pub struct Picker {
     sessions: Vec<SessionSummary>,
     /// Index into [`Picker::visible`].
     pub selected: usize,
+    /// The first list has arrived.
+    loaded: bool,
+    /// Keys typed before it did, replayed once it has: they act on the list.
+    held: Vec<KeyEvent>,
 }
 
 impl Picker {
@@ -46,6 +50,7 @@ impl Picker {
                 .then_with(|| a.name.cmp(&b.name))
         });
         self.sessions = sessions;
+        self.loaded = true;
         let (found, len) = {
             let visible = self.visible();
             let found = keep.and_then(|name| visible.iter().position(|s| s.name == name));
@@ -106,6 +111,19 @@ impl App {
             return Vec::new();
         };
         let (ctrl, alt) = (key.mods.ctrl, key.mods.alt);
+        if !picker.loaded && !(key.code == KeyCode::Esc && !ctrl && !alt) {
+            // Filter text shows at once; keys that act on the list wait for it, and so does
+            // everything typed after them, to keep the order.
+            let action = matches!(key.code, KeyCode::Enter | KeyCode::Up | KeyCode::Down)
+                || (ctrl && !alt && matches!(key.code, KeyCode::Char('p' | 'n' | 'o' | 'r' | 'x')));
+            if action || !picker.held.is_empty() {
+                picker.held.push(key);
+            } else {
+                picker.edit(&key);
+            }
+            self.picker = Some(picker);
+            return Vec::new();
+        }
         let current = self.mirror.session_name().map(str::to_string);
         let selected = picker
             .selected_session()
@@ -170,16 +188,34 @@ impl App {
         let req = self.requests.pop_front();
         match (req, response) {
             (_, Response::Sessions(list)) => {
-                if let Some(picker) = &mut self.picker {
-                    picker.set_sessions(list);
+                let Some(picker) = &mut self.picker else {
+                    return Vec::new();
+                };
+                picker.set_sessions(list);
+                let held = std::mem::take(&mut picker.held);
+                let mut outs = Vec::new();
+                for key in held {
+                    // A key may close the picker or open a dialog; the rest follow the rules.
+                    outs.extend(if self.modal.is_some() {
+                        self.modal_key(key)
+                    } else if self.picker.is_some() {
+                        self.picker_key(key)
+                    } else {
+                        Vec::new()
+                    });
                 }
-                Vec::new()
+                outs
             }
             (Some(Req::Create(_)), Response::Session { name, .. }) => vec![Out::Switch(name)],
             (Some(Req::Rename(_) | Req::Kill), Response::Ok) if self.picker.is_some() => {
                 vec![self.request(Request::ListSessions, Req::List)]
             }
             (req, Response::Error(text)) => {
+                // A list that cannot be had must not leave the picker waiting.
+                if let (Some(Req::List), Some(picker)) = (&req, &mut self.picker) {
+                    picker.loaded = true;
+                    picker.held.clear();
+                }
                 self.set_flash(text, now, true);
                 let retry = match req {
                     Some(Req::Create(retry)) => retry,
@@ -241,7 +277,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, picker: &Picker, theme: &Th
     let base = Style::new().bg(color(theme.overlay_bg));
     buf.set_style(rect, base);
     Block::bordered()
-        .border_type(BorderType::Rounded)
+        .border_type(border_type(theme.border_style))
         .border_style(base.fg(color(theme.accent)))
         .title("─ Sessions ")
         .render(rect, buf);
@@ -306,7 +342,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, picker: &Picker, theme: &Th
         let y = line(top + u16::try_from(i).unwrap_or(0));
         let selected = first + i == picker.selected;
         let style = if selected {
-            base.add_modifier(Modifier::REVERSED)
+            selection(theme, base)
         } else {
             base
         };
@@ -637,7 +673,7 @@ mod tests {
         assert!(
             buf[(u16::try_from(x).unwrap(), u16::try_from(y).unwrap())]
                 .modifier
-                .contains(Modifier::REVERSED)
+                .contains(ratatui::style::Modifier::REVERSED)
         );
         // The cursor of the terminal is hidden while the overlay is up.
         assert!(a.overlay_open());
@@ -677,6 +713,59 @@ mod tests {
         assert!(joined.contains("● main"), "{joined}");
         assert!(joined.contains("> █"), "{joined}");
         assert!(!joined.contains("switch"), "{joined}");
+    }
+
+    #[test]
+    fn keys_typed_before_the_list_arrives_are_replayed_on_it() {
+        let mut a = app();
+        a.open_picker();
+        assert!(ctrl(&mut a, 'x').is_empty());
+        assert!(a.modal.is_none());
+        a.on_server(ServerMsg::Response(Response::Sessions(sessions())));
+        let Some(Modal::Confirm(c)) = &a.modal else {
+            panic!("no confirmation")
+        };
+        assert!(c.question.starts_with("Kill session \"main\""));
+        // Escape does not wait.
+        let mut a = app();
+        a.open_picker();
+        press(&mut a, ct::KeyCode::Esc, ct::KeyModifiers::NONE);
+        assert!(a.picker.is_none());
+    }
+
+    #[test]
+    fn filter_text_typed_while_loading_shows_at_once_and_keeps_its_order_with_actions() {
+        let mut a = app();
+        a.open_picker();
+        typed(&mut a, "wor");
+        assert_eq!(a.picker.as_ref().unwrap().filter.text(), "wor");
+        // `m`, `^x`, `y`: the filter gets `m`, then the kill is asked of the first match
+        // and `y` answers it instead of going into the filter.
+        typed(&mut a, "k");
+        ctrl(&mut a, 'x');
+        let out_y = typed_y(&mut a);
+        assert!(out_y.is_empty());
+        assert_eq!(a.picker.as_ref().unwrap().filter.text(), "work");
+        let out = a.on_server(ServerMsg::Response(Response::Sessions(sessions())));
+        assert_eq!(
+            out,
+            [Out::Send(ClientMsg::Request(Request::KillSession {
+                name: "work".into()
+            }))]
+        );
+        assert!(a.modal.is_none());
+        assert_eq!(a.picker.as_ref().unwrap().filter.text(), "work");
+    }
+
+    #[test]
+    fn a_failed_list_request_does_not_leave_the_picker_waiting() {
+        let mut a = app();
+        a.open_picker();
+        ctrl(&mut a, 'x');
+        a.on_server(ServerMsg::Response(Response::Error("no list".into())));
+        assert!(a.modal.is_none() && a.flash_error);
+        typed(&mut a, "w");
+        assert_eq!(a.picker.as_ref().unwrap().filter.text(), "w");
     }
 
     #[test]

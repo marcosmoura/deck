@@ -183,6 +183,7 @@ async fn dispatch(
 ) -> bool {
     match decode_payload::<ClientMsg>(payload) {
         Ok(ClientMsg::Viewport { cols, rows }) => shared.viewport(cid, cols, rows),
+        Ok(ClientMsg::ReloadViewport { cols, rows }) => shared.reload_viewport(cid, cols, rows),
         Ok(ClientMsg::Input { terminal, bytes }) => shared.input(cid, terminal, bytes),
         Ok(ClientMsg::Scroll { terminal, to }) => shared.scroll(cid, terminal, to),
         Ok(ClientMsg::Detach) => return false,

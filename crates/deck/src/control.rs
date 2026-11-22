@@ -76,14 +76,10 @@ fn run_client(
     session: Option<String>,
     create: bool,
 ) -> anyhow::Result<ExitCode> {
-    let env = |name: &str| std::env::var(name).ok();
-    let config = deck_core::paths::config_file(&env)?;
-    let config = crate::daemon_cmd::load_config(&config)?;
     let exit = deck_tui::run(deck_tui::Options {
         socket: paths.socket,
         create,
         session,
-        config,
         read_stdin: Box::new(platform::read_stdin),
     });
     finish(exit)

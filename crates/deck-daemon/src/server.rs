@@ -2,7 +2,7 @@
 //!
 //! Lock order: `state`, then a terminal's `emu`. Nothing waits while holding either.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,15 +12,19 @@ use std::time::Duration;
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 use deck_core::action::{Action, ActionError, NameKind, default_project_name, validate_name};
 use deck_core::config::Config;
+use deck_core::layout::panel_area;
 use deck_core::model::{
     LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, Terminal,
     TerminalId,
 };
-use deck_core::protocol::{ByeReason, Frame, OuterColors, ScrollTo, ServerMsg, SessionSummary};
+use deck_core::protocol::{
+    ByeReason, Frame, NoticeLevel, OuterColors, ScrollTo, ServerMsg, SessionSummary,
+};
 use tokio::runtime::Handle;
 use tokio::sync::{Notify, watch};
 
 use crate::clock::{Clock, Fire, Poke, Throttle};
+use crate::config_file::Notice;
 use crate::emu::{EmuEvent, clamp_size, default_palette};
 use crate::env::{self, Env, TerminalIds};
 use crate::lock;
@@ -43,11 +47,15 @@ const WRITER_FLUSH: Duration = Duration::from_secs(1);
 /// The panel area of a session no client has sized yet.
 const DEFAULT_VIEWPORT: (u16, u16) = (80, 24);
 
+/// Notices kept for the next client while none is attached.
+const MAX_PENDING_NOTICES: usize = 20;
+
 /// What an attaching client asks for.
 #[derive(Debug, Clone)]
 pub struct AttachRequest {
     pub session: Option<String>,
     pub create: bool,
+    /// The size of the client's outer window.
     pub cols: u16,
     pub rows: u16,
     pub cwd: PathBuf,
@@ -143,6 +151,8 @@ struct State {
     shutting_down: bool,
     /// Terminals that left the model and are being hung up; shutdown finishes them.
     hanging: Vec<Arc<TermHandle>>,
+    /// Notices no attached client has seen, oldest first.
+    notices: VecDeque<(NoticeLevel, String)>,
 }
 
 impl State {
@@ -256,7 +266,7 @@ fn inner_size(viewport: (u16, u16)) -> (u16, u16) {
 
 pub struct Shared {
     pub paths: DaemonPaths,
-    pub config: Config,
+    config: Mutex<Arc<Config>>,
     pub clock: Arc<dyn Clock>,
     pub version: u32,
     pub handle: Handle,
@@ -288,13 +298,14 @@ impl Shared {
     pub fn new(
         paths: DaemonPaths,
         config: Config,
+        notices: Vec<Notice>,
         clock: Arc<dyn Clock>,
         version: u32,
     ) -> (Arc<Self>, watch::Receiver<bool>) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let shared = Arc::new(Self {
             paths,
-            config,
+            config: Mutex::new(Arc::new(config)),
             clock,
             version,
             handle: Handle::current(),
@@ -304,7 +315,56 @@ impl Shared {
             writers_done: Notify::new(),
             attaching: tokio::sync::Mutex::new(()),
         });
+        for notice in notices {
+            shared.notify(notice.level, notice.text);
+        }
         (shared, shutdown_rx)
+    }
+
+    /// The config in force.
+    pub fn config(&self) -> Arc<Config> {
+        Arc::clone(&lock(&self.config))
+    }
+
+    /// Replaces the config, tells the attached clients, then sends `notices`.
+    pub fn reload(&self, config: Config, notices: Vec<Notice>) {
+        let config = Arc::new(config);
+        *lock(&self.config) = Arc::clone(&config);
+        for client in self.st().clients.values().filter(|c| c.session.is_some()) {
+            client
+                .queue
+                .push_msg(ServerMsg::Config(Box::new(Config::clone(&config))));
+        }
+        for notice in notices {
+            self.notify(notice.level, notice.text);
+        }
+    }
+
+    /// Shows a message to the user: to every attached client, or to the next one that
+    /// attaches when there is none (the last 20 are kept). Always in the log.
+    pub fn notify(&self, level: NoticeLevel, text: String) {
+        match level {
+            NoticeLevel::Info => tracing::info!("{text}"),
+            NoticeLevel::Warning => tracing::warn!("{text}"),
+            NoticeLevel::Error => tracing::error!("{text}"),
+        }
+        let mut st = self.st();
+        let mut delivered = false;
+        for client in st.clients.values().filter(|c| c.session.is_some()) {
+            client.queue.push_msg(ServerMsg::Notice {
+                level,
+                text: text.clone(),
+            });
+            delivered = true;
+        }
+        if !delivered {
+            // The same message again replaces the earlier one: the newest is kept.
+            st.notices.retain(|(l, t)| !(*l == level && *t == text));
+            st.notices.push_back((level, text));
+            while st.notices.len() > MAX_PENDING_NOTICES {
+                st.notices.pop_front();
+            }
+        }
     }
 
     fn st(&self) -> MutexGuard<'_, State> {
@@ -352,12 +412,14 @@ impl Shared {
         // One attach at a time, so a session name that is free while a PTY opens (outside
         // the state lock) is still free when the session is added.
         let _attaching = self.attaching.lock().await;
+        let config = self.config();
+        let viewport = panel_area((a.cols, a.rows), &config, config.sidebar);
         let plan = {
             let mut st = self.st();
             if st.shutting_down {
                 return Err("the daemon is shutting down".into());
             }
-            let plan = self.plan_attach(&mut st, a)?;
+            let plan = self.plan_attach(&mut st, a, viewport)?;
             if matches!(plan, Plan::Create(_)) {
                 st.creating += 1;
             }
@@ -378,7 +440,7 @@ impl Shared {
                     parts.discard();
                     return Err("the daemon is shutting down".into());
                 }
-                let sid = self.add_session(&mut st, new, parts, a);
+                let sid = self.add_session(&mut st, new, parts, a, viewport);
                 (sid, st)
             }
         };
@@ -391,12 +453,21 @@ impl Shared {
         let Some(client) = st.clients.get_mut(&cid) else {
             return Err("connection closed".into());
         };
+        // The config as it is now (a reload may have come while the session was created):
+        // the viewport and the `Welcome` both come from this one read.
+        let config = self.config();
         client.session = Some(sid);
-        client.viewport = Some((a.cols, a.rows));
+        client.viewport = Some(panel_area((a.cols, a.rows), &config, config.sidebar));
         client.active = active;
         let queue = Arc::clone(&client.queue);
 
-        queue.push_msg(ServerMsg::Welcome { session: sid });
+        queue.push_msg(ServerMsg::Welcome {
+            session: sid,
+            config: Box::new(Config::clone(&config)),
+        });
+        for (level, text) in std::mem::take(&mut st.notices) {
+            queue.push_msg(ServerMsg::Notice { level, text });
+        }
         if let Some(sess) = st.session(sid) {
             queue.push_view(sess.model.view(sess.viewport));
         }
@@ -409,7 +480,12 @@ impl Shared {
     }
 
     /// The session an attach joins, or the one it creates.
-    fn plan_attach(&self, st: &mut State, a: &AttachRequest) -> Result<Plan, String> {
+    fn plan_attach(
+        &self,
+        st: &mut State,
+        a: &AttachRequest,
+        viewport: (u16, u16),
+    ) -> Result<Plan, String> {
         let existing = match &a.session {
             None => st
                 .sessions
@@ -432,15 +508,21 @@ impl Shared {
             }
             Some(name) => return Err(format!("no session named {name}")),
         };
-        Ok(Plan::Create(self.new_session_plan(st, name, a)))
+        Ok(Plan::Create(self.new_session_plan(st, name, a, viewport)))
     }
 
-    fn new_session_plan(&self, st: &mut State, name: String, a: &AttachRequest) -> NewSession {
+    fn new_session_plan(
+        &self,
+        st: &mut State,
+        name: String,
+        a: &AttachRequest,
+        viewport: (u16, u16),
+    ) -> NewSession {
         let sid = SessionId(st.alloc());
         let pid = ProjectId(st.alloc());
         let panel = PanelId(st.alloc());
         let tid = TerminalId(st.alloc());
-        let req = self.spawn_request(&a.env, &a.cwd, (a.cols, a.rows), sid, panel, tid);
+        let req = self.spawn_request(&a.env, &a.cwd, viewport, sid, panel, tid);
         NewSession {
             sid,
             pid,
@@ -462,8 +544,8 @@ impl Shared {
         terminal: TerminalId,
     ) -> SpawnRequest {
         let inner = inner_size(viewport);
-        let program = self
-            .config
+        let config = self.config();
+        let program = config
             .shell
             .clone()
             .or_else(|| {
@@ -475,7 +557,7 @@ impl Shared {
             .unwrap_or_else(|| "/bin/sh".to_string());
         SpawnRequest {
             program,
-            args: self.config.shell_args.clone(),
+            args: config.shell_args.clone(),
             cwd: cwd.to_path_buf(),
             env: env::terminal_env(
                 session_env,
@@ -498,6 +580,7 @@ impl Shared {
         new: NewSession,
         parts: terminal::Parts,
         a: &AttachRequest,
+        viewport: (u16, u16),
     ) -> SessionId {
         let NewSession {
             sid,
@@ -544,7 +627,7 @@ impl Shared {
             model,
             env: a.env.clone(),
             terminals: HashMap::from([(tid, handle)]),
-            viewport: Some((a.cols, a.rows)),
+            viewport: Some(viewport),
             title_throttle: Throttle::new(TITLE_VIEW_INTERVAL),
             last_attach: 0,
             startup: Some(tid),
@@ -636,6 +719,26 @@ impl Shared {
         client.viewport = Some((cols, rows));
         client.active = tick;
         self.follow_viewport(&mut st, cid);
+    }
+
+    /// A viewport change that came from a config reload: the client's size is recorded, and
+    /// the terminals follow it only when that client is the one that was active last.
+    pub fn reload_viewport(&self, cid: ClientId, cols: u16, rows: u16) {
+        let mut st = self.st();
+        let Some(client) = st.clients.get_mut(&cid) else {
+            return;
+        };
+        client.viewport = Some((cols, rows));
+        let Some(sid) = client.session else {
+            return;
+        };
+        let newest = st
+            .clients_of(sid)
+            .max_by_key(|(_, c)| c.active)
+            .map(|(id, _)| *id);
+        if newest == Some(cid) {
+            self.follow_viewport(&mut st, cid);
+        }
     }
 
     /// Sizes the session's terminals for the client that was active last.
@@ -1253,7 +1356,7 @@ impl Shared {
                 None => st.unique_name("main"),
             };
             st.creating += 1;
-            self.new_session_plan(&mut st, name, &a)
+            self.new_session_plan(&mut st, name, &a, DEFAULT_VIEWPORT)
         };
         let req = new.req.clone();
         let opened = tokio::task::spawn_blocking(move || terminal::open(&req))
@@ -1268,7 +1371,7 @@ impl Shared {
             return Err(ActionError::ShuttingDown);
         }
         let name = new.name.clone();
-        let sid = self.add_session(&mut st, new, parts, &a);
+        let sid = self.add_session(&mut st, new, parts, &a, DEFAULT_VIEWPORT);
         Ok((sid, name))
     }
 

@@ -43,7 +43,7 @@ Pressed after the prefix.
 | `focus_sidebar`  | `Tab`     | Move the keyboard into the sidebar                                    |
 | `help`           | `?`       | Show the help overlay                                                 |
 
-A key you set replaces the same key on any other action's default keys, with a warning (`key "c" of toggle_sidebar replaces new_panel's`). When you set two actions to one key, the one that sorts first by name wins, with a warning.
+A key you set replaces the same key on any other action's default keys, with a warning (`key "c" of toggle_sidebar replaces new_panel's`). When you set two actions to one key, that is an error naming both actions and the key (`deck config check` shows it, and a running deck keeps the previous config). `detach = []` unbinds an action; the help overlay lists it as `unbound`.
 
 ## Scroll mode
 

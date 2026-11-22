@@ -14,8 +14,8 @@ use deck_core::action::{Action, ActionError};
 use deck_core::config::Config;
 use deck_core::model::{PanelId, ProjectId, SessionView, TerminalId};
 use deck_core::protocol::{
-    ByeReason, ClientMsg, Frame, FrameReader, OuterColors, PROTOCOL_VERSION, Request, Response,
-    Role, ServerMsg, encode,
+    ByeReason, ClientMsg, Frame, FrameReader, NoticeLevel, OuterColors, PROTOCOL_VERSION, Request,
+    Response, Role, ServerMsg, encode,
 };
 use deck_daemon::{Clock, Daemon, DaemonError, DaemonPaths, Options, SystemClock};
 use tempfile::TempDir;
@@ -30,6 +30,8 @@ pub fn config() -> Config {
     Config {
         shell: Some("/bin/sh".into()),
         shell_args: Vec::new(),
+        // Without the sidebar the panel area is the window minus the status-bar row.
+        sidebar: false,
         ..Config::default()
     }
 }
@@ -54,11 +56,37 @@ impl TestDaemon {
         Self::start_with(config(), Options::default()).await
     }
 
+    /// A daemon that reads and watches `<home>/config.toml` (written with `text` first, when
+    /// given), looking at it every `poll`.
+    pub async fn start_watching(text: Option<&str>, poll: Duration) -> Self {
+        let home = tempfile::Builder::new()
+            .prefix("dk")
+            .tempdir_in(short_tmp())
+            .unwrap();
+        if let Some(text) = text {
+            std::fs::write(home.path().join("config.toml"), text).unwrap();
+        }
+        let options = Options {
+            config_path: Some(home.path().join("config.toml")),
+            config_poll: poll,
+            ..Options::default()
+        };
+        Self::start_in(home, Config::default(), options).await
+    }
+
+    pub fn config_file(&self) -> PathBuf {
+        self.home.path().join("config.toml")
+    }
+
     pub async fn start_with(config: Config, options: Options) -> Self {
         let home = tempfile::Builder::new()
             .prefix("dk")
             .tempdir_in(short_tmp())
             .unwrap();
+        Self::start_in(home, config, options).await
+    }
+
+    async fn start_in(home: TempDir, config: Config, options: Options) -> Self {
         let paths = paths_in(home.path());
         let (tx, rx) = oneshot::channel::<()>();
         let task = tokio::spawn({
@@ -145,6 +173,7 @@ pub fn hello_env() -> Vec<(OsString, OsString)> {
 pub struct Attach {
     pub session: Option<String>,
     pub create: bool,
+    /// The outer window; the daemon takes the status-bar row off for the panel area.
     pub cols: u16,
     pub rows: u16,
     pub cwd: PathBuf,
@@ -158,7 +187,7 @@ impl Default for Attach {
             session: None,
             create: true,
             cols: 80,
-            rows: 24,
+            rows: 25,
             cwd: std::env::temp_dir(),
             env: hello_env(),
             colors: None,
@@ -455,6 +484,32 @@ impl Client {
             ServerMsg::Frame(f) => Some(f),
             _ => None,
         })
+    }
+
+    /// The configs the daemon sent after `Welcome`, in order.
+    pub fn configs(&self) -> Vec<&Config> {
+        self.log
+            .iter()
+            .filter_map(|m| match m {
+                ServerMsg::Config(c) => Some(&**c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The notices received, in order.
+    pub fn notices(&self) -> Vec<(NoticeLevel, &str)> {
+        self.log
+            .iter()
+            .filter_map(|m| match m {
+                ServerMsg::Notice { level, text } => Some((*level, text.as_str())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn has_notice(&self, text: &str) -> bool {
+        self.notices().iter().any(|(_, t)| t.contains(text))
     }
 
     pub fn views(&self) -> impl Iterator<Item = &SessionView> {

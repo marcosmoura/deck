@@ -205,6 +205,7 @@ mod tests {
         let q = Queue::new();
         q.push_msg(ServerMsg::Welcome {
             session: SessionId(1),
+            config: Box::default(),
         });
         q.push_view(view("a"));
         q.push_frame(frame(1));
@@ -288,6 +289,7 @@ mod tests {
         q.push_msg(bye());
         q.push_msg(ServerMsg::Welcome {
             session: SessionId(2),
+            config: Box::default(),
         });
         assert!(matches!(q.next().await, Next::Msg(ServerMsg::Bye { .. })));
         assert!(matches!(q.next().await, Next::Done));

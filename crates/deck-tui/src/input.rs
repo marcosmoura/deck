@@ -162,12 +162,15 @@ impl Bindings {
             } else {
                 (labels(def.name).join("/"), def.help.to_string())
             };
-            if keys.is_empty() {
-                continue;
-            }
+            // An action the user unbound (`detach = []`) stays listed, so it is visible.
+            let keys = if keys.trim().is_empty() {
+                "unbound".to_string()
+            } else {
+                format!("{prefix} {keys}")
+            };
             rows.push(HelpRow {
                 group: def.group,
-                keys: format!("{prefix} {keys}"),
+                keys,
                 text,
             });
         }
@@ -385,6 +388,13 @@ mod tests {
         assert!(rows.iter().all(|r| !r.text.is_empty()));
         assert!(!rows.iter().any(|r| r.keys.ends_with(" 2")));
         assert_eq!(rows.len(), DEFAULT_BINDINGS.len() - 8);
+        // An unbound action stays listed as unbound.
+        let config = Config::parse("[keys]\ndetach = []").unwrap().config;
+        let rows = Bindings::from_config(&config).help_rows();
+        assert!(
+            rows.iter()
+                .any(|r| r.keys == "unbound" && r.text == "Detach from the session")
+        );
         // An override shows its new key.
         let config = Config::parse("[keys]\nnew_panel = [\"t\", \"C-n\"]")
             .unwrap()

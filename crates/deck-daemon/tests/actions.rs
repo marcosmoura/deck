@@ -710,7 +710,7 @@ async fn an_unsized_session_starts_its_shell_for_an_80_by_24_viewport() {
             session: Some("quiet".into()),
             create: false,
             cols: 80,
-            rows: 24,
+            rows: 25,
             ..Attach::default()
         },
     )

@@ -8,9 +8,13 @@ use std::time::{Duration, Instant};
 use deck_core::action::Action as Act;
 use deck_core::config::Config;
 use deck_core::keys::{KeyCode, KeyEvent, Modifiers, encode};
+use deck_core::layout;
 use deck_core::model::TerminalId;
 use deck_core::mouse::{self, MouseButton, MouseEvent, MouseKind};
-use deck_core::protocol::{ByeReason, ClientMsg, CursorShape, Modes, ScrollTo, ServerMsg};
+use deck_core::protocol::{
+    ByeReason, ClientMsg, CursorShape, Modes, NoticeLevel, ScrollTo, ServerMsg,
+};
+use deck_core::theme::Theme;
 use ratatui::crossterm::event as ct;
 
 use crate::Exit;
@@ -18,7 +22,7 @@ use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
 use crate::mirror::{Mirror, TermMirror};
 use crate::modal::{Modal, PromptKind, Retry};
 use crate::picker::{Picker, Req};
-use crate::sidebar::{MIN_PANEL_COLS, Sel};
+use crate::sidebar::Sel;
 
 /// Below this many columns or rows the client shows only a message.
 pub const MIN_SIZE: (u16, u16) = (20, 5);
@@ -31,9 +35,13 @@ pub fn too_small((cols, rows): (u16, u16)) -> bool {
     cols < MIN_SIZE.0 || rows < MIN_SIZE.1
 }
 
-/// The panel area of an outer window: everything but the status-bar row.
-pub fn panel_area((cols, rows): (u16, u16)) -> (u16, u16) {
-    (cols, rows.saturating_sub(1))
+/// How long a notice stays in the status bar, by level.
+pub fn notice_span(level: NoticeLevel) -> Duration {
+    Duration::from_secs(match level {
+        NoticeLevel::Info => 2,
+        NoticeLevel::Warning => 4,
+        NoticeLevel::Error => 6,
+    })
 }
 
 /// Lines the wheel scrolls per notch.
@@ -54,19 +62,32 @@ pub enum Out {
 pub struct App {
     pub mirror: Mirror,
     pub bindings: Bindings,
+    /// The colours, border style and glyphs everything is drawn with.
+    pub theme: Theme,
+    /// The config in force: the daemon's, from `Welcome` and `Config`.
+    pub config: Config,
+    /// The outer terminal does truecolor; if not, RGB colours are drawn as palette colours.
+    pub truecolor: bool,
     /// The outer terminal's size in columns and rows.
     pub size: (u16, u16),
     pub armed: bool,
     pub flash: Option<(String, Instant)>,
     /// The flash is an error, drawn in the error colour.
     pub flash_error: bool,
+    /// The level of the notice the flash shows; `None` for a message of the client's own.
+    pub flash_level: Option<NoticeLevel>,
+    /// Notices that arrived while one was showing, oldest first.
+    notices: VecDeque<(NoticeLevel, String)>,
     /// The terminal scroll mode was entered for.
     pub scroll_mode: Option<TerminalId>,
     /// A scroll of ours is on its way that brings the terminal to the bottom, which must
     /// not end scroll mode.
     bottom_expected: bool,
-    /// Typed ahead while the colours were queried; replayed by [`App::start`].
+    /// Typed ahead while the colours were queried, or before the daemon's config arrived;
+    /// replayed by [`App::start`].
     typeahead: Vec<KeyEvent>,
+    /// False until the daemon's config is in (see [`App::hold_until_configured`]).
+    configured: bool,
     /// Keys and pastes for a terminal that is not there yet, sent when it is.
     queued: Vec<Queued>,
     dirty: bool,
@@ -103,13 +124,19 @@ impl App {
         Self {
             mirror: Mirror::default(),
             bindings: Bindings::from_config(config),
+            theme: config.theme.clone(),
+            config: config.clone(),
+            truecolor: true,
             size,
             armed: false,
             flash: None,
             flash_error: false,
+            flash_level: None,
+            notices: VecDeque::new(),
             scroll_mode: None,
             bottom_expected: false,
             typeahead: keys_from_bytes(typeahead),
+            configured: true,
             queued: Vec::new(),
             dirty: true,
             modal: None,
@@ -136,22 +163,75 @@ impl App {
     /// Whether the sidebar is on screen: not hidden by the user, and the panel area keeps
     /// its minimum width.
     pub fn sidebar_visible(&self) -> bool {
-        !self.sidebar_hidden && self.size.0 >= self.sidebar_width + 1 + MIN_PANEL_COLS
+        self.sidebar_cols() > 0
     }
 
     /// Columns the sidebar and its separator take.
     pub fn sidebar_cols(&self) -> u16 {
-        if self.sidebar_visible() {
-            self.sidebar_width + 1
-        } else {
-            0
-        }
+        layout::sidebar_cols(self.size.0, self.sidebar_width, !self.sidebar_hidden)
     }
 
     /// The panel area, in columns and rows: what the daemon sizes terminals for.
     pub fn viewport(&self) -> (u16, u16) {
-        let (cols, rows) = panel_area(self.size);
-        (cols - self.sidebar_cols(), rows)
+        layout::panel_area(self.size, &self.config, !self.sidebar_hidden)
+    }
+
+    /// Takes in the daemon's config, changing only what differs from the one in force (a
+    /// sidebar the user hid stays hidden unless `sidebar` itself changed). An armed prefix
+    /// and an open prompt are kept.
+    pub(crate) fn apply_config(&mut self, config: Config) -> Vec<Out> {
+        if config == self.config {
+            return Vec::new();
+        }
+        let before = self.viewport();
+        let old = std::mem::replace(&mut self.config, config);
+        let new = &self.config;
+        self.dirty = true;
+        if new.theme != old.theme {
+            self.theme = new.theme.clone();
+        }
+        if new.prefix != old.prefix || new.keys != old.keys {
+            self.bindings = Bindings::from_config(new);
+        }
+        let mut sized = false;
+        if new.sidebar != old.sidebar {
+            self.sidebar_hidden = !new.sidebar;
+            sized = true;
+        }
+        if new.sidebar_width != old.sidebar_width {
+            self.sidebar_width = new.sidebar_width;
+            sized = true;
+        }
+        if !sized {
+            return Vec::new();
+        }
+        if !self.sidebar_visible() {
+            self.sidebar_focus = false;
+        }
+        self.ensure_visible();
+        let (cols, rows) = self.viewport();
+        if too_small(self.size) || (cols, rows) == before {
+            return Vec::new();
+        }
+        // Not a claim on the terminals' size: the client the user last typed in keeps it.
+        vec![Out::Send(ClientMsg::ReloadViewport { cols, rows })]
+    }
+
+    /// A message from the daemon for the status bar: at once when nothing of the daemon's
+    /// is showing, else after the ones before it.
+    fn push_notice(&mut self, level: NoticeLevel, text: String, now: Instant) {
+        if self.flash.is_some() && self.flash_level.is_some() {
+            self.notices.push_back((level, text));
+        } else {
+            self.show_notice(level, text, now);
+        }
+    }
+
+    fn show_notice(&mut self, level: NoticeLevel, text: String, now: Instant) {
+        self.flash = Some((text, now + notice_span(level)));
+        self.flash_error = level == NoticeLevel::Error;
+        self.flash_level = Some(level);
+        self.dirty = true;
     }
 
     fn viewport_msg(&self) -> Out {
@@ -188,6 +268,7 @@ impl App {
         let span = if error { ERROR_FLASH_FOR } else { FLASH_FOR };
         self.flash = Some((text, now + span));
         self.flash_error = error;
+        self.flash_level = None;
         self.dirty = true;
     }
 
@@ -203,7 +284,13 @@ impl App {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.dirty
+        self.dirty && self.configured
+    }
+
+    /// Keeps keys and drawing back until the first `Welcome` brings the daemon's config:
+    /// before it the bindings and the theme are not the user's.
+    pub fn hold_until_configured(&mut self) {
+        self.configured = false;
     }
 
     /// When the flash message ends.
@@ -212,7 +299,7 @@ impl App {
     }
 
     pub fn take_dirty(&mut self) -> bool {
-        std::mem::take(&mut self.dirty)
+        self.configured && std::mem::take(&mut self.dirty)
     }
 
     /// Drops an expired flash message.
@@ -220,7 +307,11 @@ impl App {
         if self.flash.as_ref().is_some_and(|(_, until)| now >= *until) {
             self.flash = None;
             self.flash_error = false;
+            self.flash_level = None;
             self.dirty = true;
+            if let Some((level, text)) = self.notices.pop_front() {
+                self.show_notice(level, text, now);
+            }
         }
     }
 
@@ -232,6 +323,10 @@ impl App {
 
     pub fn on_event(&mut self, event: ct::Event, now: Instant) -> Vec<Out> {
         match event {
+            ct::Event::Key(key) if !self.configured => {
+                self.typeahead.extend(convert(key));
+                Vec::new()
+            }
             ct::Event::Key(key) => convert(key).map_or_else(Vec::new, |k| self.on_key(k, now)),
             ct::Event::Paste(text) => self.on_paste(text),
             ct::Event::Resize(cols, rows) => {
@@ -255,7 +350,7 @@ impl App {
     /// The part of the focused terminal's inner area under a cell of the outer window, as
     /// a 0-based cell of that area.
     fn inner_cell(&self, term: &TermMirror, column: u16, row: u16) -> Option<(u16, u16)> {
-        let (panel_cols, panel_rows) = panel_area(self.size);
+        let (panel_cols, panel_rows) = (self.size.0, self.size.1.saturating_sub(1));
         let col = column.checked_sub(self.sidebar_cols())?;
         let inside =
             col < term.size.0 && row < term.size.1 && column < panel_cols && row < panel_rows;
@@ -698,7 +793,19 @@ impl App {
     pub fn on_server(&mut self, msg: ServerMsg) -> Vec<Out> {
         self.dirty = true;
         match msg {
-            ServerMsg::Welcome { .. } => Vec::new(),
+            ServerMsg::Welcome { config, .. } => {
+                let mut outs = self.apply_config(*config);
+                if !self.configured {
+                    self.configured = true;
+                    outs.extend(self.start(Instant::now()));
+                }
+                outs
+            }
+            ServerMsg::Config(config) => self.apply_config(*config),
+            ServerMsg::Notice { level, text } => {
+                self.push_notice(level, text, Instant::now());
+                Vec::new()
+            }
             ServerMsg::Response(response) => self.response(response, Instant::now()),
             ServerMsg::ActionResult(result) => {
                 self.action_result(result, Instant::now());

@@ -298,7 +298,7 @@ pub fn start(
         emu: Mutex::new(Some(Emu::new(
             req.cols,
             req.rows,
-            shared.config.scrollback_lines,
+            shared.config().scrollback_lines,
         ))),
         master: Mutex::new(parts.master),
         input: Mutex::new(Some(input_tx)),
