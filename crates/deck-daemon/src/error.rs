@@ -11,6 +11,10 @@ pub enum DaemonError {
     StateInUse(PathBuf),
     #[error("unsafe runtime directory {}: {reason}", path.display())]
     UnsafeRuntimeDir { path: PathBuf, reason: String },
+    #[error(
+        "state.json was written by a newer deck (version {0}); upgrade deck or run \"deck kill-server --forget\""
+    )]
+    NewerState(u32),
     #[error("{context}: {source}")]
     Io {
         context: String,

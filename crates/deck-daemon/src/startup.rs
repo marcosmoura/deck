@@ -21,6 +21,11 @@ pub struct DaemonPaths {
 }
 
 impl DaemonPaths {
+    /// The saved state.
+    pub fn state_file(&self) -> PathBuf {
+        self.state_dir.join("state.json")
+    }
+
     pub fn from_env(env: EnvLookup<'_>, uid: u32) -> Result<Self, PathError> {
         Ok(Self {
             runtime_dir: paths::runtime_dir(env, uid),

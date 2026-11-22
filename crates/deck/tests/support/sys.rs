@@ -31,3 +31,10 @@ pub fn terminate(pid: i32) {
     let rc = unsafe { libc::kill(pid, libc::SIGTERM) };
     assert_eq!(rc, 0, "kill: {}", std::io::Error::last_os_error());
 }
+
+/// Sends a signal to a process.
+pub fn signal(pid: i32, signal: i32) {
+    // SAFETY: plain `kill(2)`; no memory is involved.
+    let rc = unsafe { libc::kill(pid, signal) };
+    assert_eq!(rc, 0, "kill: {}", std::io::Error::last_os_error());
+}

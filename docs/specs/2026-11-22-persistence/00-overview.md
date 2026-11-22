@@ -41,8 +41,8 @@ Sessions survive the daemon stopping: after `deck kill-server`, a crash, a logou
 
 | Sub-spec                 | Type      | Crate                        | Summary                                                                   | Depends | Status |
 | ------------------------ | --------- | ---------------------------- | ------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-save-restore.md) | shippable | deck-daemon, deck-core, deck | Save `state.json`, restore on start, shutdown safety, notices, `--forget` | DECK-03 | todo   |
-| [02](02-cwd-tracking.md) | shippable | deck-daemon, deck-core       | Live cwd from OSC 7 and the OS; restore into it; new terminals inherit it | 01      | todo   |
+| [01](01-save-restore.md) | shippable | deck-daemon, deck-core, deck | Save `state.json`, restore on start, shutdown safety, notices, `--forget` | DECK-03 | done   |
+| [02](02-cwd-tracking.md) | shippable | deck-daemon, deck-core       | Live cwd from OSC 7 and the OS; restore into it; new terminals inherit it | 01      | done   |
 
 ## Limitations
 

@@ -76,7 +76,11 @@ fn kill_server_stops_the_daemon_and_waits_for_the_lock() {
     assert!(!home.daemon_running());
     wait_until("the daemon to exit", TIMEOUT, || !sys::alive(pid));
 
-    assert_eq!(stdout(&home.run_deck(&["ls"])), "no sessions\n");
+    // The session the probe created was saved when the daemon stopped.
+    assert_eq!(
+        stdout(&home.run_deck(&["ls"])),
+        "no daemon running; 1 saved session will be restored by \"deck\"\n"
+    );
     let again = home.run_deck(&["kill-server"]);
     assert!(again.status.success());
     assert_eq!(stdout(&again), "no deck daemon running\n");

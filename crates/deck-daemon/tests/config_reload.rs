@@ -12,6 +12,18 @@ use support::{Attach, Client, TestDaemon};
 const POLL: Duration = Duration::from_millis(20);
 const SHELL: &str = "shell = \"/bin/sh\"\nshell_args = []\n";
 
+/// Writes the config the way editors save: a temp file renamed over it, so the daemon's poll
+/// never sees a half-written (empty, hence valid) file.
+#[allow(
+    clippy::unwrap_used,
+    reason = "integration-test helpers fail the test on error"
+)]
+fn save(path: &std::path::Path, contents: String) {
+    let tmp = path.with_extension("toml.tmp");
+    fs::write(&tmp, contents).unwrap();
+    fs::rename(&tmp, path).unwrap();
+}
+
 fn text(extra: &str) -> String {
     format!("{SHELL}{extra}")
 }
@@ -124,16 +136,15 @@ async fn an_invalid_file_keeps_the_config_and_names_the_line() {
 async fn two_user_keys_on_one_key_are_an_error_and_a_replaced_default_a_warning() {
     let daemon = watching("").await;
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
-    fs::write(
-        daemon.config_file(),
+    save(
+        &daemon.config_file(),
         text("[keys]\ndetach = \"q\"\nscroll = \"q\"\n"),
-    )
-    .unwrap();
+    );
     client.wait(|c| !c.notices().is_empty()).await;
     assert_eq!(client.notices()[0].0, NoticeLevel::Error);
     assert!(client.configs().is_empty());
 
-    fs::write(daemon.config_file(), text("[keys]\ndetach = \"n\"\n")).unwrap();
+    save(&daemon.config_file(), text("[keys]\ndetach = \"n\"\n"));
     client.wait(|c| c.has_notice("replaces")).await;
     let warning = client
         .notices()

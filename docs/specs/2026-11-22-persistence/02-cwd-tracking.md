@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 02 — Working directory tracking
@@ -14,7 +14,7 @@ deck knows where each shell is. After `cd` in a shell and a daemon restart, the 
 1. **OSC 7** scanner in `deck-core::osc7`: a streaming scanner fed the PTY output chunks (sequences may be split across chunks) that yields paths from `ESC ] 7 ; file://<host>/<path> (BEL | ESC \)`, percent-decoded. It accepts a host that is empty, `localhost`, or the machine's hostname (passed in), compared case-insensitively, either in full or as its short name (before the first `.`), so `Mac.local` and `mac` both match. It yields only paths that decode to valid UTF-8, are absolute and contain no NUL; others are ignored. It buffers at most 4 KiB of one sequence; a longer or unterminated sequence is dropped. The bytes still go to the emulator unchanged.
 2. **OS query** in `deck-daemon::platform`: `process_cwd(pid) -> Option<PathBuf>`: `readlink /proc/<pid>/cwd` on Linux, `proc_pidinfo(PROC_PIDVNODEPATHINFO)` on macOS (declare the struct locally if `libc` does not expose it). It returns `None` on any failure and for paths that are not valid UTF-8. The pid is the terminal's own child process (the shell or the explicit program, from portable-pty), never the PTY's foreground process group.
 3. **Tracking**: a terminal's `cwd` is updated from OSC 7 immediately. A terminal that has ever reported OSC 7 is never polled again. For the others, one tick every 5 s queries `process_cwd` for all of them in one `spawn_blocking` call. A cwd that differs from the stored one marks the state dirty (sub-spec 01's save); an unchanged one does not. The interval can be shortened for tests with the hidden environment variable `DECK_TEST_CWD_POLL_MS`, read by the daemon at start.
-4. **Uses**: the saved and restored cwd; `NewTerminal` starts in the cwd of the target panel's focused terminal (falling back to the project root); `SessionView` carries each terminal's cwd (DECK-05 prints it).
+4. **Uses**: the saved and restored cwd; `NewTerminal` starts in the cwd of the target panel's focused terminal (falling back to that terminal's launch directory, then the project root, taking the first that exists); `SessionView` carries each terminal's cwd (DECK-05 prints it).
 5. **Cost**: the query never runs on the async worker threads, a tick covers every terminal in one blocking call, and frame delivery continues while a query is slow.
 
 ## Acceptance criteria

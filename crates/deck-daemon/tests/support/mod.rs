@@ -81,6 +81,30 @@ impl TestDaemon {
         Self::start_in(home, Config::default(), options).await
     }
 
+    /// A temp home that no daemon runs on yet.
+    pub fn new_home() -> TempDir {
+        tempfile::Builder::new()
+            .prefix("dk")
+            .tempdir_in(short_tmp())
+            .unwrap()
+    }
+
+    /// A daemon on an existing home (its state is read).
+    pub async fn start_on(home: TempDir) -> Self {
+        Self::start_in(home, config(), Options::default()).await
+    }
+
+    /// A daemon on an existing home with the given options.
+    pub async fn start_on_with(home: TempDir, options: Options) -> Self {
+        Self::start_in(home, config(), options).await
+    }
+
+    /// Stops the daemon like `SIGTERM` does and returns its home.
+    pub async fn stop_keep(mut self) -> TempDir {
+        self.stop_inner().await.expect("a clean stop");
+        self.home
+    }
+
     pub fn config_file(&self) -> PathBuf {
         self.home.path().join("config.toml")
     }
@@ -147,6 +171,17 @@ impl TestDaemon {
             .await
             .expect("daemon stopped in time")
             .expect("daemon task did not panic")
+    }
+
+    /// Waits for a daemon that stops by itself, and returns its home.
+    pub async fn wait_exit_keep(mut self) -> TempDir {
+        let task = self.task.take().expect("daemon task");
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("daemon stopped in time")
+            .expect("daemon task did not panic")
+            .expect("a clean stop");
+        self.home
     }
 
     /// Waits for a daemon that stops by itself.

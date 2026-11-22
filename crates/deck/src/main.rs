@@ -56,8 +56,12 @@ enum Command {
     },
     /// Lists the sessions.
     Ls,
-    /// Stops the daemon.
-    KillServer,
+    /// Stops the daemon; its sessions are restored by the next `deck`.
+    KillServer {
+        /// Also delete the saved state, so the next `deck` starts fresh.
+        #[arg(long)]
+        forget: bool,
+    },
     /// Prints the default config, checks a config file or shows where it lives.
     Config {
         #[command(subcommand)]
@@ -88,7 +92,7 @@ fn main() -> ExitCode {
         Some(Command::KillSession { name }) => control::kill_session(name),
         Some(Command::RenameSession { old, new }) => control::rename_session(old, new),
         Some(Command::Ls) => control::ls(),
-        Some(Command::KillServer) => control::kill_server(),
+        Some(Command::KillServer { forget }) => control::kill_server(forget),
         Some(Command::Config { command }) => config_cmd::run(command),
         Some(Command::Probe { session }) => control::probe(session),
     };
@@ -124,5 +128,6 @@ mod tests {
         assert!(!ok(&["attach", "-c"]));
         assert!(ok(&["kill-session", "x"]) && !ok(&["kill-session"]));
         assert!(ok(&["rename-session", "a", "b"]) && !ok(&["rename-session", "a"]));
+        assert!(ok(&["kill-server"]) && ok(&["kill-server", "--forget"]));
     }
 }

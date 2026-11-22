@@ -43,9 +43,9 @@ A session stays until it is killed; when its last terminal exits, the project st
 
 ## Commands
 
-- `deck ls` lists the sessions by name, one per line: the name, the number of projects and of terminals and `(attached)` while a client is attached. It prints `no sessions` when there are none.
+- `deck ls` lists the sessions by name, one per line: the name, the number of projects and of terminals and `(attached)` while a client is attached. It prints `no sessions` when there are none. With no daemon running but saved sessions, it prints `no daemon running; <n> saved sessions will be restored by "deck"` and starts nothing.
 - `deck kill-session <name>` kills a session and its terminals; `deck rename-session <old> <new>` renames one. A client attached to it sees the change at once. Errors print the daemon's message and exit 1. Neither starts the daemon: without one they print `no deck daemon running` and exit 1.
-- `deck kill-server` stops the daemon and every session, whatever protocol version the daemon speaks.
+- `deck kill-server` stops the daemon, whatever protocol version it speaks. The sessions are saved first and come back with the next `deck` ([Persistence](persistence.md)). `deck kill-server --forget` also deletes the saved state; with no daemon running it only deletes it and prints `state cleared`.
 
 ## Messages when deck ends
 
@@ -58,7 +58,7 @@ A session stays until it is killed; when its last terminal exits, the project st
 | `deck: terminal exited at once (status N); see <log>` | 1    | the shell failed to start; the log has details |
 | `deck: <text>`                                        | 1    | any other error from the daemon                |
 
-A deck and a daemon of different versions refuse to talk: `the daemon speaks protocol N, this deck speaks M; run "deck kill-server" to restart it`.
+A deck and a daemon of different versions refuse to talk: `the daemon speaks protocol N, this deck speaks M; run "deck kill-server" to restart it; sessions are restored when the daemon saved them`.
 
 deck also restores the terminal on errors, panics, `SIGTERM` and `SIGHUP`.
 

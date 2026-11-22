@@ -2,7 +2,7 @@
 //!
 //! Lock order: `state`, then a terminal's `emu`. Nothing waits while holding either.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,6 +24,7 @@ use deck_core::protocol::{
 use tokio::runtime::Handle;
 use tokio::sync::{Notify, watch};
 
+use crate::CwdQuery;
 use crate::clock::{Clock, Fire, Poke, Throttle};
 use crate::config_file::Notice;
 use crate::emu::{EmuEvent, clamp_size, default_palette};
@@ -32,6 +33,9 @@ use crate::lock;
 use crate::queue::Queue;
 use crate::startup::DaemonPaths;
 use crate::terminal::{self, SpawnRequest, TermHandle};
+
+mod cwd;
+mod restore;
 
 pub type ClientId = u64;
 
@@ -164,6 +168,10 @@ struct State {
     hanging: Vec<Arc<TermHandle>>,
     /// Notices no attached client has seen, oldest first.
     notices: VecDeque<(NoticeLevel, String)>,
+    /// A save is scheduled and has not taken its snapshot yet.
+    save_pending: bool,
+    /// Terminals started by a restore: one that fails at once is reported.
+    restored: HashSet<TerminalId>,
 }
 
 impl State {
@@ -298,6 +306,20 @@ fn check_dir(dir: &Path) -> Result<(), ActionError> {
     Ok(())
 }
 
+/// The configured shell, else the session's `SHELL`, else `/bin/sh`.
+fn shell_program(config: &Config, session_env: &Env) -> String {
+    config
+        .shell
+        .clone()
+        .or_else(|| {
+            env::lookup(session_env, "SHELL")
+                .and_then(|v| v.to_str())
+                .map(str::to_string)
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
 fn program_name(program: &str) -> String {
     Path::new(program)
         .file_name()
@@ -315,6 +337,11 @@ pub struct Shared {
     writers: AtomicUsize,
     writers_done: Notify,
     attaching: tokio::sync::Mutex<()>,
+    /// Serializes the writes of `state.json`; taken before `state`.
+    save_lock: Mutex<()>,
+    /// The machine's host name, for OSC 7.
+    pub(crate) hostname: String,
+    cwd_query: CwdQuery,
 }
 
 impl std::fmt::Debug for Shared {
@@ -341,6 +368,7 @@ impl Shared {
         notices: Vec<Notice>,
         clock: Arc<dyn Clock>,
         version: u32,
+        cwd_query: CwdQuery,
     ) -> (Arc<Self>, watch::Receiver<bool>) {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let shared = Arc::new(Self {
@@ -354,6 +382,9 @@ impl Shared {
             writers: AtomicUsize::new(0),
             writers_done: Notify::new(),
             attaching: tokio::sync::Mutex::new(()),
+            save_lock: Mutex::new(()),
+            hostname: crate::platform::hostname(),
+            cwd_query,
         });
         for notice in notices {
             shared.notify(notice.level, notice.text);
@@ -490,6 +521,7 @@ impl Shared {
             env::refresh(&mut sess.env, &a.env);
             sess.last_attach = active;
         }
+        self.mark_dirty(&mut st);
         let Some(client) = st.clients.get_mut(&cid) else {
             return Err("connection closed".into());
         };
@@ -587,16 +619,7 @@ impl Shared {
         terminal: TerminalId,
     ) -> SpawnRequest {
         let config = self.config();
-        let program = config
-            .shell
-            .clone()
-            .or_else(|| {
-                env::lookup(session_env, "SHELL")
-                    .and_then(|v| v.to_str())
-                    .map(str::to_string)
-            })
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/bin/sh".to_string());
+        let program = shell_program(&config, session_env);
         SpawnRequest {
             program,
             args: config.shell_args.clone(),
@@ -675,6 +698,7 @@ impl Shared {
             last_attach: 0,
             startup: Some(tid),
         });
+        self.mark_dirty(st);
         sid
     }
 
@@ -690,7 +714,15 @@ impl Shared {
                 name: s.model.name.clone(),
                 attached_clients: u32::try_from(st.clients_of(s.model.id).count())
                     .unwrap_or(u32::MAX),
-                terminals: u32::try_from(s.terminals.len()).unwrap_or(u32::MAX),
+                terminals: u32::try_from(
+                    s.model
+                        .projects
+                        .iter()
+                        .flat_map(|p| &p.panels)
+                        .map(|p| p.terminals.len())
+                        .sum::<usize>(),
+                )
+                .unwrap_or(u32::MAX),
                 projects: u32::try_from(s.model.projects.len()).unwrap_or(u32::MAX),
                 last_attached: s.last_attach,
             })
@@ -967,7 +999,7 @@ impl Shared {
     }
 
     /// A terminal's process exited and its output was read.
-    pub fn terminal_gone(&self, h: &Arc<TermHandle>, status: u32) {
+    pub fn terminal_gone(self: &Arc<Self>, h: &Arc<TermHandle>, status: u32) {
         let mut st = self.st();
         if st.shutting_down {
             return;
@@ -992,6 +1024,7 @@ impl Shared {
 
         let now = self.clock.now();
         let quick = status != 0 && now.saturating_sub(h.started) < QUICK_EXIT;
+        let was_restored = st.restored.remove(&h.id);
         if quick {
             tracing::error!(
                 terminal = %h.id,
@@ -1032,11 +1065,22 @@ impl Shared {
             return;
         }
         self.settle(&mut st, sid, before);
+        drop(st);
+        if quick && was_restored {
+            self.notify(
+                NoticeLevel::Warning,
+                format!(
+                    "restored terminal {} exited at once (status {status}); removed",
+                    h.program
+                ),
+            );
+        }
     }
 
     /// After a change to a session: its terminals match the viewport, every client has the
     /// new view, and a new active panel is shown in full.
-    fn settle(&self, st: &mut State, sid: SessionId, before: Option<PanelId>) {
+    fn settle(self: &Arc<Self>, st: &mut State, sid: SessionId, before: Option<PanelId>) {
+        self.mark_dirty(st);
         let Some(sess) = st.session(sid) else {
             return;
         };
@@ -1055,7 +1099,7 @@ impl Shared {
 
     /// Sends `Bye` to the session's clients and removes the session. Its terminals are not
     /// touched.
-    fn end_session(&self, st: &mut State, sid: SessionId, reason: ByeReason) {
+    fn end_session(self: &Arc<Self>, st: &mut State, sid: SessionId, reason: ByeReason) {
         for client in st.clients.values_mut().filter(|c| c.session == Some(sid)) {
             client.queue.push_msg(ServerMsg::Bye {
                 reason: reason.clone(),
@@ -1063,6 +1107,7 @@ impl Shared {
             client.session = None;
         }
         st.sessions.retain(|s| s.model.id != sid);
+        self.mark_dirty(st);
     }
 
     // Actions.
@@ -1417,7 +1462,7 @@ impl Shared {
             let (c, r) = layout::inner(rect, n + 1);
             Ok((n, clamp_size(c, r)))
         };
-        let (panel_id, tid, req) = {
+        let (panel_id, tid, req, dirs) = {
             let mut st = self.st();
             if st.shutting_down {
                 return Err(ActionError::ShuttingDown);
@@ -1427,24 +1472,45 @@ impl Shared {
                 .or_else(|| sess.model.active_panel())
                 .ok_or(ActionError::NoActivePanel)?;
             let (_, size) = room(sess, panel_id)?;
-            let root = sess
+            let project = sess
                 .model
                 .projects
                 .iter()
                 .find(|p| p.panels.iter().any(|x| x.id == panel_id))
-                .map(|p| p.root.clone())
                 .ok_or(ActionError::NoSuchPanel(panel_id))?;
+            let root = project.root.clone();
+            // Where the panel's focused terminal is, else where it started, else the root.
+            let focused = project
+                .panels
+                .iter()
+                .find(|x| x.id == panel_id)
+                .and_then(|p| {
+                    let id = p.focused_terminal?;
+                    p.terminals.iter().find(|t| t.id == id)
+                });
+            let dirs = [
+                focused.and_then(|t| t.cwd.clone()),
+                focused.map(|t| t.launch.cwd.clone()),
+                Some(root.clone()),
+            ];
             let env = sess.env.clone();
             let tid = TerminalId(st.alloc());
             let req = self.spawn_request(&env, &root, size, sid, panel_id, tid);
-            (panel_id, tid, req)
+            (panel_id, tid, req, dirs)
         };
 
-        let open_req = req.clone();
-        let parts = tokio::task::spawn_blocking(move || terminal::open(&open_req))
-            .await
-            .map_err(|e| ActionError::Spawn(format!("could not start {}: {e}", req.program)))?
-            .map_err(ActionError::Spawn)?;
+        let program = req.program.clone();
+        let (parts, req) = tokio::task::spawn_blocking(move || {
+            // The directory may be gone: the first one that exists.
+            let mut req = req;
+            if let Some(dir) = restore::first_dir(dirs) {
+                req.cwd = dir;
+            }
+            terminal::open(&req).map(|parts| (parts, req))
+        })
+        .await
+        .map_err(|e| ActionError::Spawn(format!("could not start {program}: {e}")))?
+        .map_err(ActionError::Spawn)?;
 
         let mut st = self.st();
         // The world may have changed while the process started.
@@ -1624,7 +1690,9 @@ impl Shared {
 
     /// Lets the writers deliver their `Bye`, then hangs up every terminal (`SIGHUP`, then
     /// `SIGKILL` after two seconds).
-    pub async fn finish_shutdown(&self) {
+    pub async fn finish_shutdown(self: &Arc<Self>) {
+        // The flag is set, so the model no longer changes: this is the state that stays.
+        self.save_final().await;
         let deadline = tokio::time::Instant::now() + WRITER_FLUSH;
         while self.writers.load(Ordering::Acquire) > 0 {
             if tokio::time::timeout_at(deadline, self.writers_done.notified())

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use deck_core::model::{SessionId, TerminalId};
+use deck_core::osc7::Osc7Scanner;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::{Notify, oneshot};
 
@@ -61,6 +62,8 @@ pub struct TermHandle {
     eof: AtomicBool,
     exited: AtomicBool,
     closed: AtomicBool,
+    /// The shell reported its directory with OSC 7 at least once.
+    reports_cwd: AtomicBool,
 }
 
 impl std::fmt::Debug for TermHandle {
@@ -128,6 +131,14 @@ impl TermHandle {
     pub fn close(&self) {
         self.closed.store(true, Ordering::Release);
         self.dirty.notify_one();
+    }
+
+    pub fn reports_cwd(&self) -> bool {
+        self.reports_cwd.load(Ordering::Acquire)
+    }
+
+    pub fn set_reports_cwd(&self) {
+        self.reports_cwd.store(true, Ordering::Release);
     }
 
     pub fn has_exited(&self) -> bool {
@@ -311,6 +322,7 @@ pub fn start(
         eof: AtomicBool::new(false),
         exited: AtomicBool::new(false),
         closed: AtomicBool::new(false),
+        reports_cwd: AtomicBool::new(false),
     });
 
     spawn_writer(parts.writer, input_rx, queued);
@@ -366,6 +378,7 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
         .name("pty-reader".into())
         .spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
+            let mut osc7 = Osc7Scanner::new(&s.hostname);
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
@@ -375,6 +388,9 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
                         };
                         h.last_data.store(nanos(s.clock.now()), Ordering::Release);
                         s.output(&h, bytes);
+                        for path in osc7.feed(bytes) {
+                            s.osc7_cwd(&h, path);
+                        }
                         h.activity.notify_one();
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}

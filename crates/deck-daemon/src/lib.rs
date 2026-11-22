@@ -1,5 +1,5 @@
-//! The daemon: socket server, sessions, PTYs, terminal emulation and frames. Persistence
-//! and agent status come with later specs.
+//! The daemon: socket server, sessions, PTYs, terminal emulation, frames and persistence.
+//! Agent status comes with a later spec.
 
 mod clock;
 mod config_file;
@@ -7,6 +7,8 @@ mod conn;
 mod emu;
 mod env;
 mod error;
+mod persist;
+mod platform;
 mod queue;
 mod server;
 mod startup;
@@ -20,7 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use deck_core::config::Config;
-use deck_core::protocol::PROTOCOL_VERSION;
+use deck_core::protocol::{NoticeLevel, PROTOCOL_VERSION};
 use tokio::net::UnixListener;
 
 use config_file::{Change, ConfigFile};
@@ -28,6 +30,8 @@ use config_file::{Change, ConfigFile};
 pub use clock::{Clock, Drain, Fire, ManualClock, Poke, SystemClock, Throttle};
 pub use config_file::Notice;
 pub use error::DaemonError;
+pub use persist::saved_session_count;
+pub use platform::process_cwd;
 pub use startup::{DaemonPaths, check_runtime_dir, effective_uid};
 
 /// Locks a mutex whose holders never leave data half-written, so poisoning is ignored.
@@ -42,6 +46,40 @@ pub const TEST_PROTOCOL_VERSION_VAR: &str = "DECK_TEST_PROTOCOL_VERSION";
 /// The hidden variable that sets how often the config file is looked at, in milliseconds.
 pub const TEST_CONFIG_POLL_VAR: &str = "DECK_TEST_CONFIG_POLL_MS";
 
+/// The hidden variable that sets how often terminals' directories are asked of the
+/// operating system, in milliseconds.
+pub const TEST_CWD_POLL_VAR: &str = "DECK_TEST_CWD_POLL_MS";
+
+/// How often the directories of the terminals that do not report them are looked up.
+const CWD_POLL: Duration = Duration::from_secs(5);
+
+/// How the daemon asks for the directory of a process: the operating system, unless a test
+/// puts something else in its place.
+#[derive(Clone)]
+pub struct CwdQuery(Arc<dyn Fn(u32) -> Option<PathBuf> + Send + Sync>);
+
+impl CwdQuery {
+    pub fn new(query: impl Fn(u32) -> Option<PathBuf> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(query))
+    }
+
+    pub(crate) fn ask(&self, pid: u32) -> Option<PathBuf> {
+        (self.0)(pid)
+    }
+}
+
+impl Default for CwdQuery {
+    fn default() -> Self {
+        Self::new(process_cwd)
+    }
+}
+
+impl std::fmt::Debug for CwdQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CwdQuery").finish_non_exhaustive()
+    }
+}
+
 /// How often the config file is looked at.
 const CONFIG_POLL: Duration = Duration::from_secs(1);
 
@@ -54,6 +92,9 @@ pub struct Options {
     /// is then ignored) and watches it; when not, the `config` it is given stays.
     pub config_path: Option<PathBuf>,
     pub config_poll: Duration,
+    /// How often the directories of terminals that never reported one are looked up.
+    pub cwd_poll: Duration,
+    pub cwd_query: CwdQuery,
 }
 
 impl Default for Options {
@@ -63,6 +104,8 @@ impl Default for Options {
             protocol_version: PROTOCOL_VERSION,
             config_path: None,
             config_poll: CONFIG_POLL,
+            cwd_poll: CWD_POLL,
+            cwd_query: CwdQuery::default(),
         }
     }
 }
@@ -81,6 +124,9 @@ impl Options {
         }
         if let Some(ms) = env(TEST_CONFIG_POLL_VAR).and_then(|v| v.parse::<u64>().ok()) {
             options.config_poll = Duration::from_millis(ms.max(10));
+        }
+        if let Some(ms) = env(TEST_CWD_POLL_VAR).and_then(|v| v.parse::<u64>().ok()) {
+            options.cwd_poll = Duration::from_millis(ms.max(10));
         }
         options
     }
@@ -145,6 +191,11 @@ impl Daemon {
         let locks = startup::prepare(&paths, uid)?;
         on_locked().map_err(|e| DaemonError::io("cannot prepare the daemon log", e))?;
 
+        // A save that did not finish leaves a temp file; the state itself is read before
+        // anything is bound, so a file this daemon cannot use stops it early.
+        persist::remove_tmp(&paths.state_file());
+        let loaded = persist::load(&paths)?;
+
         // Only the daemon removes the socket, and only under the lock.
         match fs::remove_file(&paths.socket) {
             Ok(()) => {}
@@ -173,9 +224,34 @@ impl Daemon {
             notices,
             options.clock,
             options.protocol_version,
+            options.cwd_query,
         );
+        let launches = match loaded {
+            persist::Loaded::Missing => Vec::new(),
+            persist::Loaded::State(file, notes) => {
+                for note in notes {
+                    tracing::warn!("state.json: {note}");
+                }
+                shared.restore(*file)
+            }
+            persist::Loaded::Bad(why) => {
+                tracing::error!("{why}");
+                shared.notify(
+                    NoticeLevel::Error,
+                    format!(
+                        "previous state could not be read; see {}",
+                        paths.log_file.display()
+                    ),
+                );
+                Vec::new()
+            }
+        };
+        // Clients can connect while the terminals start.
+        let launching = (!launches.is_empty())
+            .then(|| tokio::spawn(Arc::clone(&shared).launch_restored(launches)));
         let watcher = watched
             .map(|file| tokio::spawn(watch_config(Arc::clone(&shared), file, options.config_poll)));
+        let tracker = tokio::spawn(Arc::clone(&shared).track_cwds(options.cwd_poll));
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
@@ -200,7 +276,12 @@ impl Daemon {
         if let Some(watcher) = watcher {
             watcher.abort();
         }
+        tracker.abort();
         shared.finish_shutdown().await;
+        // It stops at the shutdown flag; an open that was in flight is discarded and reaped.
+        if let Some(launching) = launching {
+            let _ = launching.await;
+        }
         if let Err(e) = fs::remove_file(&paths.socket) {
             tracing::warn!("cannot remove the socket: {e}");
         }

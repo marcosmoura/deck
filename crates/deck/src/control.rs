@@ -15,7 +15,7 @@ use deck_core::protocol::{
     ByeReason, ClientMsg, FrameReader, PROTOCOL_VERSION, Request, Response, Role, ServerMsg,
     SessionSummary, encode,
 };
-use deck_daemon::{DaemonPaths, check_runtime_dir};
+use deck_daemon::{DaemonPaths, check_runtime_dir, saved_session_count};
 
 use crate::platform;
 
@@ -268,8 +268,27 @@ fn bye_text(reason: &ByeReason) -> String {
 fn mismatch_text(daemon: u32) -> String {
     format!(
         "the daemon speaks protocol {daemon}, this deck speaks {PROTOCOL_VERSION}; \
-         run \"deck kill-server\" to restart it (sessions are kept from DECK-04 on)"
+         run \"deck kill-server\" to restart it; sessions are restored when the daemon saved them"
     )
+}
+
+/// What the daemon logs when `state.json` comes from a newer deck.
+const NEWER_STATE: &str = "state.json was written by a newer deck";
+
+/// The line a daemon logged after byte `from` of its log that says `state.json` is newer.
+fn newer_state_line(log: &Path, from: u64) -> Option<String> {
+    let bytes = fs::read(log).ok()?;
+    // A log that is now shorter than before was rotated: read it from the start.
+    let from = usize::try_from(from)
+        .ok()
+        .filter(|from| *from <= bytes.len())
+        .unwrap_or(0);
+    let fresh = bytes.get(from..)?;
+    String::from_utf8_lossy(fresh)
+        .lines()
+        .rev()
+        .find_map(|line| line.split_once(NEWER_STATE))
+        .map(|(_, rest)| format!("{NEWER_STATE}{rest}"))
 }
 
 /// Connects to the daemon, starting it when the socket does not accept a connection.
@@ -284,11 +303,20 @@ fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
     }
     let exe = std::env::current_exe().context("cannot find the deck executable")?;
     let deadline = Instant::now() + START_TIMEOUT;
+    let log_start = fs::metadata(&paths.log_file).map_or(0, |m| m.len());
     let mut attempts = 0;
     let mut exited: Option<Arc<AtomicBool>> = None;
     loop {
         if UnixStream::connect(&paths.socket).is_ok() {
             return Ok(());
+        }
+        let gone = exited.as_ref().is_none_or(|e| e.load(Ordering::Acquire));
+        // Our daemon is gone: it may have refused a state file written by a newer deck.
+        if gone
+            && attempts > 0
+            && let Some(line) = newer_state_line(&paths.log_file, log_start)
+        {
+            bail!("{line}");
         }
         if Instant::now() >= deadline {
             bail!(
@@ -296,7 +324,6 @@ fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
                 paths.log_file.display()
             );
         }
-        let gone = exited.as_ref().is_none_or(|e| e.load(Ordering::Acquire));
         if gone && attempts < START_ATTEMPTS {
             if attempts > 0 {
                 std::thread::sleep(RESTART_BACKOFF);
@@ -346,7 +373,13 @@ pub fn probe(session: Option<String>) -> anyhow::Result<ExitCode> {
 pub fn ls() -> anyhow::Result<ExitCode> {
     let paths = checked_paths()?;
     let Ok(mut conn) = Conn::open(&paths.socket, REPLY_TIMEOUT) else {
-        println!("no sessions");
+        match saved_session_count(&paths) {
+            0 => println!("no sessions"),
+            n => println!(
+                "no daemon running; {n} saved {} will be restored by \"deck\"",
+                if n == 1 { "session" } else { "sessions" }
+            ),
+        }
         return Ok(ExitCode::SUCCESS);
     };
     match conn.control(Request::ListSessions) {
@@ -426,11 +459,31 @@ fn read_pid(lock: &Path) -> Option<i32> {
     }
 }
 
-/// `deck kill-server`.
-pub fn kill_server() -> anyhow::Result<ExitCode> {
+/// Deletes the saved state and a leftover temp file.
+fn forget_state(paths: &DaemonPaths) -> anyhow::Result<()> {
+    let state = paths.state_file();
+    let mut tmp = state.clone().into_os_string();
+    tmp.push(".tmp");
+    for file in [state, PathBuf::from(tmp)] {
+        match fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => bail!("cannot delete {}: {e}", file.display()),
+        }
+    }
+    Ok(())
+}
+
+/// `deck kill-server`; with `forget`, the saved state goes too.
+pub fn kill_server(forget: bool) -> anyhow::Result<ExitCode> {
     let paths = checked_paths()?;
     if !lock_held(&paths.lock) {
-        println!("no deck daemon running");
+        if forget {
+            forget_state(&paths)?;
+            println!("state cleared");
+        } else {
+            println!("no deck daemon running");
+        }
         return Ok(ExitCode::SUCCESS);
     }
     // The daemon may still be binding its socket: retry until the answer timeout.
@@ -460,6 +513,9 @@ pub fn kill_server() -> anyhow::Result<ExitCode> {
     }
     if !wait_unlocked(&paths.lock, STOP_TIMEOUT) {
         bail!("the daemon did not stop; see {}", paths.log_file.display());
+    }
+    if forget {
+        forget_state(&paths)?;
     }
     Ok(ExitCode::SUCCESS)
 }
