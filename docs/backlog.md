@@ -14,13 +14,12 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 1. [DECK-04](#tasks): sessions survive a daemon restart
 1. [DECK-05](#tasks): control API: the `deck` CLI for agents and scripts
 1. [DECK-06](#tasks): agent status in the sidebar, hooks, resume after restart
+1. [DECK-09](#tasks): sidebar titles with program and agent icons
 1. [DECK-07](#deck-07): panels named after what their agent is doing
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue:
-
-- [DECK-09](#deck-09): sidebar titles with program and agent icons
+Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
@@ -34,7 +33,7 @@ Open tasks the user has not placed in the queue:
 | DECK-06 | Agent status, hooks and resume            | ready      | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)          |
 | DECK-07 | Auto-named panels                         | todo       | DECK-06          | — (simple task, [note](#deck-07))                                     |
 | DECK-08 | Config and theming                        | ready      | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)      |
-| DECK-09 | Sidebar titles with icons                 | draft spec | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)      |
+| DECK-09 | Sidebar titles with icons                 | ready      | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)      |
 
 ### Withdrawn
 
