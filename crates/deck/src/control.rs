@@ -4,7 +4,7 @@
 use std::fs::{self, File, TryLockError};
 use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -61,22 +61,92 @@ pub fn attach_guards() -> anyhow::Result<()> {
 /// `deck` and `deck attach`: the guards, the start-up, then the attach client.
 ///
 /// Without a name the client attaches to the most recent session or creates `main`; with a
-/// name the session must exist.
-pub fn attach(session: Option<String>) -> anyhow::Result<ExitCode> {
+/// name the session must exist, unless `create` asks for it to be created.
+pub fn attach(session: Option<String>, create: bool) -> anyhow::Result<ExitCode> {
     attach_guards()?;
     let paths = checked_paths()?;
     ensure_daemon(&paths)?;
+    let create = create || session.is_none();
+    run_client(paths, session, create)
+}
+
+/// Runs the attach client on `session`.
+fn run_client(
+    paths: DaemonPaths,
+    session: Option<String>,
+    create: bool,
+) -> anyhow::Result<ExitCode> {
     let env = |name: &str| std::env::var(name).ok();
     let config = deck_core::paths::config_file(&env)?;
     let config = crate::daemon_cmd::load_config(&config)?;
     let exit = deck_tui::run(deck_tui::Options {
         socket: paths.socket,
-        create: session.is_none(),
+        create,
         session,
         config,
         read_stdin: Box::new(platform::read_stdin),
     });
     finish(exit)
+}
+
+/// `deck new`: creates a session, then attaches to it unless `detached`.
+pub fn new_session(
+    name: Option<String>,
+    dir: Option<PathBuf>,
+    detached: bool,
+) -> anyhow::Result<ExitCode> {
+    if !detached {
+        attach_guards()?;
+    }
+    let cwd = std::env::current_dir().context("cannot read the current directory")?;
+    let dir = match dir {
+        Some(dir) => std::path::absolute(&dir)
+            .with_context(|| format!("cannot resolve {}", dir.display()))?,
+        None => cwd,
+    };
+    let paths = checked_paths()?;
+    ensure_daemon(&paths)?;
+    let mut conn = Conn::open(&paths.socket, REPLY_TIMEOUT).context("cannot connect")?;
+    let created = match conn.control(Request::NewSession { name, cwd: dir }) {
+        Outcome::Response(Response::Session { name, .. }) => name,
+        Outcome::Response(Response::Error(text)) => bail!("{text}"),
+        Outcome::Response(_) => bail!("unexpected answer from the daemon"),
+        Outcome::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
+        Outcome::Other(e) => return Err(e),
+    };
+    drop(conn);
+    if detached {
+        println!("{created}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    run_client(paths, Some(created), false)
+}
+
+/// Sends a request to a daemon that must already run: `kill-session` and `rename-session`
+/// never start one.
+fn session_request(request: Request) -> anyhow::Result<ExitCode> {
+    let paths = checked_paths()?;
+    let Ok(mut conn) = Conn::open(&paths.socket, REPLY_TIMEOUT) else {
+        eprintln!("no deck daemon running");
+        return Ok(ExitCode::FAILURE);
+    };
+    match conn.control(request) {
+        Outcome::Response(Response::Ok) => Ok(ExitCode::SUCCESS),
+        Outcome::Response(Response::Error(text)) => bail!("{text}"),
+        Outcome::Response(_) => bail!("unexpected answer from the daemon"),
+        Outcome::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
+        Outcome::Other(e) => Err(e),
+    }
+}
+
+/// `deck kill-session`.
+pub fn kill_session(name: String) -> anyhow::Result<ExitCode> {
+    session_request(Request::KillSession { name })
+}
+
+/// `deck rename-session`.
+pub fn rename_session(old: String, new: String) -> anyhow::Result<ExitCode> {
+    session_request(Request::RenameSession { from: old, to: new })
 }
 
 /// Prints the message that ends an attach, now that the terminal is restored, and picks
@@ -286,7 +356,9 @@ pub fn ls() -> anyhow::Result<ExitCode> {
         }
         Outcome::Response(Response::Sessions(sessions)) => print!("{}", session_lines(&sessions)),
         Outcome::Response(Response::Error(text)) => bail!("{text}"),
-        Outcome::Response(Response::Ok) => bail!("unexpected answer from the daemon"),
+        Outcome::Response(Response::Ok | Response::Session { .. }) => {
+            bail!("unexpected answer from the daemon")
+        }
         Outcome::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
         Outcome::Other(e) => return Err(e),
     }
@@ -295,20 +367,26 @@ pub fn ls() -> anyhow::Result<ExitCode> {
 
 /// One line per session, in columns.
 fn session_lines(sessions: &[SessionSummary]) -> String {
-    let width = sessions.iter().map(|s| s.name.len()).max().unwrap_or(0);
+    let count = |n: u32, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let rows: Vec<(&str, String, String, bool)> = sessions
+        .iter()
+        .map(|s| {
+            (
+                s.name.as_str(),
+                count(s.projects, "project", "projects"),
+                count(s.terminals, "terminal", "terminals"),
+                s.attached_clients > 0,
+            )
+        })
+        .collect();
+    let width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
+    let pw = rows.iter().map(|r| r.1.len()).max().unwrap_or(0);
     let mut out = String::new();
-    for s in sessions {
-        let terminals = if s.terminals == 1 {
-            "1 terminal".to_string()
-        } else {
-            format!("{} terminals", s.terminals)
-        };
-        let attached = if s.attached_clients > 0 {
-            "  (attached)"
-        } else {
-            ""
-        };
-        out.push_str(&format!("{:<width$}  {terminals}{attached}\n", s.name));
+    for (name, projects, terminals, attached) in rows {
+        let attached = if attached { "  (attached)" } else { "" };
+        out.push_str(&format!(
+            "{name:<width$}  {projects:<pw$}  {terminals}{attached}\n"
+        ));
     }
     out
 }
@@ -394,16 +472,18 @@ mod tests {
 
     #[test]
     fn sessions_are_listed_in_columns() {
-        let summary = |name: &str, attached, terminals| SessionSummary {
+        let summary = |name: &str, attached, projects, terminals| SessionSummary {
             id: SessionId(1),
             name: name.into(),
             attached_clients: attached,
             terminals,
+            projects,
+            last_attached: 0,
         };
-        let text = session_lines(&[summary("main", 1, 1), summary("work-long", 0, 3)]);
+        let text = session_lines(&[summary("main", 1, 1, 1), summary("work-long", 0, 2, 3)]);
         assert_eq!(
             text,
-            "main       1 terminal  (attached)\nwork-long  3 terminals\n"
+            "main       1 project   1 terminal  (attached)\nwork-long  2 projects  3 terminals\n"
         );
     }
 

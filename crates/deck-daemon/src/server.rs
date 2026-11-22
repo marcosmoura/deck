@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
+use deck_core::action::{Action, ActionError, NameKind, default_project_name, validate_name};
 use deck_core::config::Config;
 use deck_core::model::{
     LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, Terminal,
@@ -39,6 +40,8 @@ const FALLBACK_COLORS: OuterColors = OuterColors {
 };
 const HANG_UP_GRACE: Duration = Duration::from_secs(2);
 const WRITER_FLUSH: Duration = Duration::from_secs(1);
+/// The panel area of a session no client has sized yet.
+const DEFAULT_VIEWPORT: (u16, u16) = (80, 24);
 
 /// What an attaching client asks for.
 #[derive(Debug, Clone)]
@@ -61,6 +64,46 @@ struct SessionRt {
     title_throttle: Throttle,
     /// When a client last attached; the highest tick is the most recently attached.
     last_attach: u64,
+    /// The terminal the session was created with: if it fails at once, the session ends
+    /// with that error instead of staying empty.
+    startup: Option<TerminalId>,
+}
+
+impl SessionRt {
+    /// The terminals of the active panel: the only ones whose frames are streamed.
+    fn active_terminals(&self) -> Vec<Arc<TermHandle>> {
+        let Some(active) = self.model.active_panel() else {
+            return Vec::new();
+        };
+        self.model
+            .projects
+            .iter()
+            .flat_map(|p| &p.panels)
+            .find(|p| p.id == active)
+            .map(|p| {
+                p.terminals
+                    .iter()
+                    .filter_map(|t| self.terminals.get(&t.id).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn is_active(&self, terminal: TerminalId) -> bool {
+        self.active_terminals().iter().any(|t| t.id == terminal)
+    }
+}
+
+/// Where a new panel goes.
+enum PanelTarget {
+    Project {
+        project: ProjectId,
+        name: Option<String>,
+    },
+    NewProject {
+        name: String,
+        root: PathBuf,
+    },
 }
 
 /// What an attach does once the state lock is released.
@@ -98,6 +141,8 @@ struct State {
     /// Sessions being created: their first process is starting, outside the lock.
     creating: usize,
     shutting_down: bool,
+    /// Terminals that left the model and are being hung up; shutdown finishes them.
+    hanging: Vec<Arc<TermHandle>>,
 }
 
 impl State {
@@ -158,8 +203,8 @@ impl State {
             return Vec::new();
         };
         let mut frames: Vec<Frame> = sess
-            .terminals
-            .values()
+            .active_terminals()
+            .iter()
             .filter_map(|t| t.with_emu(|e| e.full_frame(t.id)))
             .collect();
         frames.sort_by_key(|f| f.terminal);
@@ -183,12 +228,30 @@ fn terminal_model(session: &mut Session, id: TerminalId) -> Option<&mut Terminal
 }
 
 fn project_name(cwd: &Path, env: &Env) -> String {
-    let at_home = env::lookup(env, "HOME").is_some_and(|h| Path::new(h) == cwd);
-    if at_home {
-        return "~".into();
+    default_project_name(cwd, env::lookup(env, "HOME").map(Path::new))
+}
+
+/// A directory a client named: absolute (clients resolve `~` and relative paths) and
+/// existing.
+fn check_dir(dir: &Path) -> Result<(), ActionError> {
+    if !dir.is_absolute() {
+        return Err(ActionError::NotAbsolute(dir.display().to_string()));
     }
-    cwd.file_name()
-        .map_or_else(|| "root".into(), |n| n.to_string_lossy().into_owned())
+    if !dir.is_dir() {
+        return Err(ActionError::NotADirectory(dir.display().to_string()));
+    }
+    Ok(())
+}
+
+fn program_name(program: &str) -> String {
+    Path::new(program)
+        .file_name()
+        .map_or_else(|| program.to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+/// The size of a panel's terminal: the whole panel area (a single terminal has no border).
+fn inner_size(viewport: (u16, u16)) -> (u16, u16) {
+    clamp_size(viewport.0, viewport.1)
 }
 
 pub struct Shared {
@@ -364,46 +427,20 @@ impl Shared {
         }
         let name = match &a.session {
             None => st.unique_name("main"),
-            Some(name) if a.create => name.clone(),
+            Some(name) if a.create => {
+                validate_name(name, NameKind::Session).map_err(|e| e.to_string())?
+            }
             Some(name) => return Err(format!("no session named {name}")),
         };
-        Ok(Plan::Create(self.new_session(st, name, a)))
+        Ok(Plan::Create(self.new_session_plan(st, name, a)))
     }
 
-    fn new_session(&self, st: &mut State, name: String, a: &AttachRequest) -> NewSession {
+    fn new_session_plan(&self, st: &mut State, name: String, a: &AttachRequest) -> NewSession {
         let sid = SessionId(st.alloc());
         let pid = ProjectId(st.alloc());
         let panel = PanelId(st.alloc());
         let tid = TerminalId(st.alloc());
-        let inner = clamp_size(a.cols.saturating_sub(2), a.rows.saturating_sub(2));
-
-        let program = self
-            .config
-            .shell
-            .clone()
-            .or_else(|| {
-                env::lookup(&a.env, "SHELL")
-                    .and_then(|v| v.to_str())
-                    .map(str::to_string)
-            })
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/bin/sh".to_string());
-        let req = SpawnRequest {
-            program,
-            args: self.config.shell_args.clone(),
-            cwd: a.cwd.clone(),
-            env: env::terminal_env(
-                &a.env,
-                &TerminalIds {
-                    socket: &self.paths.socket,
-                    session: sid,
-                    panel,
-                    terminal: tid,
-                },
-            ),
-            cols: inner.0,
-            rows: inner.1,
-        };
+        let req = self.spawn_request(&a.env, &a.cwd, (a.cols, a.rows), sid, panel, tid);
         NewSession {
             sid,
             pid,
@@ -411,6 +448,46 @@ impl Shared {
             tid,
             name,
             req,
+        }
+    }
+
+    /// The process of a new terminal: the shell, in `cwd`, sized for `viewport`.
+    fn spawn_request(
+        &self,
+        session_env: &Env,
+        cwd: &Path,
+        viewport: (u16, u16),
+        session: SessionId,
+        panel: PanelId,
+        terminal: TerminalId,
+    ) -> SpawnRequest {
+        let inner = inner_size(viewport);
+        let program = self
+            .config
+            .shell
+            .clone()
+            .or_else(|| {
+                env::lookup(session_env, "SHELL")
+                    .and_then(|v| v.to_str())
+                    .map(str::to_string)
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string());
+        SpawnRequest {
+            program,
+            args: self.config.shell_args.clone(),
+            cwd: cwd.to_path_buf(),
+            env: env::terminal_env(
+                session_env,
+                &TerminalIds {
+                    socket: &self.paths.socket,
+                    session,
+                    panel,
+                    terminal,
+                },
+            ),
+            cols: inner.0,
+            rows: inner.1,
         }
     }
 
@@ -455,6 +532,7 @@ impl Shared {
                             cwd: a.cwd.clone(),
                             env: Vec::<(OsString, OsString)>::new(),
                         },
+                        program: program_name(&req.program),
                         title: None,
                         cwd: None,
                         exit_status: None,
@@ -469,6 +547,7 @@ impl Shared {
             viewport: Some((a.cols, a.rows)),
             title_throttle: Throttle::new(TITLE_VIEW_INTERVAL),
             last_attach: 0,
+            startup: Some(tid),
         });
         sid
     }
@@ -486,6 +565,8 @@ impl Shared {
                 attached_clients: u32::try_from(st.clients_of(s.model.id).count())
                     .unwrap_or(u32::MAX),
                 terminals: u32::try_from(s.terminals.len()).unwrap_or(u32::MAX),
+                projects: u32::try_from(s.model.projects.len()).unwrap_or(u32::MAX),
+                last_attached: s.last_attach,
             })
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -513,7 +594,9 @@ impl Shared {
         self.follow_viewport(&mut st, cid);
         // Typing returns the terminal to the live screen first; focus reports do not.
         let id = handle.id;
-        if !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O")
+        let active = st.session(sid).is_some_and(|s| s.is_active(id));
+        if active
+            && !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O")
             && let Some(frame) = handle
                 .with_emu(|e| e.scroll_to_bottom().then(|| e.full_frame(id)))
                 .flatten()
@@ -537,7 +620,9 @@ impl Shared {
             e.scroll(to);
             e.full_frame(terminal)
         });
-        if let Some(frame) = frame {
+        if let Some(frame) = frame
+            && st.session(sid).is_some_and(|s| s.is_active(terminal))
+        {
             st.push_frame(sid, &frame);
         }
     }
@@ -567,8 +652,8 @@ impl Shared {
         if sess.viewport == Some(vp) {
             return;
         }
-        let inner = clamp_size(vp.0.saturating_sub(2), vp.1.saturating_sub(2));
-        for t in sess.terminals.values() {
+        let inner = inner_size(vp);
+        for t in sess.active_terminals() {
             if t.with_emu(|e| e.size()) != Some(inner) {
                 t.resize_pty(inner.0, inner.1);
             }
@@ -700,7 +785,8 @@ impl Shared {
     /// Turns the emulator's news into a frame for the session's clients.
     pub fn pump(&self, h: &Arc<TermHandle>) {
         let st = self.st();
-        if st.clients_of(h.session).next().is_none() {
+        let streamed = st.session(h.session).is_some_and(|s| s.is_active(h.id));
+        if !streamed || st.clients_of(h.session).next().is_none() {
             h.with_emu(|e| e.reset_damage());
             return;
         }
@@ -717,11 +803,17 @@ impl Shared {
         }
         h.close();
         let sid = h.session;
-        if st.session(sid).is_none() {
+        // Closed by an action, or its session was killed: already out of the model.
+        if !st
+            .session(sid)
+            .is_some_and(|s| s.terminals.contains_key(&h.id))
+        {
+            h.release();
             return;
         }
         // The last output reaches the clients before the terminal goes.
-        if let Some(frame) = h.with_emu(|e| e.damage_frame(h.id)) {
+        let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id));
+        if streamed && let Some(frame) = h.with_emu(|e| e.damage_frame(h.id)) {
             st.push_frame(sid, &frame);
         }
         // Whatever a background job still prints from here on is discarded.
@@ -740,32 +832,72 @@ impl Shared {
         let Some(sess) = st.session_mut(sid) else {
             return;
         };
+        let before = sess.model.active_panel();
         sess.terminals.remove(&h.id);
-        for panel in sess
+        let panel = sess
             .model
             .projects
             .iter_mut()
             .flat_map(|p| p.panels.iter_mut())
-        {
+            .find(|p| p.terminals.iter().any(|t| t.id == h.id));
+        let mut emptied = None;
+        if let Some(panel) = panel {
             panel.terminals.retain(|t| t.id != h.id);
             if panel.focused_terminal == Some(h.id) {
                 panel.focused_terminal = panel.terminals.first().map(|t| t.id);
             }
+            if panel.terminals.is_empty() {
+                emptied = Some(panel.id);
+            }
         }
-        if !sess.terminals.is_empty() {
-            st.push_view(sid);
-            return;
+        if let Some(panel) = emptied {
+            sess.model.remove_panel(panel);
         }
 
-        // Until DECK-02: a session without terminals ends.
-        let reason = if quick {
-            ByeReason::Error(format!(
+        // A session whose first process fails at once ends with that error, rather than
+        // staying empty behind a broken shell.
+        if quick && sess.startup == Some(h.id) && sess.terminals.is_empty() {
+            let reason = ByeReason::Error(format!(
                 "terminal exited at once (status {status}); see {}",
                 self.paths.log_file.display()
-            ))
-        } else {
-            ByeReason::SessionEnded
+            ));
+            self.end_session(&mut st, sid, reason);
+            let none_left = st.sessions.is_empty() && st.creating == 0;
+            drop(st);
+            if none_left {
+                self.request_shutdown();
+            }
+            return;
+        }
+        self.settle(&mut st, sid, before);
+    }
+
+    /// After a change to a session: its terminals match the viewport, every client has the
+    /// new view, and a new active panel is shown in full.
+    fn settle(&self, st: &mut State, sid: SessionId, before: Option<PanelId>) {
+        let Some(sess) = st.session(sid) else {
+            return;
         };
+        let inner = inner_size(sess.viewport.unwrap_or(DEFAULT_VIEWPORT));
+        let moved = sess.model.active_panel() != before;
+        if moved {
+            for t in sess.active_terminals() {
+                if t.with_emu(|e| e.size()) != Some(inner) {
+                    t.resize_pty(inner.0, inner.1);
+                }
+            }
+        }
+        st.push_view(sid);
+        if moved {
+            for frame in st.full_frames(sid) {
+                st.push_frame(sid, &frame);
+            }
+        }
+    }
+
+    /// Sends `Bye` to the session's clients and removes the session. Its terminals are not
+    /// touched.
+    fn end_session(&self, st: &mut State, sid: SessionId, reason: ByeReason) {
         for client in st.clients.values_mut().filter(|c| c.session == Some(sid)) {
             client.queue.push_msg(ServerMsg::Bye {
                 reason: reason.clone(),
@@ -773,12 +905,394 @@ impl Shared {
             client.session = None;
         }
         st.sessions.retain(|s| s.model.id != sid);
-        // A session being created counts: its attach would otherwise fail on the shutdown.
+    }
+
+    // Actions.
+
+    /// Runs an action of an attached client on its session.
+    pub async fn action(
+        self: &Arc<Self>,
+        cid: ClientId,
+        action: Action,
+    ) -> Result<(), ActionError> {
+        let sid = self
+            .st()
+            .clients
+            .get(&cid)
+            .and_then(|c| c.session)
+            .ok_or(ActionError::NotAttached)?;
+        match action {
+            Action::NewProject { name, root } => {
+                let name = validate_name(&name, NameKind::Project)?;
+                check_dir(&root)?;
+                self.add_panel(sid, PanelTarget::NewProject { name, root })
+                    .await
+            }
+            Action::NewPanel { project, name } => {
+                let name = name
+                    .map(|n| validate_name(&n, NameKind::Panel))
+                    .transpose()?;
+                self.add_panel(sid, PanelTarget::Project { project, name })
+                    .await
+            }
+            Action::KillSession => {
+                let queue = self.st().clients.get(&cid).map(|c| Arc::clone(&c.queue));
+                let answer = || {
+                    if let Some(q) = queue {
+                        q.push_msg(ServerMsg::ActionResult(Ok(())));
+                    }
+                };
+                if self.kill_session(|s| s.model.id == sid, answer)? {
+                    self.request_shutdown();
+                }
+                Ok(())
+            }
+            other => self.edit(sid, other),
+        }
+    }
+
+    /// The actions that need no new process.
+    fn edit(self: &Arc<Self>, sid: SessionId, action: Action) -> Result<(), ActionError> {
+        let mut st = self.st();
+        let state = &mut *st;
+        let name_taken = |state: &State, name: &str, except: SessionId| {
+            state
+                .sessions
+                .iter()
+                .any(|s| s.model.id != except && s.model.name == name)
+        };
+        let renamed = match &action {
+            Action::RenameSession { name } => {
+                let name = validate_name(name, NameKind::Session)?;
+                if name_taken(state, &name, sid) {
+                    return Err(ActionError::SessionExists(name));
+                }
+                Some(name)
+            }
+            _ => None,
+        };
+        let sess = state.session_mut(sid).ok_or(ActionError::NotAttached)?;
+        let before = sess.model.active_panel();
+        let mut doomed: Vec<Arc<TermHandle>> = Vec::new();
+        match action {
+            Action::RenameSession { .. } => {
+                sess.model.name = renamed.unwrap_or_default();
+            }
+            Action::RenameProject { project, name } => {
+                let name = validate_name(&name, NameKind::Project)?;
+                if sess
+                    .model
+                    .projects
+                    .iter()
+                    .any(|p| p.id != project && p.name == name)
+                {
+                    return Err(ActionError::ProjectExists(name));
+                }
+                let p = sess
+                    .model
+                    .projects
+                    .iter_mut()
+                    .find(|p| p.id == project)
+                    .ok_or(ActionError::NoSuchProject(project))?;
+                p.name = name;
+            }
+            Action::SetProjectCollapsed { project, collapsed } => {
+                sess.model
+                    .projects
+                    .iter_mut()
+                    .find(|p| p.id == project)
+                    .ok_or(ActionError::NoSuchProject(project))?
+                    .collapsed = collapsed;
+            }
+            Action::FocusProject { project } => {
+                if !sess.model.focus_project(project) {
+                    return Err(ActionError::NoSuchProject(project));
+                }
+            }
+            Action::CloseProject { project } => {
+                let removed = sess
+                    .model
+                    .remove_project(project)
+                    .ok_or(ActionError::NoSuchProject(project))?;
+                for t in removed.panels.iter().flat_map(|p| &p.terminals) {
+                    doomed.extend(sess.terminals.remove(&t.id));
+                }
+            }
+            Action::RenamePanel { panel, name } => {
+                let name = validate_name(&name, NameKind::Panel)?;
+                let p = sess
+                    .model
+                    .projects
+                    .iter_mut()
+                    .flat_map(|p| p.panels.iter_mut())
+                    .find(|p| p.id == panel)
+                    .ok_or(ActionError::NoSuchPanel(panel))?;
+                p.name = name;
+                p.name_source = NameSource::Manual;
+            }
+            Action::ClosePanel { panel } => {
+                let removed = sess
+                    .model
+                    .remove_panel(panel)
+                    .ok_or(ActionError::NoSuchPanel(panel))?;
+                for t in &removed.terminals {
+                    doomed.extend(sess.terminals.remove(&t.id));
+                }
+            }
+            Action::FocusPanel { panel } => {
+                if !sess.model.focus_panel(panel) {
+                    return Err(ActionError::NoSuchPanel(panel));
+                }
+            }
+            Action::CyclePanel { delta } => {
+                sess.model.cycle_panel(delta);
+            }
+            Action::NewProject { .. } | Action::NewPanel { .. } | Action::KillSession => {
+                unreachable!("handled by `action`")
+            }
+        }
+        self.settle(&mut st, sid, before);
+        drop(st);
+        self.hang_up(doomed);
+        Ok(())
+    }
+
+    /// Adds a panel with one new shell, in an existing project or a new one.
+    async fn add_panel(
+        self: &Arc<Self>,
+        sid: SessionId,
+        target: PanelTarget,
+    ) -> Result<(), ActionError> {
+        let (project_id, panel_id, tid, req) = {
+            let mut st = self.st();
+            if st.shutting_down {
+                return Err(ActionError::ShuttingDown);
+            }
+            let sess = st.session(sid).ok_or(ActionError::NotAttached)?;
+            let (existing, root) = match &target {
+                PanelTarget::Project { project, .. } => {
+                    let p = sess
+                        .model
+                        .projects
+                        .iter()
+                        .find(|p| p.id == *project)
+                        .ok_or(ActionError::NoSuchProject(*project))?;
+                    (Some(p.id), p.root.clone())
+                }
+                PanelTarget::NewProject { name, root } => {
+                    if sess.model.projects.iter().any(|p| p.name == *name) {
+                        return Err(ActionError::ProjectExists(name.clone()));
+                    }
+                    (None, root.clone())
+                }
+            };
+            let env = sess.env.clone();
+            let viewport = sess.viewport.unwrap_or(DEFAULT_VIEWPORT);
+            let project_id = existing.unwrap_or_else(|| ProjectId(st.alloc()));
+            let panel_id = PanelId(st.alloc());
+            let tid = TerminalId(st.alloc());
+            let req = self.spawn_request(&env, &root, viewport, sid, panel_id, tid);
+            (project_id, panel_id, tid, req)
+        };
+
+        let open_req = req.clone();
+        let parts = tokio::task::spawn_blocking(move || terminal::open(&open_req))
+            .await
+            .map_err(|e| ActionError::Spawn(format!("could not start {}: {e}", req.program)))?
+            .map_err(ActionError::Spawn)?;
+
+        let mut st = self.st();
+        // The world may have changed while the process started.
+        let checked = if st.shutting_down {
+            Err(ActionError::ShuttingDown)
+        } else if let Some(sess) = st.session(sid) {
+            match &target {
+                PanelTarget::Project { project, .. } => sess
+                    .model
+                    .projects
+                    .iter()
+                    .any(|p| p.id == *project)
+                    .then_some(())
+                    .ok_or(ActionError::NoSuchProject(*project)),
+                PanelTarget::NewProject { name, .. } => {
+                    (!sess.model.projects.iter().any(|p| p.name == *name))
+                        .then_some(())
+                        .ok_or_else(|| ActionError::ProjectExists(name.clone()))
+                }
+            }
+        } else {
+            Err(ActionError::NotAttached)
+        };
+        if let Err(e) = checked {
+            parts.discard();
+            return Err(e);
+        }
+        let handle = terminal::start(self, tid, sid, &req, parts);
+        let Some(sess) = st.session_mut(sid) else {
+            return Err(ActionError::NotAttached);
+        };
+        sess.terminals.insert(tid, handle);
+        let before = sess.model.active_panel();
+        let root = req.cwd.clone();
+        let program = program_name(&req.program);
+        let (panel_name, name_source) = match &target {
+            PanelTarget::Project {
+                name: Some(name), ..
+            } => (Some(name.clone()), NameSource::Manual),
+            _ => (None, NameSource::Default),
+        };
+        if let PanelTarget::NewProject { name, .. } = target {
+            sess.model.projects.push(Project {
+                id: project_id,
+                name,
+                root: root.clone(),
+                panels: Vec::new(),
+                active_panel: None,
+                collapsed: false,
+            });
+        }
+        let Some(project) = sess.model.projects.iter_mut().find(|p| p.id == project_id) else {
+            return Err(ActionError::NoSuchProject(project_id));
+        };
+        let name = panel_name.unwrap_or_else(|| project.next_panel_name());
+        project.panels.push(Panel {
+            id: panel_id,
+            name,
+            name_source,
+            focused_terminal: Some(tid),
+            terminals: vec![Terminal {
+                id: tid,
+                launch: LaunchSpec {
+                    program: None,
+                    args: Vec::new(),
+                    cwd: root,
+                    env: Vec::<(OsString, OsString)>::new(),
+                },
+                program,
+                title: None,
+                cwd: None,
+                exit_status: None,
+            }],
+        });
+        sess.model.focus_panel(panel_id);
+        self.settle(&mut st, sid, before);
+        Ok(())
+    }
+
+    /// Hangs up the processes of the session `which` picks and ends it. `answer` runs once
+    /// the session is found and before its clients get `Bye`, so a requester attached to it
+    /// still receives its answer. True when no session is left: the caller then shuts the
+    /// daemon down.
+    fn kill_session(
+        self: &Arc<Self>,
+        which: impl Fn(&SessionRt) -> bool,
+        answer: impl FnOnce(),
+    ) -> Result<bool, ActionError> {
+        let mut st = self.st();
+        let Some(sess) = st.sessions.iter().find(|s| which(s)) else {
+            return Err(ActionError::NotAttached);
+        };
+        let sid = sess.model.id;
+        let handles: Vec<Arc<TermHandle>> = sess.terminals.values().cloned().collect();
+        answer();
+        self.end_session(&mut st, sid, ByeReason::SessionEnded);
         let none_left = st.sessions.is_empty() && st.creating == 0;
         drop(st);
-        if none_left {
-            self.request_shutdown();
+        self.hang_up(handles);
+        Ok(none_left)
+    }
+
+    /// Hangs up terminals that left the model: `SIGHUP`, `SIGKILL` after two seconds.
+    fn hang_up(self: &Arc<Self>, handles: Vec<Arc<TermHandle>>) {
+        if handles.is_empty() {
+            return;
         }
+        self.st().hanging.extend(handles.iter().cloned());
+        let shared = Arc::clone(self);
+        self.handle.spawn(async move {
+            hang_up_and_wait(handles.clone()).await;
+            shared
+                .st()
+                .hanging
+                .retain(|h| !handles.iter().any(|d| d.id == h.id));
+        });
+    }
+
+    // Session requests.
+
+    /// Creates a session with a project for `cwd` and its first panel.
+    pub async fn new_session(
+        self: &Arc<Self>,
+        name: Option<String>,
+        cwd: PathBuf,
+        env: Env,
+    ) -> Result<(SessionId, String), ActionError> {
+        let name = name
+            .map(|n| validate_name(&n, NameKind::Session))
+            .transpose()?;
+        check_dir(&cwd)?;
+        let a = AttachRequest {
+            session: name.clone(),
+            create: true,
+            cols: DEFAULT_VIEWPORT.0,
+            rows: DEFAULT_VIEWPORT.1,
+            cwd,
+            env,
+        };
+        let _attaching = self.attaching.lock().await;
+        let new = {
+            let mut st = self.st();
+            if st.shutting_down {
+                return Err(ActionError::ShuttingDown);
+            }
+            let name = match name {
+                Some(n) if st.sessions.iter().any(|s| s.model.name == n) => {
+                    return Err(ActionError::SessionExists(n));
+                }
+                Some(n) => n,
+                None => st.unique_name("main"),
+            };
+            st.creating += 1;
+            self.new_session_plan(&mut st, name, &a)
+        };
+        let req = new.req.clone();
+        let opened = tokio::task::spawn_blocking(move || terminal::open(&req))
+            .await
+            .map_err(|e| ActionError::Spawn(format!("could not start {}: {e}", new.req.program)))
+            .and_then(|opened| opened.map_err(ActionError::Spawn));
+        let mut st = self.st();
+        st.creating -= 1;
+        let parts = opened?;
+        if st.shutting_down {
+            parts.discard();
+            return Err(ActionError::ShuttingDown);
+        }
+        let name = new.name.clone();
+        let sid = self.add_session(&mut st, new, parts, &a);
+        Ok((sid, name))
+    }
+
+    /// Ends the named session; true when it was the last one.
+    pub fn kill_session_named(
+        self: &Arc<Self>,
+        name: &str,
+        answer: impl FnOnce(),
+    ) -> Result<bool, ActionError> {
+        self.kill_session(|s| s.model.name == name, answer)
+            .map_err(|_| ActionError::NoSuchSession(name.to_string()))
+    }
+
+    pub fn rename_session_named(self: &Arc<Self>, from: &str, to: &str) -> Result<(), ActionError> {
+        let to = validate_name(to, NameKind::Session)?;
+        let st = self.st();
+        let sid = st
+            .sessions
+            .iter()
+            .find(|s| s.model.name == from)
+            .map(|s| s.model.id)
+            .ok_or_else(|| ActionError::NoSuchSession(from.to_string()))?;
+        drop(st);
+        self.edit(sid, Action::RenameSession { name: to })
     }
 
     // Shutdown.
@@ -812,24 +1326,30 @@ impl Shared {
             }
         }
 
-        let handles: Vec<Arc<TermHandle>> = self
-            .st()
-            .sessions
-            .iter()
-            .flat_map(|s| s.terminals.values().cloned())
-            .collect();
-        for h in &handles {
-            h.close();
-            h.hang_up();
-        }
-        let deadline = tokio::time::Instant::now() + HANG_UP_GRACE;
-        while handles.iter().any(|h| !h.has_exited()) && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        let stubborn: Vec<_> = handles.into_iter().filter(|h| !h.has_exited()).collect();
-        if !stubborn.is_empty() {
-            let _ =
-                tokio::task::spawn_blocking(move || stubborn.iter().for_each(|h| h.kill())).await;
-        }
+        let handles: Vec<Arc<TermHandle>> = {
+            let st = self.st();
+            st.sessions
+                .iter()
+                .flat_map(|s| s.terminals.values().cloned())
+                .chain(st.hanging.iter().cloned())
+                .collect()
+        };
+        hang_up_and_wait(handles).await;
+    }
+}
+
+/// `SIGHUP` to every terminal, then `SIGKILL` for those still running after two seconds.
+async fn hang_up_and_wait(handles: Vec<Arc<TermHandle>>) {
+    for h in &handles {
+        h.close();
+        h.hang_up();
+    }
+    let deadline = tokio::time::Instant::now() + HANG_UP_GRACE;
+    while handles.iter().any(|h| !h.has_exited()) && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let stubborn: Vec<_> = handles.into_iter().filter(|h| !h.has_exited()).collect();
+    if !stubborn.is_empty() {
+        let _ = tokio::task::spawn_blocking(move || stubborn.iter().for_each(|h| h.kill())).await;
     }
 }

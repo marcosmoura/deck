@@ -1,17 +1,21 @@
 //! Drawing: the terminal's frame and contents, the status bar and the too-small message.
 //! Every colour and glyph of deck's own UI comes from the [`Theme`].
 
+use deck_core::config::HelpGroup;
 use deck_core::protocol::{self, CursorShape};
-use deck_core::theme::{BorderStyle, Theme};
+use deck_core::theme::Theme;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
-use ratatui::widgets::{Block, BorderType, Widget};
+use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::app::{App, too_small};
+use crate::input::Action;
 use crate::mirror::TermMirror;
+use crate::modal::{Modal, Prompt};
+use crate::sidebar::{self, SIDEBAR_HINTS};
 
 pub const TOO_SMALL: &str = "deck: window too small";
 /// The status-bar hints while scroll mode is on.
@@ -63,21 +67,12 @@ pub fn style(s: protocol::Style) -> Style {
         .add_modifier(modifiers)
 }
 
-fn border_type(style: BorderStyle) -> BorderType {
-    match style {
-        BorderStyle::Rounded => BorderType::Rounded,
-        BorderStyle::Plain => BorderType::Plain,
-        BorderStyle::Thick => BorderType::Thick,
-        BorderStyle::Double => BorderType::Double,
-    }
-}
-
-fn width(text: &str) -> u16 {
+pub(crate) fn width(text: &str) -> u16 {
     u16::try_from(Span::raw(text).width()).unwrap_or(u16::MAX)
 }
 
 /// `text` cut to at most `max` columns, with `…` in place of what was cut.
-fn truncate(text: &str, max: u16) -> String {
+pub(crate) fn truncate(text: &str, max: u16) -> String {
     if width(text) <= max {
         return text.to_string();
     }
@@ -103,16 +98,122 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_too_small(frame.buffer_mut(), area);
         return;
     }
-    let panel = Rect::new(0, 0, area.width, area.height - 1);
-    let cursor = draw_panel(frame.buffer_mut(), panel, app, &theme);
-    draw_status(
-        frame.buffer_mut(),
-        Rect::new(0, area.height - 1, area.width, 1),
-        app,
-        &theme,
-    );
-    if let Some(pos) = cursor {
+    let side = app.sidebar_cols();
+    if side > 0 {
+        sidebar::draw(
+            frame.buffer_mut(),
+            Rect::new(0, 0, side - 1, area.height - 1),
+            app,
+            &theme,
+        );
+    }
+    let panel = Rect::new(side, 0, area.width - side, area.height - 1);
+    let cursor = if app.panel_area_empty() {
+        draw_empty(frame.buffer_mut(), panel, app, &theme);
+        None
+    } else {
+        draw_panel(frame.buffer_mut(), panel, app)
+    };
+    let bar = Rect::new(0, area.height - 1, area.width, 1);
+    draw_status(frame.buffer_mut(), bar, app, &theme);
+    if matches!(app.modal, Some(Modal::Help)) {
+        draw_help(
+            frame.buffer_mut(),
+            Rect::new(0, 0, area.width, area.height - 1),
+            app,
+            &theme,
+        );
+    }
+    if let Some(picker) = &app.picker {
+        crate::picker::draw(
+            frame.buffer_mut(),
+            Rect::new(0, 0, area.width, area.height - 1),
+            app,
+            picker,
+            &theme,
+        );
+    }
+    if !app.overlay_open()
+        && let Some(pos) = cursor
+    {
         frame.set_cursor_position(pos);
+    }
+}
+
+/// The message centered in a panel area that has no panel.
+fn draw_empty(buf: &mut Buffer, panel: Rect, app: &App, theme: &Theme) {
+    let label = |action| app.bindings.key_label(action).unwrap_or_default();
+    let text = match app.mirror.active_project() {
+        Some(p) => format!(
+            "No panels in {} — {} to create one",
+            p.name,
+            label(Action::NewPanel)
+        ),
+        None => format!("No projects — {} to add one", label(Action::NewProject)),
+    };
+    let text = truncate(&text, panel.width);
+    let x = panel.x + panel.width.saturating_sub(width(&text)) / 2;
+    buf.set_stringn(
+        x,
+        panel.y + panel.height / 2,
+        &text,
+        usize::from(panel.width),
+        Style::new().fg(color(theme.muted)),
+    );
+}
+
+/// The help overlay: every binding, grouped, in a rounded box in the middle.
+fn draw_help(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+    let rows = app.bindings.help_rows();
+    let key_w = rows.iter().map(|r| width(&r.keys)).max().unwrap_or(0);
+    let mut lines: Vec<(String, Style)> = Vec::new();
+    let heading = Style::new()
+        .fg(color(theme.accent))
+        .add_modifier(Modifier::BOLD);
+    for group in HelpGroup::ALL {
+        let mut in_group = rows.iter().filter(|r| r.group == group).peekable();
+        if in_group.peek().is_none() {
+            continue;
+        }
+        lines.push((format!(" {}", group.title()), heading));
+        for r in in_group {
+            let pad = " ".repeat(usize::from(key_w - width(&r.keys)));
+            lines.push((format!("  {}{pad}  {}", r.keys, r.text), Style::new()));
+        }
+    }
+    let inner_w = lines.iter().map(|(l, _)| width(l)).max().unwrap_or(0) + 2;
+    let w = (inner_w + 2).min(area.width);
+    let h = (u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(2))
+    .min(area.height);
+    let rect = Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - h) / 2,
+        w,
+        h,
+    );
+    Clear.render(rect, buf);
+    let base = Style::new().bg(color(theme.overlay_bg));
+    buf.set_style(rect, base);
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(base.fg(color(theme.accent)))
+        .title(" Help ")
+        .title_bottom(" esc close ")
+        .render(rect, buf);
+    for (i, (line, style)) in lines
+        .iter()
+        .take(usize::from(h.saturating_sub(2)))
+        .enumerate()
+    {
+        buf.set_stringn(
+            rect.x + 1,
+            rect.y + 1 + u16::try_from(i).unwrap_or(0),
+            line,
+            usize::from(w.saturating_sub(2)),
+            base.patch(*style),
+        );
     }
 }
 
@@ -140,28 +241,22 @@ fn draw_too_small(buf: &mut Buffer, area: Rect) {
 
 /// Lays the terminal out for the size the daemon used, then copies the part that fits the
 /// panel area; returns the cursor position when it is visible there.
-fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App, theme: &Theme) -> Option<Position> {
+fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
     let (vw, vh) = app
         .mirror
         .view()
         .and_then(|v| v.layout_viewport)
         .unwrap_or((panel.width, panel.height));
-    if vw < 3 || vh < 3 {
+    if vw == 0 || vh == 0 {
         return None;
     }
     let term = app
         .mirror
         .focused_id()
         .and_then(|id| app.mirror.terminal(id));
-    let title = app
-        .mirror
-        .focused()
-        .and_then(|t| t.title.clone())
-        .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| app.program.clone());
 
     let mut tmp = Buffer::empty(Rect::new(0, 0, vw, vh));
-    draw_terminal(&mut tmp, Rect::new(0, 0, vw, vh), &title, term, theme);
+    draw_terminal(&mut tmp, term);
 
     let (cw, ch) = (vw.min(panel.width), vh.min(panel.height));
     for y in 0..ch {
@@ -180,72 +275,25 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App, theme: &Theme) -> Option
     if !cursor.visible {
         return None;
     }
-    let (x, y) = (1 + cursor.col, 1 + cursor.row);
-    (x < vw - 1 && y < vh - 1 && x < cw && y < ch)
-        .then_some(Position::new(panel.x + x, panel.y + y))
+    let (x, y) = (cursor.col, cursor.row);
+    (x < cw && y < ch).then_some(Position::new(panel.x + x, panel.y + y))
 }
 
-/// The focused terminal's border, title and lines inside `rect`.
-fn draw_terminal(
-    buf: &mut Buffer,
-    rect: Rect,
-    title: &str,
-    term: Option<&TermMirror>,
-    theme: &Theme,
-) {
-    let border = Style::new().fg(color(theme.border_focused));
-    Block::bordered()
-        .border_type(border_type(theme.border_style))
-        .border_style(border)
-        .render(rect, buf);
-
-    // "[offset/history]" at the right of the top border while scrolled back.
-    let indicator = term
-        .filter(|t| t.display_offset > 0)
-        .map(|t| format!(" [{}/{}] ", t.display_offset, t.history))
-        .filter(|text| width(text) + 4 <= rect.width);
-    let indicator_w = indicator.as_deref().map_or(0, width);
-    if let Some(text) = &indicator {
-        buf.set_stringn(
-            rect.x + rect.width - 1 - indicator_w,
-            rect.y,
-            text,
-            usize::from(indicator_w),
-            border.fg(color(theme.warning)),
-        );
-    }
-
-    // "─ title ─": the title sits after one border cell, with a space on each side.
-    let room = rect.width.saturating_sub(6 + indicator_w);
-    if room > 0 && !title.is_empty() {
-        let text = format!(" {} ", truncate(title, room));
-        buf.set_stringn(
-            rect.x + 2,
-            rect.y,
-            &text,
-            usize::from(rect.width.saturating_sub(3 + indicator_w)),
-            border.fg(color(theme.title)),
-        );
-    }
-
+/// The focused terminal's lines, from the top left of `buf`.
+fn draw_terminal(buf: &mut Buffer, term: Option<&TermMirror>) {
     let Some(term) = term else { return };
-    let inner = Rect::new(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
-    for (row, line) in term
-        .lines
-        .iter()
-        .enumerate()
-        .take(usize::from(inner.height))
-    {
-        let y = inner.y + u16::try_from(row).unwrap_or(0);
+    let area = buf.area;
+    for (row, line) in term.lines.iter().enumerate().take(usize::from(area.height)) {
+        let y = u16::try_from(row).unwrap_or(0);
         for run in &line.runs {
-            if run.col >= inner.width {
+            if run.col >= area.width {
                 break;
             }
             buf.set_stringn(
-                inner.x + run.col,
+                run.col,
                 y,
                 &run.text,
-                usize::from(inner.width - run.col),
+                usize::from(area.width - run.col),
                 style(run.style),
             );
         }
@@ -258,10 +306,62 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         .bg(color(theme.status_bg));
     buf.set_style(bar, base);
 
+    let flash_style = Style::new().fg(color(if app.flash_error {
+        theme.error
+    } else {
+        theme.warning
+    }));
+    let flash = app.flash.as_ref().map(|(text, _)| text.clone());
+    match &app.modal {
+        Some(Modal::Prompt(prompt)) => {
+            draw_prompt(
+                buf,
+                bar,
+                prompt,
+                flash.map(|t| (t, flash_style)),
+                base,
+                theme,
+            );
+            return;
+        }
+        Some(Modal::Confirm(confirm)) => {
+            let text = format!(" {}", confirm.question);
+            buf.set_stringn(
+                bar.x,
+                bar.y,
+                &text,
+                usize::from(bar.width),
+                base.fg(color(theme.warning)),
+            );
+            if let Some(text) = flash {
+                let w = width(&text);
+                let used = width(&confirm.question) + 2;
+                if used + w < bar.width {
+                    buf.set_stringn(
+                        bar.x + bar.width - w,
+                        bar.y,
+                        &text,
+                        usize::from(w),
+                        base.patch(flash_style),
+                    );
+                }
+            }
+            return;
+        }
+        _ => {}
+    }
+
     let name = app.mirror.session_name().unwrap_or("");
-    let (badge, badge_style) = if app.armed || app.scroll_mode.is_some() {
+    let (badge, badge_style) = if app.armed || app.scroll_mode.is_some() || app.sidebar_focus {
+        let label = if app.armed {
+            " PREFIX "
+        } else if app.scroll_mode.is_some() {
+            " SCROLL "
+        } else {
+            " SIDEBAR "
+        };
         (
-            if app.armed { " PREFIX " } else { " SCROLL " }.to_string(),
+            label.to_string(),
             Style::new()
                 .fg(color(theme.warning))
                 .add_modifier(Modifier::REVERSED),
@@ -275,10 +375,38 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         )
     };
     let project = app.mirror.project_name().unwrap_or("");
+    let location = match app.mirror.active_panel() {
+        Some(panel) => format!("{project} › {}", panel.name),
+        None => project.to_string(),
+    };
+    // The terminal's title, or its program, after the location; not when there is no panel.
+    let location = match app.mirror.focused() {
+        Some(term) if !app.panel_area_empty() => {
+            let title = term
+                .title
+                .clone()
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| term.program.clone());
+            format!("{location} · {title}")
+        }
+        _ => location,
+    };
+    // "[offset/history]" while the focused terminal is scrolled back.
+    let indicator = app
+        .mirror
+        .focused_id()
+        .and_then(|id| app.mirror.terminal(id))
+        .filter(|t| t.display_offset > 0)
+        .map(|t| format!(" [{}/{}]", t.display_offset, t.history))
+        .unwrap_or_default();
     let (right, right_style) = match &app.flash {
-        Some((text, _)) => (text.clone(), Style::new().fg(color(theme.warning))),
+        Some((text, _)) => (text.clone(), flash_style),
         None if app.scroll_mode.is_some() => (
             SCROLL_HINTS.to_string(),
+            Style::new().fg(color(theme.muted)),
+        ),
+        None if app.sidebar_focus && app.scroll_mode.is_none() => (
+            SIDEBAR_HINTS.to_string(),
             Style::new().fg(color(theme.muted)),
         ),
         // The hints wait for the session, like the name and the project.
@@ -294,12 +422,21 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         usize::from(bar.width),
         base.patch(badge_style),
     );
+    let indicator_w = width(&indicator).min(bar.width.saturating_sub(x - bar.x));
+    buf.set_stringn(
+        x,
+        bar.y,
+        &indicator,
+        usize::from(indicator_w),
+        base.fg(color(theme.warning)),
+    );
+    let x = x + indicator_w;
     let room = bar
         .width
         .saturating_sub(right_w + 1)
         .saturating_sub(x - bar.x);
-    if room > 1 && !project.is_empty() {
-        let text = format!(" {}", truncate(project, room - 1));
+    if room > 1 && !location.is_empty() {
+        let text = format!(" {}", truncate(&location, room - 1));
         buf.set_stringn(
             x,
             bar.y,
@@ -309,6 +446,75 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
         );
     }
     if right_w <= bar.width {
+        buf.set_stringn(
+            bar.x + bar.width - right_w,
+            bar.y,
+            &right,
+            usize::from(right_w),
+            base.patch(right_style),
+        );
+    }
+}
+
+/// The one-line editor of a prompt; a flash, when there is one, takes the hints' place.
+fn draw_prompt(
+    buf: &mut Buffer,
+    bar: Rect,
+    prompt: &Prompt,
+    flash: Option<(String, Style)>,
+    base: Style,
+    theme: &Theme,
+) {
+    let (right, right_style) = flash.unwrap_or_else(|| {
+        (
+            "⏎ save  esc cancel".to_string(),
+            Style::new().fg(color(theme.muted)),
+        )
+    });
+    let right_w = width(&right).min(bar.width);
+    let label = format!(" {} ", prompt.label());
+    let (x, _) = buf.set_stringn(
+        bar.x,
+        bar.y,
+        &label,
+        usize::from(bar.width),
+        base.fg(color(theme.accent)).add_modifier(Modifier::BOLD),
+    );
+    let (before, after) = prompt.editor.split();
+    let avail = bar.width.saturating_sub(right_w + 1 + (x - bar.x));
+    // The text keeps the cursor in sight: the start is cut when it does not fit.
+    let mut before: Vec<char> = before.chars().collect();
+    while width(&before.iter().collect::<String>()) + 1 > avail && !before.is_empty() {
+        before.remove(0);
+    }
+    let before: String = before.into_iter().collect();
+    let (x, _) = buf.set_stringn(x, bar.y, &before, usize::from(avail), base);
+    let left = avail.saturating_sub(width(&before));
+    let mut rest = after.chars();
+    let cursor_cell = rest.next();
+    match cursor_cell {
+        None => {
+            buf.set_stringn(
+                x,
+                bar.y,
+                "█",
+                usize::from(left),
+                base.fg(color(theme.accent)),
+            );
+        }
+        Some(c) => {
+            let (cx, _) = buf.set_stringn(
+                x,
+                bar.y,
+                c.to_string(),
+                usize::from(left),
+                base.add_modifier(Modifier::REVERSED),
+            );
+            let left = left.saturating_sub(cx - x);
+            buf.set_stringn(cx, bar.y, rest.as_str(), usize::from(left), base);
+        }
+    }
+    if right_w > 0 && width(&label) + width(&before) + right_w < bar.width {
         buf.set_stringn(
             bar.x + bar.width - right_w,
             bar.y,
@@ -332,8 +538,7 @@ pub fn cursor_style(shape: CursorShape) -> ratatui::crossterm::cursor::SetCursor
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mirror::tests::{frame, line, view};
-    use deck_core::config::Config;
+    use crate::mirror::tests::{frame, line, no_sidebar, view};
     use deck_core::model::TerminalId;
     use deck_core::protocol::{Cursor, Line, Run, ServerMsg};
     use ratatui::Terminal;
@@ -349,7 +554,7 @@ mod tests {
     }
 
     fn app(size: (u16, u16), vp: Option<(u16, u16)>, title: Option<&str>) -> App {
-        let mut app = App::new(&Config::default(), size, "sh".into(), &[]);
+        let mut app = App::new(&no_sidebar(), size, &[]);
         let mut v = view(title);
         v.layout_viewport = vp;
         app.on_server(ServerMsg::SessionView(v));
@@ -383,7 +588,7 @@ mod tests {
         let mut a = app((80, 24), Some((80, 23)), None);
         put(
             &mut a,
-            (78, 21),
+            (80, 23),
             vec![
                 (0, line("$ echo hello")),
                 (1, line("hello")),
@@ -391,44 +596,59 @@ mod tests {
             ],
         );
         let (mut t, text) = render(&a);
-        assert_eq!(text[0], format!("╭─ sh {}╮", "─".repeat(80 - 7)));
-        assert_eq!(text[1], format!("│$ echo hello{}│", " ".repeat(66)));
-        assert_eq!(text[2], format!("│hello{}│", " ".repeat(73)));
-        assert_eq!(text[22], format!("╰{}╯", "─".repeat(78)));
+        // The terminal fills the panel area: no border, no title.
+        assert_eq!(text[0], format!("$ echo hello{}", " ".repeat(68)));
+        assert_eq!(text[1], format!("hello{}", " ".repeat(75)));
+        assert!(!text.iter().any(|r| r.contains('╭') || r.contains('│')));
         assert_eq!(
             text[23],
             format!(
-                " main  proj{}{} d detach",
-                " ".repeat(80 - 11 - 9 - prefix_hint().chars().count()),
+                " main  proj › p · sh{}{} ? help  d detach",
+                " ".repeat(80 - 20 - 17 - prefix_hint().chars().count()),
                 prefix_hint()
             )
         );
-        // The border is the accent, the hints are muted, the session name is bold.
+        // The hints are muted, the session name is bold.
         let buf = t.backend().buffer();
-        assert_eq!(buf[(0, 0)].fg, Color::Blue);
         assert_eq!(buf[(1, 23)].fg, Color::Blue);
         assert!(buf[(1, 23)].modifier.contains(Modifier::BOLD));
         assert_eq!(buf[(79, 23)].fg, Color::DarkGray);
         assert_eq!(buf[(7, 23)].fg, Color::DarkGray);
         // The cursor frame has it at row 0, col 1.
-        assert_eq!(t.get_cursor_position().unwrap(), Position::new(2, 1));
+        assert_eq!(t.get_cursor_position().unwrap(), Position::new(1, 0));
     }
 
     #[test]
-    fn the_title_is_the_osc_title_and_is_truncated_with_an_ellipsis() {
+    fn the_status_bar_shows_the_osc_title_cut_with_an_ellipsis_beside_the_hints() {
+        let a = app((80, 24), Some((80, 23)), Some("vim: a title"));
+        let (_, text) = render(&a);
+        assert!(
+            text[23].starts_with(" main  proj › p · vim: a title "),
+            "{}",
+            text[23]
+        );
+
         let a = app(
-            (30, 10),
-            Some((30, 9)),
+            (50, 10),
+            Some((50, 9)),
             Some("vim: a very long title indeed"),
         );
         let (_, text) = render(&a);
-        assert!(
-            text[0].starts_with("╭─ vim: a very long title"),
-            "{}",
-            text[0]
-        );
-        assert!(text[0].contains("… ─"), "{}", text[0]);
-        assert_eq!(width(&text[0]), 30);
+        let bar = &text[9];
+        assert!(bar.starts_with(" main  proj › p · vim: a "), "{bar}");
+        assert!(bar.contains("… "), "{bar}");
+        assert!(bar.ends_with("d detach"), "{bar}");
+        assert_eq!(width(bar), 50);
+
+        // No title when the panel area is empty.
+        let mut v = view(Some("t"));
+        v.projects[0].panels.clear();
+        v.projects[0].active_panel = None;
+        v.active_panel = None;
+        let mut a = App::new(&no_sidebar(), (80, 24), &[]);
+        a.on_server(ServerMsg::SessionView(v));
+        let (_, text) = render(&a);
+        assert!(!text[23].contains('·'), "{}", text[23]);
     }
 
     #[test]
@@ -445,45 +665,44 @@ mod tests {
     #[test]
     fn the_scroll_indicator_and_badge() {
         let mut a = app((80, 24), Some((80, 23)), None);
-        let mut f = frame(true, (78, 21), vec![(0, line("line 3880"))]);
+        let mut f = frame(true, (80, 23), vec![(0, line("line 3880"))]);
         f.display_offset = 120;
         f.history = 4096;
         a.on_server(ServerMsg::Frame(f));
         a.scroll_mode = Some(TerminalId(4));
         let (t, text) = render(&a);
-        assert_eq!(
-            text[0],
-            format!("╭─ sh {} [120/4096] ╮", "─".repeat(80 - 6 - 12 - 1))
-        );
-        assert!(text[1].starts_with("│line 3880"));
+        assert!(text[0].starts_with("line 3880"));
         assert_eq!(
             text[23],
             format!(
-                " SCROLL  proj{}q exit  g top  G bottom",
-                " ".repeat(80 - 13 - 23)
+                " SCROLL  [120/4096] proj › p · sh{}q exit  g top  G bottom",
+                " ".repeat(80 - 33 - 23)
             )
         );
         let buf = t.backend().buffer();
         // The indicator is the warning colour, the badge has the PREFIX style.
-        assert_eq!(buf[(68, 0)].fg, Color::Yellow);
+        assert_eq!(buf[(10, 23)].fg, Color::Yellow);
         assert_eq!(buf[(1, 23)].fg, Color::Yellow);
         assert!(buf[(1, 23)].modifier.contains(Modifier::REVERSED));
 
         // The wheel alone shows the indicator and neither the badge nor the scroll hints.
         a.scroll_mode = None;
         let (_, text) = render(&a);
-        assert!(text[0].contains("[120/4096]"), "{}", text[0]);
-        assert!(text[23].starts_with(" main "), "{}", text[23]);
         assert!(
-            text[23].ends_with(&format!("{} d detach", prefix_hint())),
+            text[23].starts_with(" main  [120/4096] proj"),
+            "{}",
+            text[23]
+        );
+        assert!(
+            text[23].ends_with(&format!("{} ? help  d detach", prefix_hint())),
             "{}",
             text[23]
         );
 
         // Back at the bottom there is no indicator.
-        a.on_server(ServerMsg::Frame(frame(true, (78, 21), vec![])));
+        a.on_server(ServerMsg::Frame(frame(true, (80, 23), vec![])));
         let (_, text) = render(&a);
-        assert!(!text[0].contains('['), "{}", text[0]);
+        assert!(!text[23].contains('['), "{}", text[23]);
     }
 
     #[test]
@@ -497,7 +716,7 @@ mod tests {
 
     #[test]
     fn the_status_bar_has_no_hints_before_the_first_session_view() {
-        let a = App::new(&Config::default(), (80, 24), "sh".into(), &[]);
+        let a = App::new(&no_sidebar(), (80, 24), &[]);
         let (_, text) = render(&a);
         assert!(!text[23].contains("detach"), "{}", text[23]);
     }
@@ -542,16 +761,14 @@ mod tests {
         let l = Line {
             runs: vec![run(0, "日本"), run(5, "🙂"), run(8, "e\u{301}x")],
         };
-        put(&mut a, (18, 3), vec![(0, l)]);
+        put(&mut a, (20, 5), vec![(0, l)]);
         let (t, _) = render(&a);
         let buf = t.backend().buffer();
-        assert_eq!(buf[(1, 1)].symbol(), "日");
-        assert_eq!(buf[(3, 1)].symbol(), "本");
-        assert_eq!(buf[(6, 1)].symbol(), "🙂");
-        assert_eq!(buf[(9, 1)].symbol(), "e\u{301}");
-        assert_eq!(buf[(10, 1)].symbol(), "x");
-        assert_eq!(buf[(19, 1)].symbol(), "│");
-        assert_eq!(buf[(19, 3)].symbol(), "│");
+        assert_eq!(buf[(0, 0)].symbol(), "日");
+        assert_eq!(buf[(2, 0)].symbol(), "本");
+        assert_eq!(buf[(5, 0)].symbol(), "🙂");
+        assert_eq!(buf[(8, 0)].symbol(), "e\u{301}");
+        assert_eq!(buf[(9, 0)].symbol(), "x");
     }
 
     #[test]
@@ -570,9 +787,9 @@ mod tests {
                 },
             }],
         };
-        put(&mut a, (18, 3), vec![(0, l)]);
+        put(&mut a, (20, 5), vec![(0, l)]);
         let (t, _) = render(&a);
-        let cell = &t.backend().buffer()[(1, 1)];
+        let cell = &t.backend().buffer()[(0, 0)];
         assert_eq!(cell.fg, Color::Red);
         assert_eq!(cell.bg, Color::Rgb(1, 2, 3));
         assert!(
@@ -583,12 +800,11 @@ mod tests {
 
     #[test]
     fn a_smaller_client_draws_the_larger_layout_cropped() {
-        let mut a = app((30, 8), Some((60, 20)), None);
-        put(&mut a, (58, 18), vec![(0, line("0123456789"))]);
+        let mut a = app((30, 8), Some((60, 19)), None);
+        put(&mut a, (60, 19), vec![(0, line("0123456789"))]);
         let (mut t, text) = render(&a);
         assert_eq!(text[0].chars().count(), 30);
-        assert!(text[1].starts_with("│0123456789"));
-        assert_eq!(text[6].chars().next(), Some('│'));
+        assert!(text[0].starts_with("0123456789"));
         assert!(text[7].starts_with(" main"));
         // The cursor is in the visible part.
         assert!(t.get_cursor_position().is_ok());
@@ -597,11 +813,10 @@ mod tests {
     #[test]
     fn a_larger_client_pads_with_blanks() {
         let mut a = app((40, 10), Some((20, 6)), None);
-        put(&mut a, (18, 4), vec![(0, line("hi"))]);
+        put(&mut a, (20, 5), vec![(0, line("hi"))]);
         let (_, text) = render(&a);
-        assert_eq!(text[0].chars().filter(|c| *c == '╮').count(), 1);
-        assert_eq!(text[0].trim_end().chars().count(), 20);
-        assert_eq!(text[3].trim_end(), "│                  │");
+        assert_eq!(text[0].trim_end(), "hi");
+        assert_eq!(text[4].trim(), "");
         assert_eq!(text[6].trim(), "");
     }
 
@@ -610,14 +825,14 @@ mod tests {
         let mut a = app((20, 6), Some((30, 5)), None);
         let l = Line {
             runs: vec![Run {
-                col: 18,
+                col: 19,
                 text: "日".into(),
                 style: protocol::Style::default(),
             }],
         };
-        put(&mut a, (28, 3), vec![(0, l)]);
+        put(&mut a, (30, 5), vec![(0, l)]);
         let (_, text) = render(&a);
-        assert!(!text[1].contains('日'), "{}", text[1]);
+        assert!(!text[0].contains('日'), "{}", text[0]);
     }
 
     #[test]

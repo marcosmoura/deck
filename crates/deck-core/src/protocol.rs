@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::action::{Action, ActionError};
 use crate::model::{SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -42,6 +43,8 @@ pub enum ClientMsg {
         terminal: TerminalId,
         to: ScrollTo,
     },
+    /// An action on the attached session, answered by `ServerMsg::ActionResult` in order.
+    Action(Action),
 }
 
 /// Where to scroll a terminal's display. Positive counts go back into the history (up),
@@ -65,10 +68,23 @@ pub enum Role {
     Control,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Request {
     ListSessions,
     KillServer,
+    /// Creates a session with a project for `cwd`; answered by `Response::Session`.
+    NewSession {
+        name: Option<String>,
+        #[serde(with = "crate::wire::path")]
+        cwd: PathBuf,
+    },
+    KillSession {
+        name: String,
+    },
+    RenameSession {
+        from: String,
+        to: String,
+    },
 }
 
 /// The outer terminal's colours as the client found them.
@@ -95,6 +111,8 @@ pub enum ServerMsg {
         reason: ByeReason,
     },
     Response(Response),
+    /// The outcome of the client's `Action`s, one per action, in order.
+    ActionResult(Result<(), ActionError>),
 }
 
 /// `VersionMismatch` keeps its shape in every version.
@@ -111,6 +129,11 @@ pub enum Response {
     Sessions(Vec<SessionSummary>),
     Ok,
     Error(String),
+    /// The session `Request::NewSession` created.
+    Session {
+        id: SessionId,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +142,9 @@ pub struct SessionSummary {
     pub name: String,
     pub attached_clients: u32,
     pub terminals: u32,
+    pub projects: u32,
+    /// Higher is more recently attached; 0 for a session nobody attached yet.
+    pub last_attached: u64,
 }
 
 /// An update of one terminal's screen. `lines` holds the changed rows, or every row when
@@ -322,6 +348,7 @@ mod tests {
             id: SessionId(1),
             name: "main".into(),
             active_project: Some(ProjectId(2)),
+            active_panel: Some(PanelId(3)),
             layout_viewport: Some((100, 30)),
             projects: vec![ProjectView {
                 id: ProjectId(2),
@@ -336,6 +363,7 @@ mod tests {
                     focused_terminal: Some(TerminalId(4)),
                     terminals: vec![TerminalView {
                         id: TerminalId(4),
+                        program: "sh".into(),
                         title: Some("t".into()),
                         cwd: Some("/x".into()),
                         exit_status: Some(1),
@@ -440,6 +468,20 @@ mod tests {
             ClientMsg::Detach,
             ClientMsg::Request(Request::ListSessions),
             ClientMsg::Request(Request::KillServer),
+            ClientMsg::Request(Request::NewSession {
+                name: Some("s".into()),
+                cwd: "/x".into(),
+            }),
+            ClientMsg::Request(Request::NewSession {
+                name: None,
+                cwd: "/".into(),
+            }),
+            ClientMsg::Request(Request::KillSession { name: "s".into() }),
+            ClientMsg::Request(Request::RenameSession {
+                from: "a".into(),
+                to: "b".into(),
+            }),
+            ClientMsg::Action(Action::KillSession),
             ClientMsg::Scroll {
                 terminal: TerminalId(3),
                 to: ScrollTo::Lines(-7),
@@ -487,7 +529,15 @@ mod tests {
                 name: "main".into(),
                 attached_clients: 2,
                 terminals: 3,
+                projects: 2,
+                last_attached: 9,
             }])),
+            ServerMsg::Response(Response::Session {
+                id: SessionId(2),
+                name: "main-2".into(),
+            }),
+            ServerMsg::ActionResult(Ok(())),
+            ServerMsg::ActionResult(Err(ActionError::EmptyName)),
             ServerMsg::Response(Response::Ok),
             ServerMsg::Response(Response::Error("no".into())),
         ]

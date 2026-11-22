@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 
-use deck_core::model::{SessionView, TerminalId, TerminalView};
+use deck_core::model::{
+    PanelId, PanelView, ProjectId, ProjectView, SessionView, TerminalId, TerminalView,
+};
 use deck_core::protocol::{Cursor, CursorShape, Frame, Line, Modes};
 
 /// One terminal's screen.
@@ -103,6 +105,29 @@ impl Mirror {
             .map(|p| p.name.as_str())
     }
 
+    pub fn find_project(&self, id: ProjectId) -> Option<&ProjectView> {
+        self.view.as_ref()?.projects.iter().find(|p| p.id == id)
+    }
+
+    pub fn find_panel(&self, id: PanelId) -> Option<(&ProjectView, &PanelView)> {
+        self.view
+            .as_ref()?
+            .projects
+            .iter()
+            .find_map(|p| Some((p, p.panels.iter().find(|x| x.id == id)?)))
+    }
+
+    pub fn active_project(&self) -> Option<&ProjectView> {
+        self.find_project(self.view.as_ref()?.active_project?)
+    }
+
+    /// The active project's active panel.
+    pub fn active_panel(&self) -> Option<&PanelView> {
+        let project = self.active_project()?;
+        let id = project.active_panel?;
+        project.panels.iter().find(|p| p.id == id)
+    }
+
     /// The focused terminal of the active project's active panel.
     pub fn focused(&self) -> Option<&TerminalView> {
         let view = self.view.as_ref()?;
@@ -130,6 +155,14 @@ pub(crate) mod tests {
         NameSource, PanelId, PanelView, ProjectId, ProjectView, SessionId, TerminalView,
     };
     use deck_core::protocol::{Run, Style};
+
+    /// The default config with the sidebar off, for tests of the panel area alone.
+    pub fn no_sidebar() -> deck_core::config::Config {
+        deck_core::config::Config {
+            sidebar: false,
+            ..deck_core::config::Config::default()
+        }
+    }
 
     pub fn line(text: &str) -> Line {
         Line {
@@ -159,11 +192,72 @@ pub(crate) mod tests {
         }
     }
 
+    pub fn panel(id: u64, name: &str, terminals: u64) -> PanelView {
+        PanelView {
+            id: PanelId(id),
+            name: name.into(),
+            name_source: NameSource::Default,
+            focused_terminal: Some(TerminalId(id * 10 + 1)),
+            terminals: (1..=terminals)
+                .map(|n| TerminalView {
+                    id: TerminalId(id * 10 + n),
+                    program: "sh".into(),
+                    title: None,
+                    cwd: None,
+                    exit_status: None,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn project(id: u64, name: &str, collapsed: bool, panels: Vec<PanelView>) -> ProjectView {
+        ProjectView {
+            id: ProjectId(id),
+            name: name.into(),
+            root: "/r".into(),
+            collapsed,
+            active_panel: panels.first().map(|p| p.id),
+            panels,
+        }
+    }
+
+    /// The sidebar mockup of the spec: panel 3 (`editor`, terminal 30) of project 1 is active.
+    pub fn mockup() -> SessionView {
+        SessionView {
+            id: SessionId(1),
+            name: "main".into(),
+            active_project: Some(ProjectId(1)),
+            active_panel: Some(PanelId(3)),
+            layout_viewport: Some((71, 23)),
+            projects: vec![
+                project(
+                    1,
+                    "terminal-multiplexer",
+                    false,
+                    vec![
+                        panel(3, "editor", 1),
+                        panel(4, "claude", 1),
+                        panel(5, "tests", 1),
+                    ],
+                ),
+                project(2, "budget", false, vec![panel(6, "api", 1)]),
+                project(7, "empty", false, vec![]),
+                project(
+                    8,
+                    "dotfiles",
+                    true,
+                    vec![panel(9, "vim", 1), panel(10, "git", 1)],
+                ),
+            ],
+        }
+    }
+
     pub fn view(title: Option<&str>) -> SessionView {
         SessionView {
             id: SessionId(1),
             name: "main".into(),
             active_project: Some(ProjectId(2)),
+            active_panel: Some(PanelId(3)),
             layout_viewport: Some((80, 23)),
             projects: vec![ProjectView {
                 id: ProjectId(2),
@@ -178,6 +272,7 @@ pub(crate) mod tests {
                     focused_terminal: Some(TerminalId(4)),
                     terminals: vec![TerminalView {
                         id: TerminalId(4),
+                        program: "sh".into(),
                         title: title.map(str::to_string),
                         cwd: None,
                         exit_status: None,

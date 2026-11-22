@@ -11,7 +11,7 @@ const PAGE_UP: &str = "\x1b[5~";
 /// `deck` in an 80×24 terminal, once its first prompt is inside the frame.
 fn attached() -> Harness {
     let h = Harness::deck(SIZE);
-    h.wait_for_text("│$ ", TIMEOUT);
+    h.wait_for_text("$", TIMEOUT);
     h
 }
 
@@ -24,10 +24,10 @@ fn rows(h: &Harness) -> Vec<String> {
     h.screen_text().lines().map(str::to_string).collect()
 }
 
-/// `(offset, history)` of the `[offset/history]` on the top border.
+/// `(offset, history)` of the `[offset/history]` in the status bar.
 fn indicator(h: &Harness) -> Option<(u32, u32)> {
-    let top = rows(h).into_iter().next()?;
-    let inner = &top[top.find('[')? + 1..];
+    let bar = rows(h).pop()?;
+    let inner = &bar[bar.find('[')? + 1..];
     let (offset, rest) = inner.split_once('/')?;
     let (history, _) = rest.split_once(']')?;
     Some((offset.parse().ok()?, history.parse().ok()?))
@@ -50,7 +50,7 @@ fn wheel(h: &mut Harness, up: bool) {
 fn with_history() -> Harness {
     let mut h = attached();
     h.send_keys("seq 1 500\r");
-    h.wait_for_text("│500", TIMEOUT);
+    h.wait_for_row_start("500", TIMEOUT);
     h
 }
 
@@ -62,23 +62,33 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
     h.send_keys(PAGE_UP);
     wait_until("the indicator", TIMEOUT, || indicator(&h).is_some());
     let (offset, history) = indicator(&h).unwrap();
-    assert_eq!(offset, 21, "one page of the 21-row terminal");
+    assert_eq!(offset, 23, "one page of the 23-row terminal");
     assert!(history > 450, "{history}");
     h.capture("scrolled");
     let screen = rows(&h);
-    assert!(!h.screen_text().contains("│500"), "{}", h.screen_text());
+    assert!(
+        screen[..screen.len() - 1]
+            .iter()
+            .all(|r| !r.contains("500")),
+        "{}",
+        h.screen_text()
+    );
     assert!(status(&h).starts_with(" SCROLL "), "{}", status(&h));
     assert!(
         status(&h).ends_with("q exit  g top  G bottom"),
         "{}",
         status(&h)
     );
-    assert!(screen[0].ends_with(&format!("[{offset}/{history}] ╮")));
+    assert!(
+        status(&h).contains(&format!("[{offset}/{history}]")),
+        "{}",
+        status(&h)
+    );
 
     // G returns to the bottom and stays in the mode.
     h.send_keys("G");
     wait_until("the bottom", TIMEOUT, || indicator(&h).is_none());
-    h.wait_for_text("│500", TIMEOUT);
+    h.wait_for_row_start("500", TIMEOUT);
     assert!(status(&h).starts_with(" SCROLL "), "{}", status(&h));
     h.capture("bottom");
 
@@ -92,12 +102,12 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
     wait_until("scroll mode to end", TIMEOUT, || {
         !status(&h).contains("SCROLL")
     });
-    h.wait_for_text("│500", TIMEOUT);
+    h.wait_for_row_start("500", TIMEOUT);
     assert!(indicator(&h).is_none());
     assert!(status(&h).starts_with(" main "), "{}", status(&h));
     // What was typed in scroll mode never reached the shell.
     h.send_keys("echo done\r");
-    h.wait_for_text("│done", TIMEOUT);
+    h.wait_for_row_start("done", TIMEOUT);
     assert!(!h.screen_text().contains("xyz"), "{}", h.screen_text());
 }
 
@@ -125,7 +135,7 @@ fn the_wheel_scrolls_a_shell_with_history_and_typing_returns_to_the_bottom() {
 
     h.send_keys("Q");
     wait_until("the bottom", TIMEOUT, || indicator(&h).is_none());
-    h.wait_for_text("│$ Q", TIMEOUT);
+    h.wait_for_text("$ Q", TIMEOUT);
 }
 
 #[test]
@@ -135,7 +145,7 @@ fn the_wheel_does_nothing_in_a_fresh_shell() {
     wheel(&mut h, true);
     // Output after the wheel shows that it was handled; nothing scrolled.
     h.send_keys("echo sync\r");
-    h.wait_for_text("│sync", TIMEOUT);
+    h.wait_for_row_start("sync", TIMEOUT);
     assert!(indicator(&h).is_none(), "{}", h.screen_text());
 }
 
@@ -160,26 +170,20 @@ fn the_wheel_moves_through_a_file_in_less() {
     let mut h = attached();
     h.send_keys("seq 1 200 > numbers.txt; LESS= less numbers.txt\r");
     wait_until("less", TIMEOUT, || {
-        rows(&h)
-            .get(1)
-            .is_some_and(|r| r.replace('│', "").trim() == "1")
+        rows(&h).first().is_some_and(|r| r.trim() == "1")
     });
     wheel(&mut h, false);
     wait_until("three lines down", TIMEOUT, || {
-        rows(&h)
-            .get(1)
-            .is_some_and(|r| r.replace('│', "").trim() == "4")
+        rows(&h).first().is_some_and(|r| r.trim() == "4")
     });
     wheel(&mut h, true);
     wait_until("back up", TIMEOUT, || {
-        rows(&h)
-            .get(1)
-            .is_some_and(|r| r.replace('│', "").trim() == "1")
+        rows(&h).first().is_some_and(|r| r.trim() == "1")
     });
     // The wheel moved the program, not deck's history.
     assert!(indicator(&h).is_none());
     h.send_keys("q");
-    h.wait_for_text("│$ ", TIMEOUT);
+    h.wait_for_text("$", TIMEOUT);
 }
 
 /// Runs a shell snippet in the terminal that prints `READY` (built so that the echoed command
@@ -204,7 +208,7 @@ fn the_wheel_on_the_alternate_screen_sends_cursor_keys_until_1007_is_off() {
     // Ctrl+C ends the sleep; a fresh program with `?1007` turned off.
     h.send_bytes(&[3]);
     h.send_keys("printf '\\033[?1049l'\r");
-    h.wait_for_text("│$ ", TIMEOUT);
+    h.wait_for_text("$", TIMEOUT);
     h.send_keys("clear\r");
     start_reader(&mut h, "printf '\\033[?1049h\\033[?1007l'", 1);
     wheel(&mut h, true);
@@ -215,14 +219,14 @@ fn the_wheel_on_the_alternate_screen_sends_cursor_keys_until_1007_is_off() {
 }
 
 #[test]
-fn a_program_with_sgr_mouse_mode_receives_a_click_in_inner_coordinates() {
+fn a_program_with_sgr_mouse_mode_receives_a_click_in_terminal_coordinates() {
     let mut h = attached();
     start_reader(&mut h, "printf '\\033[?1000h\\033[?1006h'", 9);
-    // The outer cell (6, 4), 1-based, is the inner column 5, row 3.
+    // The cell (6, 4), 1-based, is the terminal's own column 6, row 4: no border to take off.
     h.send_keys("\x1b[<0;6;4M");
-    h.wait_for_text("GOT:1b5b3c303b353b334d", TIMEOUT);
+    h.wait_for_text("GOT:1b5b3c303b363b344d", TIMEOUT);
     h.capture("mouse");
-    // The hex is `ESC[<0;5;3M`.
+    // The hex is `ESC[<0;6;4M`.
 }
 
 #[test]

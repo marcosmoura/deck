@@ -9,6 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use deck_core::action::Action;
 use deck_core::protocol::{ClientMsg, FrameReader, PROTOCOL_VERSION, Role, ServerMsg, encode};
 use support::{Harness, Home, TIMEOUT, stderr, stdout, sys, wait_until};
 
@@ -154,8 +155,8 @@ fn an_unsafe_runtime_dir_is_refused() {
     assert!(!home.daemon_running());
 }
 
-/// Attaches to the running daemon and types `exit` into the shell, then reads until the
-/// daemon says goodbye: the last session has ended and the daemon is shutting down.
+/// Attaches to the running daemon and kills its session, then reads until the daemon says
+/// goodbye: the last session has ended and the daemon is shutting down.
 fn end_the_last_session(home: &Home) {
     let mut stream = UnixStream::connect(home.socket()).unwrap();
     stream.set_read_timeout(Some(TIMEOUT)).unwrap();
@@ -178,13 +179,9 @@ fn end_the_last_session(home: &Home) {
     loop {
         while let Some(msg) = reader.next_message::<ServerMsg>().unwrap() {
             match msg {
-                ServerMsg::SessionView(view) if !typed => {
-                    let terminal = view.projects[0].panels[0].terminals[0].id;
-                    let input = ClientMsg::Input {
-                        terminal,
-                        bytes: b"exit\n".to_vec(),
-                    };
-                    stream.write_all(&encode(&input).unwrap()).unwrap();
+                ServerMsg::SessionView(_) if !typed => {
+                    let kill = ClientMsg::Action(Action::KillSession);
+                    stream.write_all(&encode(&kill).unwrap()).unwrap();
                     typed = true;
                 }
                 ServerMsg::Bye { .. } => return,

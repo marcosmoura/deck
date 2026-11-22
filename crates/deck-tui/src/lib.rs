@@ -5,16 +5,24 @@ mod colors;
 mod draw;
 mod input;
 mod mirror;
+mod modal;
+mod picker;
+mod sidebar;
+#[cfg(test)]
+mod sidebar_tests;
 mod term;
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use deck_core::config::Config;
-use deck_core::protocol::{ClientMsg, FrameReader, PROTOCOL_VERSION, Role, ServerMsg, encode};
+use deck_core::protocol::{
+    ByeReason, ClientMsg, FrameReader, OuterColors, PROTOCOL_VERSION, Request, Response, Role,
+    ServerMsg, encode,
+};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event as ct;
@@ -26,7 +34,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc;
 use tokio::time::sleep_until;
 
-use crate::app::{App, Out, panel_area};
+use crate::app::{App, Out};
 
 /// The redraw timer: at most one draw per tick, and only when something changed.
 const REDRAW: Duration = Duration::from_millis(16);
@@ -113,72 +121,25 @@ async fn run_async(mut options: Options) -> Exit {
         }
     };
     let size = ct_terminal::size().unwrap_or((80, 24));
-    let program = program_name(&options.config);
-    let mut app = App::new(&options.config, size, program, &probe.leftover);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    let home = std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from);
+    let mut app = App::new(&options.config, size, &probe.leftover).with_dirs(cwd.clone(), home);
 
-    let stream = match UnixStream::connect(&options.socket).await {
-        Ok(stream) => stream,
+    let ctx = Ctx {
+        socket: options.socket.clone(),
+        cwd,
+        colors: probe.colors,
+    };
+    let hello = ctx.hello(&app, options.session.clone(), options.create);
+    let mut link = match Link::open(&ctx.socket, hello).await {
+        Ok(link) => link,
         Err(e) => {
             drop(guard);
             return Exit::Error(format!("cannot connect to the deck daemon: {e}"));
         }
     };
-    let (mut read_half, mut write_half) = stream.into_split();
-
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ClientMsg>();
-    let hello = {
-        let (cols, rows) = panel_area(size);
-        ClientMsg::Hello {
-            version: PROTOCOL_VERSION,
-            role: Role::Attach {
-                session: options.session.clone(),
-                create: options.create,
-                cols: cols.max(app::MIN_SIZE.0),
-                rows: rows.max(app::MIN_SIZE.1 - 1),
-            },
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-            env: std::env::vars_os().collect(),
-            colors: probe.colors,
-        }
-    };
-    let _ = out_tx.send(hello);
-
-    let writer = tokio::spawn(async move {
-        while let Some(msg) = out_rx.recv().await {
-            let Ok(bytes) = encode(&msg) else { continue };
-            if write_half.write_all(&bytes).await.is_err() {
-                break;
-            }
-        }
-        let _ = write_half.shutdown().await;
-    });
-
-    let (server_tx, mut server_rx) = mpsc::unbounded_channel::<Server>();
-    tokio::spawn(async move {
-        let mut reader = FrameReader::new();
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            match read_half.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => reader.push(&buf[..n]),
-            }
-            loop {
-                match reader.next_message::<ServerMsg>() {
-                    Ok(Some(msg)) => {
-                        if server_tx.send(Server::Msg(Box::new(msg))).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(_) => {
-                        let _ = server_tx.send(Server::Closed);
-                        return;
-                    }
-                }
-            }
-        }
-        let _ = server_tx.send(Server::Closed);
-    });
 
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<ct::Event>();
     let stop = Arc::new(AtomicBool::new(false));
@@ -227,7 +188,7 @@ async fn run_async(mut options: Options) -> Exit {
                 Some(event) => app.on_event(event, Instant::now()),
                 None => break Exit::Error("lost the terminal input".into()),
             },
-            msg = server_rx.recv() => match msg {
+            msg = link.server_rx.recv() => match msg {
                 Some(Server::Msg(msg)) => app.on_server(*msg),
                 Some(Server::Closed) | None => break Exit::Lost,
             },
@@ -262,7 +223,19 @@ async fn run_async(mut options: Options) -> Exit {
         for out in outs {
             match out {
                 Out::Send(msg) => {
-                    let _ = out_tx.send(msg);
+                    let _ = link.out_tx.send(msg);
+                }
+                Out::Switch(name) => match switch(&ctx, &mut app, &mut link, name).await {
+                    Ok(()) => {}
+                    Err(exit) => break 'run exit,
+                },
+                // The session was killed: go on in the one attached most recently, if any.
+                Out::Exit(Exit::SessionEnded(ended)) => {
+                    match follow(&ctx, &mut app, &mut link, &ended).await {
+                        Ok(true) => {}
+                        Ok(false) => break 'run Exit::SessionEnded(ended),
+                        Err(exit) => break 'run exit,
+                    }
                 }
                 Out::Clipboard(bytes) => {
                     let mut stdout = io::stdout();
@@ -276,38 +249,228 @@ async fn run_async(mut options: Options) -> Exit {
 
     stop.store(true, Ordering::Release);
     let _ = reader.join();
-    drop(out_tx);
-    let _ = tokio::time::timeout(FLUSH_FOR, writer).await;
+    link.close().await;
     drop(terminal);
     drop(guard);
     exit
 }
 
-/// The name of the program a new terminal runs: the shell's basename.
-fn program_name(config: &Config) -> String {
-    let shell = config
-        .shell
-        .clone()
-        .or_else(|| std::env::var("SHELL").ok())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/bin/sh".to_string());
-    shell
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("sh")
-        .to_string()
+/// What a connection's `Hello` needs besides the session.
+struct Ctx {
+    socket: PathBuf,
+    cwd: PathBuf,
+    colors: Option<OuterColors>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_program_is_the_shells_basename() {
-        let config = Config::parse("shell = \"/usr/local/bin/fish\"")
-            .unwrap()
-            .config;
-        assert_eq!(program_name(&config), "fish");
+impl Ctx {
+    fn hello(&self, app: &App, session: Option<String>, create: bool) -> ClientMsg {
+        let (cols, rows) = app.viewport();
+        ClientMsg::Hello {
+            version: PROTOCOL_VERSION,
+            role: Role::Attach {
+                session,
+                create,
+                cols: cols.max(app::MIN_SIZE.0),
+                rows: rows.max(app::MIN_SIZE.1 - 1),
+            },
+            cwd: self.cwd.clone(),
+            env: std::env::vars_os().collect(),
+            colors: self.colors,
+        }
     }
+}
+
+/// One connection to the daemon: what goes out and what comes in.
+struct Link {
+    out_tx: mpsc::UnboundedSender<ClientMsg>,
+    writer: tokio::task::JoinHandle<()>,
+    server_rx: mpsc::UnboundedReceiver<Server>,
+}
+
+impl Link {
+    /// Connects and sends `hello`.
+    async fn open(socket: &Path, hello: ClientMsg) -> io::Result<Self> {
+        let stream = UnixStream::connect(socket).await?;
+        let (mut read_half, mut write_half) = stream.into_split();
+
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ClientMsg>();
+        let _ = out_tx.send(hello);
+        let writer = tokio::spawn(async move {
+            while let Some(msg) = out_rx.recv().await {
+                let Ok(bytes) = encode(&msg) else { continue };
+                if write_half.write_all(&bytes).await.is_err() {
+                    break;
+                }
+            }
+            let _ = write_half.shutdown().await;
+        });
+
+        let (server_tx, server_rx) = mpsc::unbounded_channel::<Server>();
+        tokio::spawn(async move {
+            let mut reader = FrameReader::new();
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match read_half.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => reader.push(&buf[..n]),
+                }
+                loop {
+                    match reader.next_message::<ServerMsg>() {
+                        Ok(Some(msg)) => {
+                            if server_tx.send(Server::Msg(Box::new(msg))).is_err() {
+                                return;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(_) => {
+                            let _ = server_tx.send(Server::Closed);
+                            return;
+                        }
+                    }
+                }
+            }
+            let _ = server_tx.send(Server::Closed);
+        });
+        Ok(Self {
+            out_tx,
+            writer,
+            server_rx,
+        })
+    }
+
+    /// Lets the writer flush what is queued (`Detach`) and ends the connection.
+    async fn close(self) {
+        drop(self.out_tx);
+        let _ = tokio::time::timeout(FLUSH_FOR, self.writer).await;
+    }
+}
+
+/// How long a new connection may take to deliver its first view.
+const ATTACH_FOR: Duration = Duration::from_secs(5);
+
+/// Attaches to `name` on a new connection and waits for its first view, which goes to `app`.
+/// `Err` is why the daemon refused (the session is gone, say) or could not be reached.
+async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, String> {
+    let hello = ctx.hello(app, Some(name.to_string()), false);
+    let mut link = Link::open(&ctx.socket, hello)
+        .await
+        .map_err(|e| format!("cannot connect to the deck daemon: {e}"))?;
+    let wait = async {
+        loop {
+            match link.server_rx.recv().await {
+                Some(Server::Msg(msg)) => match *msg {
+                    ServerMsg::Bye {
+                        reason: ByeReason::Error(text),
+                    } => return Err(text),
+                    ServerMsg::Bye { .. } => return Err(format!("cannot attach to {name}")),
+                    msg => {
+                        let first = matches!(msg, ServerMsg::SessionView(_));
+                        for out in app.on_server(msg) {
+                            if let Out::Send(msg) = out {
+                                let _ = link.out_tx.send(msg);
+                            }
+                        }
+                        if first {
+                            return Ok(());
+                        }
+                    }
+                },
+                Some(Server::Closed) | None => {
+                    return Err("lost the connection to the deck daemon".to_string());
+                }
+            }
+        }
+    };
+    match tokio::time::timeout(ATTACH_FOR, wait).await {
+        Ok(Ok(())) => Ok(link),
+        Ok(Err(text)) => Err(text),
+        Err(_) => Err(format!("the daemon did not answer for {name}")),
+    }
+}
+
+/// Moves the client to another session on a new connection, without leaving the outer
+/// terminal. When the daemon refuses, it goes back to the session it left and shows why;
+/// `Err` is the exit when that is not possible either.
+async fn switch(ctx: &Ctx, app: &mut App, link: &mut Link, name: String) -> Result<(), Exit> {
+    let previous = app.mirror.session_name().map(str::to_string);
+    let _ = link.out_tx.send(ClientMsg::Detach);
+    app.reset_session();
+    let (new, flash) = match attach_to(ctx, app, &name).await {
+        Ok(new) => (new, None),
+        Err(text) => {
+            let back = match &previous {
+                Some(previous) => attach_to(ctx, app, previous).await.ok(),
+                None => None,
+            };
+            match back {
+                Some(new) => (new, Some(text)),
+                None => return Err(Exit::Error(text)),
+            }
+        }
+    };
+    std::mem::replace(link, new).close().await;
+    if let Some(text) = flash {
+        app.set_flash(text, Instant::now(), true);
+    }
+    Ok(())
+}
+
+/// The session `ended` was killed: goes on in the one attached most recently that the daemon
+/// accepts. `Ok(false)` when none is left.
+async fn follow(ctx: &Ctx, app: &mut App, link: &mut Link, ended: &str) -> Result<bool, Exit> {
+    let _ = link.out_tx.send(ClientMsg::Detach);
+    app.reset_session();
+    let mut skip = vec![ended.to_string()];
+    let mut flash = None;
+    while let Some(name) = next_session(ctx, &skip).await {
+        match attach_to(ctx, app, &name).await {
+            Ok(new) => {
+                std::mem::replace(link, new).close().await;
+                if let Some(text) = flash {
+                    app.set_flash(text, Instant::now(), true);
+                }
+                return Ok(true);
+            }
+            Err(text) => {
+                flash = Some(text);
+                skip.push(name);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// The session attached most recently, other than those in `skip`.
+async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
+    let hello = ClientMsg::Hello {
+        version: PROTOCOL_VERSION,
+        role: Role::Control,
+        cwd: ctx.cwd.clone(),
+        env: std::env::vars_os().collect(),
+        colors: None,
+    };
+    let ask = async {
+        let mut link = Link::open(&ctx.socket, hello).await.ok()?;
+        link.out_tx
+            .send(ClientMsg::Request(Request::ListSessions))
+            .ok()?;
+        loop {
+            match link.server_rx.recv().await? {
+                Server::Msg(msg) => {
+                    if let ServerMsg::Response(Response::Sessions(list)) = *msg {
+                        return list
+                            .into_iter()
+                            .filter(|s| !skip.contains(&s.name))
+                            .max_by_key(|s| s.last_attached)
+                            .map(|s| s.name);
+                    }
+                }
+                Server::Closed => return None,
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(2), ask)
+        .await
+        .ok()
+        .flatten()
 }

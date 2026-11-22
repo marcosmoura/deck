@@ -64,6 +64,9 @@ impl Home {
         let mut keys: Vec<(String, String)> = vec![
             ("shell".into(), "\"/bin/sh\"".into()),
             ("shell_args".into(), "[]".into()),
+            // The sidebar is off unless a test turns it on (`config_unset("sidebar")` brings
+            // back the product default), so the panel area keeps the whole window.
+            ("sidebar".into(), "false".into()),
         ];
         for (key, value) in config {
             if *value == UNSET {
@@ -489,6 +492,20 @@ impl Harness {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for {text:?}; the screen is:\n{}",
+                self.screen_text()
+            );
+            std::thread::sleep(POLL);
+        }
+    }
+
+    /// Waits until a row of the screen starts with `prefix`; unlike `wait_for_text`, this
+    /// skips a command line that echoes the text.
+    pub fn wait_for_row_start(&self, prefix: &str, limit: Duration) {
+        let deadline = Instant::now() + limit;
+        while !self.screen_text().lines().any(|r| r.starts_with(prefix)) {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for a row starting with {prefix:?}; the screen is:\n{}",
                 self.screen_text()
             );
             std::thread::sleep(POLL);

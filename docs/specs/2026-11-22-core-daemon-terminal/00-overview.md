@@ -31,7 +31,7 @@ None. Uses the decisions in [architecture.md](../../architecture.md): process mo
 - **Colours**: the client asks the outer terminal for its foreground and background (OSC 10/11) at attach, so programs inside deck that ask the same question (Codex, OpenCode, nvim) pick a matching light or dark theme.
 - **Upgrades**: `deck kill-server` stops a daemon of any protocol version (the pid is in `deck.lock`; `SIGTERM` when the daemon cannot answer), so the advice printed on a version mismatch always works.
 - **First size**: the creating client sends its panel area in `Hello`, so the first shell starts at the right size.
-- **Lifecycle until DECK-02**: a session whose last terminal exits ends ([architecture.md#model](../../architecture.md#model) records this as temporary; DECK-02 replaces it).
+- **Lifecycle until DECK-02**: a session whose last terminal exits ends. *Superseded by [DECK-02](../2026-11-22-sessions-sidebar/00-overview.md): the session now stays, with an empty project.*
 - Scrollback: 10,000 lines per terminal by default (`scrollback_lines`).
 - A version mismatch between client and daemon is reported, never worked around ([architecture.md](../../architecture.md#protocol)).
 
@@ -53,6 +53,6 @@ The sub-specs run in order: each one's tests need the one before.
 - `README.md` (new): what deck is, install from source, `deck`, detach and reattach.
 - `docs/features/sessions.md` (new): attach, detach, the default session, `deck ls`, `deck kill-server`.
 - `docs/features/keys.md` (new): the prefix and every binding, kept current by later specs.
-- `docs/architecture.md`: anything this spec settles differently; when DECK-02 lands, the temporary lifecycle note goes.
+- `docs/architecture.md`: anything this spec settles differently.
 
 Reviewed by spec-reviewer on 22 Nov 2026.

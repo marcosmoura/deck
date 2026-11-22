@@ -1,6 +1,8 @@
 //! Keys: conversion from crossterm events and the binding table.
 
-use deck_core::config::Config;
+use std::collections::BTreeMap;
+
+use deck_core::config::{Config, DEFAULT_BINDINGS, HelpGroup};
 use deck_core::keys::{KeyCode, KeyEvent, KeySpec, Modifiers};
 use ratatui::crossterm::event as ct;
 
@@ -8,28 +10,68 @@ use ratatui::crossterm::event as ct;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Detach,
-    /// Bound, does nothing until the scroll mode of sub-spec 06.
+    Sessions,
+    RenameSession,
     Scroll,
+    NewPanel,
+    NextPanel,
+    PrevPanel,
+    /// The N-th panel of the active project, from 1.
+    GotoPanel(usize),
+    RenamePanel,
+    ClosePanel,
+    NewProject,
+    RenameProject,
+    CloseProject,
+    ToggleSidebar,
+    FocusSidebar,
+    Help,
 }
 
 impl Action {
     fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "detach" => Some(Self::Detach),
-            "scroll" => Some(Self::Scroll),
-            _ => None,
-        }
+        Some(match name {
+            "detach" => Self::Detach,
+            "sessions" => Self::Sessions,
+            "rename_session" => Self::RenameSession,
+            "scroll" => Self::Scroll,
+            "new_panel" => Self::NewPanel,
+            "next_panel" => Self::NextPanel,
+            "prev_panel" => Self::PrevPanel,
+            "rename_panel" => Self::RenamePanel,
+            "close_panel" => Self::ClosePanel,
+            "new_project" => Self::NewProject,
+            "rename_project" => Self::RenameProject,
+            "close_project" => Self::CloseProject,
+            "toggle_sidebar" => Self::ToggleSidebar,
+            "focus_sidebar" => Self::FocusSidebar,
+            "help" => Self::Help,
+            other => {
+                let n: usize = other.strip_prefix("panel_")?.parse().ok()?;
+                (1..=9).contains(&n).then_some(Self::GotoPanel(n))?
+            }
+        })
     }
 }
 
 /// The actions that show in the status bar's hints, in order, with their label.
-const HINTED: &[(Action, &str)] = &[(Action::Detach, "detach")];
+const HINTED: &[(Action, &str)] = &[(Action::Help, "help"), (Action::Detach, "detach")];
+
+/// One line of the help overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelpRow {
+    pub group: HelpGroup,
+    /// The prefix and the key(s), e.g. `⌥Space c`.
+    pub keys: String,
+    pub text: String,
+}
 
 /// The prefix and the keys bound after it.
 #[derive(Debug, Clone)]
 pub struct Bindings {
     prefix: KeySpec,
     actions: Vec<(Action, Vec<KeySpec>)>,
+    table: BTreeMap<String, Vec<KeySpec>>,
 }
 
 impl Bindings {
@@ -42,6 +84,7 @@ impl Bindings {
         Self {
             prefix: config.prefix,
             actions,
+            table: config.keys.clone(),
         }
     }
 
@@ -56,17 +99,79 @@ impl Bindings {
             .map(|(action, _)| *action)
     }
 
-    /// The hint text of the status bar, e.g. `⌥Space d detach`.
+    /// The prefix as shown in the UI.
+    pub fn prefix_label(&self) -> String {
+        spec_label(&self.prefix)
+    }
+
+    /// The prefix and the first key of an action, e.g. `⌥Space c`.
+    pub fn key_label(&self, action: Action) -> Option<String> {
+        let keys = &self.actions.iter().find(|(a, _)| *a == action)?.1;
+        Some(format!(
+            "{} {}",
+            self.prefix_label(),
+            spec_label(keys.first()?)
+        ))
+    }
+
+    /// The hint text of the status bar, e.g. `⌥Space ? help  d detach`.
     pub fn hints(&self) -> String {
-        let prefix = spec_label(&self.prefix);
-        HINTED
+        let items: Vec<String> = HINTED
             .iter()
             .filter_map(|(action, label)| {
                 let keys = &self.actions.iter().find(|(a, _)| a == action)?.1;
-                Some(format!("{prefix} {} {label}", spec_label(keys.first()?)))
+                Some(format!("{} {label}", spec_label(keys.first()?)))
             })
-            .collect::<Vec<_>>()
-            .join("  ")
+            .collect();
+        if items.is_empty() {
+            return String::new();
+        }
+        format!("{} {}", self.prefix_label(), items.join("  "))
+    }
+
+    /// Every action with its keys, in the order of the binding table, for the help overlay.
+    /// `panel_1` to `panel_9` share one line.
+    pub fn help_rows(&self) -> Vec<HelpRow> {
+        let prefix = self.prefix_label();
+        let labels = |name: &str| -> Vec<String> {
+            self.table
+                .get(name)
+                .map(|keys| keys.iter().map(spec_label).collect())
+                .unwrap_or_default()
+        };
+        let mut rows = Vec::new();
+        for def in DEFAULT_BINDINGS {
+            let (keys, text) = if def.name == "panel_1" {
+                let all: Vec<Vec<String>> =
+                    (1..=9).map(|n| labels(&format!("panel_{n}"))).collect();
+                let default = all
+                    .iter()
+                    .enumerate()
+                    .all(|(i, l)| *l == [(i + 1).to_string()]);
+                let keys = if default {
+                    "1-9".to_string()
+                } else {
+                    all.iter()
+                        .map(|l| l.join("/"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                (keys, "Focus panel N".to_string())
+            } else if def.name.starts_with("panel_") {
+                continue;
+            } else {
+                (labels(def.name).join("/"), def.help.to_string())
+            };
+            if keys.is_empty() {
+                continue;
+            }
+            rows.push(HelpRow {
+                group: def.group,
+                keys: format!("{prefix} {keys}"),
+                text,
+            });
+        }
+        rows
     }
 }
 
@@ -223,9 +328,9 @@ mod tests {
 
     #[test]
     fn a_shifted_character_matches_its_binding_without_shift() {
-        let config = Config::parse("[keys]\ndetach = \"X\"").unwrap().config;
+        let config = Config::parse("[keys]\ndetach = \"Z\"").unwrap().config;
         let b = Bindings::from_config(&config);
-        let shifted = convert(press(ct::KeyCode::Char('X'), ct::KeyModifiers::SHIFT)).unwrap();
+        let shifted = convert(press(ct::KeyCode::Char('Z'), ct::KeyModifiers::SHIFT)).unwrap();
         assert_eq!(b.lookup(&shifted), Some(Action::Detach));
         let plain = convert(press(ct::KeyCode::Char('d'), ct::KeyModifiers::NONE)).unwrap();
         assert_eq!(b.lookup(&plain), None);
@@ -250,7 +355,45 @@ mod tests {
         } else {
             "M-Space"
         };
-        assert_eq!(b.hints(), format!("{prefix} d detach"));
+        assert_eq!(b.hints(), format!("{prefix} ? help  d detach"));
+    }
+
+    #[test]
+    fn the_new_actions_are_bound_and_the_help_lists_them_grouped() {
+        let b = Bindings::from_config(&Config::default());
+        let key = |c: char| KeyEvent::new(KeyCode::Char(c), Modifiers::NONE);
+        assert_eq!(b.lookup(&key('c')), Some(Action::NewPanel));
+        assert_eq!(b.lookup(&key('n')), Some(Action::NextPanel));
+        assert_eq!(b.lookup(&key('p')), Some(Action::PrevPanel));
+        assert_eq!(b.lookup(&key('3')), Some(Action::GotoPanel(3)));
+        assert_eq!(b.lookup(&key('0')), None);
+        assert_eq!(b.lookup(&key(',')), Some(Action::RenamePanel));
+        assert_eq!(
+            b.lookup(&KeyEvent::new(KeyCode::Char('X'), Modifiers::SHIFT)),
+            Some(Action::ClosePanel)
+        );
+        assert_eq!(b.lookup(&key('?')), Some(Action::Help));
+        assert_eq!(b.lookup(&key('s')), Some(Action::Sessions));
+        assert_eq!(b.lookup(&key('$')), Some(Action::RenameSession));
+        assert_eq!(
+            b.lookup(&KeyEvent::new(KeyCode::Tab, Modifiers::NONE)),
+            Some(Action::FocusSidebar)
+        );
+        let rows = b.help_rows();
+        let p = b.prefix_label();
+        assert!(rows.iter().any(|r| r.keys == format!("{p} 1-9")));
+        assert!(rows.iter().all(|r| !r.text.is_empty()));
+        assert!(!rows.iter().any(|r| r.keys.ends_with(" 2")));
+        assert_eq!(rows.len(), DEFAULT_BINDINGS.len() - 8);
+        // An override shows its new key.
+        let config = Config::parse("[keys]\nnew_panel = [\"t\", \"C-n\"]")
+            .unwrap()
+            .config;
+        let rows = Bindings::from_config(&config).help_rows();
+        assert!(
+            rows.iter()
+                .any(|r| r.keys.starts_with(&format!("{p} t/")) && r.text == "New panel")
+        );
     }
 
     #[test]

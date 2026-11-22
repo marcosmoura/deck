@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 02 — Sidebar, panels and projects
@@ -111,3 +111,4 @@ Prompt:
 ## Notes
 
 - Colours and glyphs (`▾`, `▸`, `▌`) come from the `Theme` value (DECK-01 02-core-types notes); DECK-08 makes them configurable.
+- After the user tried it, the Screen mockup's border was dropped: a panel with a single terminal has no border and no title, and the terminal fills the panel area. The terminal's title (the OSC title, else the program name) is shown in the status bar after `project › panel`, and the scroll indicator `[offset/history]` follows the `SCROLL` badge there. Borders return with several terminals (DECK-03).

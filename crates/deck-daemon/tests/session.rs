@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use deck_core::action::Action;
 use deck_core::protocol::{ByeReason, ClientMsg, Request, Response, Role, ServerMsg};
 use deck_daemon::{ManualClock, Options};
 use support::{Attach, Client, TIMEOUT, TestDaemon, config, hello, sys, system_clock};
@@ -37,7 +38,7 @@ async fn a_new_client_gets_main_with_a_shell_sized_by_its_attach() {
 
     let view = client.view.clone().unwrap();
     assert_eq!(view.name, "main");
-    assert_eq!(view.layout_viewport, Some((82, 26)));
+    assert_eq!(view.layout_viewport, Some((80, 24)));
     let project = &view.projects[0];
     assert_eq!(
         project.name,
@@ -89,12 +90,12 @@ async fn a_viewport_resizes_the_pty_and_the_view() {
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
     client
         .send(&ClientMsg::Viewport {
-            cols: 102,
-            rows: 32,
+            cols: 100,
+            rows: 30,
         })
         .await;
     client
-        .wait(|c| c.view.as_ref().and_then(|v| v.layout_viewport) == Some((102, 32)))
+        .wait(|c| c.view.as_ref().and_then(|v| v.layout_viewport) == Some((100, 30)))
         .await;
     client.type_line("stty size").await;
     client.wait_row("30 100").await;
@@ -109,29 +110,29 @@ async fn the_pty_follows_the_client_that_was_active_last() {
     let mut b = Client::attach(
         &daemon.paths.socket,
         Attach {
-            cols: 62,
-            rows: 20,
+            cols: 60,
+            rows: 18,
             ..Attach::default()
         },
     )
     .await;
     // Attaching to an existing session is a viewport claim too.
-    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((62, 20)));
+    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((60, 18)));
 
     b.type_line("stty size").await;
     b.wait_row("18 60").await;
     a.wait_row("18 60").await;
     assert_eq!(
         a.view.as_ref().unwrap().layout_viewport,
-        Some((62, 20)),
+        Some((60, 18)),
         "both clients get the new view"
     );
-    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((62, 20)));
+    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((60, 18)));
 
     a.type_line("stty size").await;
     a.wait_row("24 80").await;
     b.wait_row("24 80").await;
-    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((82, 26)));
+    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((80, 24)));
     daemon.stop().await.unwrap();
 }
 
@@ -177,22 +178,35 @@ async fn terminals_get_the_clients_environment_and_nothing_of_the_daemons() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_shell_that_exits_ends_the_session_after_its_last_output() {
+async fn a_shell_that_exits_leaves_the_session_with_an_empty_project_after_its_last_output() {
     let daemon = TestDaemon::start().await;
-    let socket = daemon.paths.socket.clone();
-    let mut client = Client::attach(&socket, Attach::default()).await;
+    let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
     client.type_line("printf 'a\\nb'; exit").await;
-    client.wait(|c| c.bye.is_some()).await;
-    assert_eq!(client.bye, Some(ByeReason::SessionEnded));
-    // The screen as of the last frame before the Bye has the final output.
+    client
+        .wait(|c| {
+            c.view
+                .as_ref()
+                .is_some_and(|v| v.projects[0].panels.is_empty())
+        })
+        .await;
+    // The screen as of the last frame before the view has the final output.
     assert!(
         client.screen().iter().any(|r| r.starts_with('b')),
         "{:?}",
         client.screen()
     );
-    assert!(matches!(client.log.last(), Some(ServerMsg::Bye { .. })));
-    daemon.wait_exit().await.unwrap();
-    assert!(!socket.exists());
+    let view = client.view.clone().unwrap();
+    assert_eq!(view.projects.len(), 1);
+    assert_eq!(view.active_panel, None);
+    assert_eq!(client.bye, None, "the client stays attached");
+
+    let mut control = Client::control(&daemon.paths.socket).await;
+    let Response::Sessions(sessions) = control.request(Request::ListSessions).await else {
+        panic!("sessions")
+    };
+    assert_eq!(sessions.len(), 1);
+    assert_eq!((sessions[0].terminals, sessions[0].projects), (0, 1));
+    daemon.stop().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -211,9 +225,15 @@ async fn a_background_job_holding_the_pty_does_not_keep_the_terminal_alive() {
             (!r.is_empty() && r.chars().all(|c| c.is_ascii_digit())).then(|| r.parse().ok())?
         })
         .expect("jobs -p prints the pid");
-    client.wait(|c| c.bye.is_some()).await;
-    assert_eq!(client.bye, Some(ByeReason::SessionEnded));
-    daemon.wait_exit().await.unwrap();
+    client
+        .wait(|c| {
+            c.view
+                .as_ref()
+                .is_some_and(|v| v.projects[0].panels.is_empty())
+        })
+        .await;
+    assert_eq!(client.bye, None);
+    daemon.stop().await.unwrap();
     // Clean up what the test started.
     sys::kill9(bg);
     let deadline = Instant::now() + TIMEOUT;
@@ -336,7 +356,7 @@ async fn a_stalled_client_does_not_stop_another_and_resyncs_when_it_reads_again(
         .wait(|c| c.view.as_ref().and_then(|v| v.layout_viewport) == Some((100, 30)))
         .await;
     stalled
-        .wait(|c| c.frames().any(|f| f.full && f.size == (98, 28)))
+        .wait(|c| c.frames().any(|f| f.full && f.size == (100, 30)))
         .await;
     daemon.stop().await.unwrap();
 }
@@ -493,7 +513,7 @@ async fn session_selection_follows_the_attach_rules() {
     drop(again);
 
     // When that session is gone, the most recently attached one that still exists is used.
-    x.type_line("exit").await;
+    x.send(&ClientMsg::Action(Action::KillSession)).await;
     x.wait(|c| c.bye.is_some()).await;
     let next = Client::attach(
         socket,

@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 01 — Model actions and lifecycle
@@ -21,7 +21,7 @@ The daemon side of projects, panels and sessions: every operation the sidebar an
 3. **New panel**: one terminal launched with `program: None` in the project's root; default name as in the overview's decisions; it becomes the active panel and its project the active project.
 4. **New project**: appended to the session; creates its first panel as in requirement 3 and focuses it.
 5. **Close**: `ClosePanel` and `CloseProject` hang up the processes of their terminals (`SIGHUP`, `SIGKILL` after 2 s), remove them, and move focus as in requirement 7. Confirmation is the client's job.
-6. **Lifecycle**: a terminal whose process exits is removed; a panel left with no terminals is removed; projects and sessions stay. `KillSession` hangs up every terminal of the session, sends `Bye { SessionEnded }` to its clients and removes it; the daemon exits when no session is left. This replaces DECK-01's temporary rule (a session ends with its last terminal); the worker updates the DECK-01 daemon test and attach criterion that relied on it, and their spec text, as listed in the overview.
+6. **Lifecycle**: a terminal whose process exits is removed; a panel left with no terminals is removed; projects and sessions stay. `KillSession` hangs up every terminal of the session, sends `Bye { SessionEnded }` to its clients and removes it; the daemon exits when no session is left. One exception stays from DECK-01: when the terminal a session was created with fails within 1 s with a non-zero status and the session has no other terminal, the session ends and its clients get `Bye { Error("terminal exited at once (status <n>); see <log path>") }` (a bad `shell` setting). Directories in `NewProject.root` and `NewSession.cwd` must be absolute; clients resolve `~` and relative paths. This replaces DECK-01's temporary rule (a session ends with its last terminal); the worker updates the DECK-01 daemon test and attach criterion that relied on it, and their spec text, as listed in the overview.
 7. **Focus**: each session stores its active project and panel. After a panel is removed, focus goes to the next panel of the same project, else the previous one, else stays on the project with no active panel. After a project is removed, focus goes to the next project, else the previous one, else none. `CyclePanel` walks panels in sidebar order (projects in order, their panels in order, skipping collapsed projects), wrapping around. `FocusProject` focuses the project and its last active panel, or none.
 8. **Frames follow the active panel**: on a focus change, the daemon stops streaming the old panel's terminals, resizes the new panel's terminals to the latest viewport, and sends `full` frames for them. A session that no client has sized yet (created with `deck new -d` or a control request) uses an 80×24 viewport until a client attaches. Terminals of inactive panels keep running and parsing output.
 9. **SessionView** carries the session's id and name, and gains: project `root` and `collapsed`, panel `name_source`, per-terminal program name (for titles), and the session's active project and panel (`Option`s). It is sent to every client of the session after every change that alters it, including `RenameSession` from a control client.

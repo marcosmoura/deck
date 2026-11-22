@@ -12,6 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
+use crate::env::Env;
 use crate::queue::{Next, Queue};
 use crate::server::{AttachRequest, ClientId, Shared, WriterGuard};
 
@@ -120,6 +121,7 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
         guard,
     ));
 
+    let hello = Hello { env: env.clone() };
     if let Role::Attach {
         session,
         create,
@@ -132,8 +134,8 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
             create,
             cols,
             rows,
-            cwd,
-            env,
+            cwd: cwd.clone(),
+            env: env.clone(),
         };
         if let Err(message) = shared.attach(cid, &request).await {
             queue.push_msg(ServerMsg::Bye {
@@ -152,7 +154,7 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
             }
             next = reader.payload() => match next {
                 Ok(Some(payload)) => {
-                    if !dispatch(&shared, cid, &queue, &payload) {
+                    if !dispatch(&shared, cid, &queue, &hello, &payload).await {
                         break;
                     }
                 }
@@ -166,8 +168,19 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
     }
 }
 
+/// What a connection's `Hello` said about the client's environment.
+struct Hello {
+    env: Env,
+}
+
 /// Handles one message; false ends the connection.
-fn dispatch(shared: &Arc<Shared>, cid: ClientId, queue: &Queue, payload: &[u8]) -> bool {
+async fn dispatch(
+    shared: &Arc<Shared>,
+    cid: ClientId,
+    queue: &Queue,
+    hello: &Hello,
+    payload: &[u8],
+) -> bool {
     match decode_payload::<ClientMsg>(payload) {
         Ok(ClientMsg::Viewport { cols, rows }) => shared.viewport(cid, cols, rows),
         Ok(ClientMsg::Input { terminal, bytes }) => shared.input(cid, terminal, bytes),
@@ -181,6 +194,32 @@ fn dispatch(shared: &Arc<Shared>, cid: ClientId, queue: &Queue, payload: &[u8]) 
         Ok(ClientMsg::Request(Request::KillServer)) => {
             queue.push_msg(ServerMsg::Response(Response::Ok));
             shared.request_shutdown();
+        }
+        Ok(ClientMsg::Request(Request::NewSession { name, cwd })) => {
+            let response = match shared.new_session(name, cwd, hello.env.clone()).await {
+                Ok((id, name)) => Response::Session { id, name },
+                Err(e) => Response::Error(e.to_string()),
+            };
+            queue.push_msg(ServerMsg::Response(response));
+        }
+        Ok(ClientMsg::Request(Request::KillSession { name })) => {
+            let answer = || queue.push_msg(ServerMsg::Response(Response::Ok));
+            match shared.kill_session_named(&name, answer) {
+                Ok(true) => shared.request_shutdown(),
+                Ok(false) => {}
+                Err(e) => queue.push_msg(ServerMsg::Response(Response::Error(e.to_string()))),
+            }
+        }
+        Ok(ClientMsg::Request(Request::RenameSession { from, to })) => {
+            queue.push_msg(ServerMsg::Response(
+                shared
+                    .rename_session_named(&from, &to)
+                    .map_or_else(|e| Response::Error(e.to_string()), |()| Response::Ok),
+            ));
+        }
+        Ok(ClientMsg::Action(action)) => {
+            let result = shared.action(cid, action).await;
+            queue.push_msg(ServerMsg::ActionResult(result));
         }
         Ok(ClientMsg::Hello { .. }) => tracing::warn!("a second Hello was ignored"),
         Err(e) => {

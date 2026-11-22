@@ -24,14 +24,30 @@ On macOS:
 
 Pressed after the prefix.
 
-| Action   | Default | What it does                                                     |
-| -------- | ------- | ---------------------------------------------------------------- |
-| `detach` | `d`     | Detach from the session ([sessions](sessions.md))                |
-| `scroll` | `[`     | Enter [scroll mode](#scroll-mode) for the focused terminal       |
+| Action           | Default   | What it does                                                          |
+| ---------------- | --------- | --------------------------------------------------------------------- |
+| `detach`         | `d`       | Detach from the session ([sessions](sessions.md))                     |
+| `sessions`       | `s`       | Open the session picker ([sessions](sessions.md#switching-sessions))  |
+| `rename_session` | `$`       | Rename the session you are in                                         |
+| `scroll`         | `[`       | Enter [scroll mode](#scroll-mode) for the focused terminal            |
+| `new_panel`      | `c`       | New panel in the active project ([sidebar](sidebar.md))               |
+| `next_panel`     | `n`       | Focus the next panel                                                  |
+| `prev_panel`     | `p`       | Focus the previous panel                                              |
+| `panel_1`..`panel_9` | `1`..`9` | Focus the N-th panel of the active project                          |
+| `rename_panel`   | `,`       | Rename the active panel                                               |
+| `close_panel`    | `X`       | Close the active panel, after a confirmation                          |
+| `new_project`    | `P`       | New project: asks a directory, then a name                            |
+| `rename_project` | `.`       | Rename the active project                                            |
+| `close_project`  | `Q`       | Close the active project, after a confirmation                        |
+| `toggle_sidebar` | `b`       | Show or hide the sidebar                                              |
+| `focus_sidebar`  | `Tab`     | Move the keyboard into the sidebar                                    |
+| `help`           | `?`       | Show the help overlay                                                 |
+
+A key you set replaces the same key on any other action's default keys, with a warning (`key "c" of toggle_sidebar replaces new_panel's`). When you set two actions to one key, the one that sorts first by name wins, with a warning.
 
 ## Scroll mode
 
-`Option+Space [` scrolls back through the focused terminal's history. The status bar shows a `SCROLL` badge instead of the session name, with the hints `q exit  g top  G bottom`, and the terminal's top border shows `[offset/history]` at the right: how many lines it is scrolled back out of how many it holds.
+`Option+Space [` scrolls back through the focused terminal's history. The status bar shows a `SCROLL` badge instead of the session name, with the hints `q exit  g top  G bottom`, and `[offset/history]` follows the badge: how many lines the terminal is scrolled back out of how many it holds.
 
 | Keys                       | What they do                         |
 | -------------------------- | ------------------------------------ |
@@ -55,7 +71,7 @@ The wheel works over any terminal and never enters scroll mode:
 - Otherwise, on the alternate screen (`less`, `man`), the wheel sends three `Up` or `Down` presses per notch (the program's own `?1007` setting; with it off the wheel does nothing there).
 - Otherwise the wheel scrolls the history, 3 lines per notch, and shows the indicator. Without history it does nothing.
 
-Clicks, releases, drags and motion inside a terminal go to programs that asked for them, with coordinates relative to the terminal (SGR encoding when the program asked for it, X10 otherwise). Events on the border or the status bar are never sent. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
+Clicks, releases, drags and motion inside a terminal go to programs that asked for them, with coordinates relative to the terminal, which fills the panel area (SGR encoding when the program asked for it, X10 otherwise). Events on the sidebar, its separator or the status bar are never sent. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
 
 ## Configuration
 
@@ -63,6 +79,8 @@ In `config.toml` (`~/.config/deck/config.toml`, or `$DECK_HOME/config.toml`), ev
 
 ```toml
 prefix = "M-Space"
+sidebar = true
+sidebar_width = 28
 
 [keys]
 detach = "d"          # one key

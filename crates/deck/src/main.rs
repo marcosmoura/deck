@@ -4,6 +4,7 @@ mod control;
 mod daemon_cmd;
 mod platform;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -23,8 +24,34 @@ struct Cli {
 enum Command {
     /// Attaches to a session (the most recent one, or a new `main`, without a name).
     Attach {
-        /// The session to attach to; it must exist.
+        /// The session to attach to; it must exist unless `-c` is given.
         name: Option<String>,
+        /// Create the session when it does not exist.
+        #[arg(short, long, requires = "name")]
+        create: bool,
+    },
+    /// Creates a session and attaches to it.
+    New {
+        /// The session's name (`main`, `main-2`, ... when omitted).
+        name: Option<String>,
+        /// The directory of the session's first project (default: the current one).
+        #[arg(short = 'c', long = "dir", value_name = "DIR")]
+        dir: Option<PathBuf>,
+        /// Create the session without attaching; prints its name.
+        #[arg(short, long)]
+        detached: bool,
+    },
+    /// Kills a session and its terminals.
+    KillSession {
+        /// The session to kill.
+        name: String,
+    },
+    /// Renames a session.
+    RenameSession {
+        /// The session's current name.
+        old: String,
+        /// Its new name.
+        new: String,
     },
     /// Lists the sessions.
     Ls,
@@ -45,8 +72,15 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Some(Command::Daemon) => daemon_cmd::run(),
-        Some(Command::Attach { name }) => control::attach(name),
-        None => control::attach(None),
+        Some(Command::Attach { name, create }) => control::attach(name, create),
+        None => control::attach(None, false),
+        Some(Command::New {
+            name,
+            dir,
+            detached,
+        }) => control::new_session(name, dir, detached),
+        Some(Command::KillSession { name }) => control::kill_session(name),
+        Some(Command::RenameSession { old, new }) => control::rename_session(old, new),
         Some(Command::Ls) => control::ls(),
         Some(Command::KillServer) => control::kill_server(),
         Some(Command::Probe { session }) => control::probe(session),
@@ -69,5 +103,19 @@ mod tests {
         assert!(!help.contains("_probe"), "{help}");
         assert!(Cli::try_parse_from(["deck", "daemon"]).is_ok());
         assert!(Cli::try_parse_from(["deck", "_probe", "--session", "x"]).is_ok());
+    }
+
+    #[test]
+    fn the_session_commands_parse() {
+        let ok = |args: &[&str]| {
+            let mut argv = vec!["deck"];
+            argv.extend_from_slice(args);
+            Cli::try_parse_from(argv).is_ok()
+        };
+        assert!(ok(&["new"]) && ok(&["new", "x", "-c", "/tmp", "-d"]));
+        assert!(ok(&["attach", "-c", "x"]) && ok(&["attach", "--create", "x"]));
+        assert!(!ok(&["attach", "-c"]));
+        assert!(ok(&["kill-session", "x"]) && !ok(&["kill-session"]));
+        assert!(ok(&["rename-session", "a", "b"]) && !ok(&["rename-session", "a"]));
     }
 }

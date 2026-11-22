@@ -20,6 +20,8 @@ To try it without installing, with an isolated socket and state directory: `just
 deck                # attach to the most recent session, or start one called "main"
 deck attach work    # attach to the session "work" (it must exist)
 deck ls             # list the sessions
+deck new work -d    # create a session without attaching
+deck kill-session work
 deck kill-server    # stop the daemon and every session
 ```
 

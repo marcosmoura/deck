@@ -14,8 +14,35 @@ shell_args = ["-l"]
 # Lines of scrollback kept per terminal.
 scrollback_lines = 10000
 
+# The sidebar of projects and panels: shown or hidden, and its width in columns (20 to 60).
+# It also hides while the window is narrower than its width plus 21 columns.
+sidebar = true
+sidebar_width = 28
+
 # Key bindings, pressed after the prefix. An action takes one key or a list of keys, and
 # replaces that action's default keys.
 [keys]
 detach = "d"
+sessions = "s"
+rename_session = "$"
 scroll = "["
+new_panel = "c"
+next_panel = "n"
+prev_panel = "p"
+panel_1 = "1"
+panel_2 = "2"
+panel_3 = "3"
+panel_4 = "4"
+panel_5 = "5"
+panel_6 = "6"
+panel_7 = "7"
+panel_8 = "8"
+panel_9 = "9"
+rename_panel = ","
+close_panel = "X"
+new_project = "P"
+rename_project = "."
+close_project = "Q"
+toggle_sidebar = "b"
+focus_sidebar = "Tab"
+help = "?"

@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use deck_core::action::{Action, ActionError};
 use deck_core::config::Config;
-use deck_core::model::{SessionView, TerminalId};
+use deck_core::model::{PanelId, ProjectId, SessionView, TerminalId};
 use deck_core::protocol::{
     ByeReason, ClientMsg, Frame, FrameReader, OuterColors, PROTOCOL_VERSION, Request, Response,
     Role, ServerMsg, encode,
@@ -156,8 +157,8 @@ impl Default for Attach {
         Self {
             session: None,
             create: true,
-            cols: 82,
-            rows: 26,
+            cols: 80,
+            rows: 24,
             cwd: std::env::temp_dir(),
             env: hello_env(),
             colors: None,
@@ -249,6 +250,73 @@ impl Client {
     /// The first terminal of the session view.
     pub fn terminal(&self) -> TerminalId {
         self.view.as_ref().expect("a session view").projects[0].panels[0].terminals[0].id
+    }
+
+    /// The focused terminal of the active panel.
+    pub fn active_terminal(&self) -> TerminalId {
+        let view = self.view.as_ref().expect("a session view");
+        let project = view
+            .projects
+            .iter()
+            .find(|p| Some(p.id) == view.active_project)
+            .expect("an active project");
+        let panel = project
+            .panels
+            .iter()
+            .find(|p| Some(p.id) == view.active_panel)
+            .expect("an active panel");
+        panel.focused_terminal.expect("a focused terminal")
+    }
+
+    /// The projects as (name, panel names), in order.
+    pub fn tree(&self) -> Vec<(String, Vec<String>)> {
+        self.view
+            .as_ref()
+            .expect("a session view")
+            .projects
+            .iter()
+            .map(|p| {
+                (
+                    p.name.clone(),
+                    p.panels.iter().map(|x| x.name.clone()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    pub fn project_id(&self, name: &str) -> ProjectId {
+        let view = self.view.as_ref().expect("a session view");
+        view.projects
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("no project {name}"))
+            .id
+    }
+
+    pub fn panel_id(&self, project: &str, panel: &str) -> PanelId {
+        let view = self.view.as_ref().expect("a session view");
+        view.projects
+            .iter()
+            .find(|p| p.name == project)
+            .and_then(|p| p.panels.iter().find(|x| x.name == panel))
+            .unwrap_or_else(|| panic!("no panel {project}/{panel}"))
+            .id
+    }
+
+    /// Sends an action and waits for its result.
+    pub async fn action(&mut self, action: Action) -> Result<(), ActionError> {
+        self.send(&ClientMsg::Action(action)).await;
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            let left = deadline
+                .checked_duration_since(Instant::now())
+                .expect("an action result in time");
+            match self.recv(left).await {
+                Some(ServerMsg::ActionResult(r)) => return r,
+                Some(_) => {}
+                None => panic!("no action result"),
+            }
+        }
     }
 
     fn absorb(&mut self, msg: ServerMsg) {
@@ -350,7 +418,7 @@ impl Client {
     }
 
     pub async fn type_line(&mut self, line: &str) {
-        let terminal = self.terminal();
+        let terminal = self.active_terminal();
         self.send(&ClientMsg::Input {
             terminal,
             bytes: format!("{line}\n").into_bytes(),

@@ -189,6 +189,7 @@ mod tests {
             name: name.into(),
             projects: vec![],
             active_project: None,
+            active_panel: None,
             layout_viewport: None,
         }
     }

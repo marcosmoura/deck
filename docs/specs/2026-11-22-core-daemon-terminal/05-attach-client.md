@@ -55,7 +55,7 @@ The user can run `deck`: a shell opens in a rounded frame with a status bar, typ
 - [ ] Every byte `0x01`–`0x7f` except `0x1b`, sent one at a time through the outer PTY to a program in raw mode that echoes its input bytes, arrives unchanged (this covers crossterm's `Ctrl+4`…`Ctrl+7` reports for `0x1c`–`0x1f`).
 - [ ] With `[keys] detach = "X"` in the config, `Option+Space X` (typed as Shift+x) detaches.
 - [ ] The prefix badge shows after `Option+Space` and disappears after the next key or `Esc` (capture `prefix`).
-- [ ] `exit` in the shell prints `[session main ended]`.
+- [ ] `exit` in the shell leaves the client attached to the session, now empty (changed by [DECK-02 sub-spec 01](../2026-11-22-sessions-sidebar/01-model-actions.md); `[session <session> ended]` now follows a killed session).
 - [ ] `deck kill-server` while attached ends the client with `[deck daemon stopped]`.
 - [ ] `SIGTERM` to the client leaves the outer terminal cooked and on the main screen (`tty_mode()`, `raw_output()`).
 - [ ] A 15×4 outer terminal shows `deck: window too small`, and the shell's size equals its size before the shrink when the window grows back.

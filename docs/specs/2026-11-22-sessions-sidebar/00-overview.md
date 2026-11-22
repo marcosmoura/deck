@@ -39,9 +39,9 @@ Turn the single-terminal client into the product's shape: a session holds projec
 
 | Sub-spec                        | Type       | Crate                   | Summary                                                                 | Depends     | Status |
 | ------------------------------- | ---------- | ----------------------- | ----------------------------------------------------------------------- | ----------- | ------ |
-| [01](01-model-actions.md)       | foundation | deck-core, deck-daemon, deck (tests) | Actions for projects, panels and sessions; lifecycle; frames follow the active panel | DECK-01 | todo |
-| [02](02-sidebar.md)             | shippable  | deck-tui, deck-core     | Sidebar, panel and project bindings, prompts, confirmations, help        | 01          | todo   |
-| [03](03-session-picker.md)      | shippable  | deck-tui, deck          | Session picker, session CLI (`new`, `kill-session`, `rename-session`)    | 01          | todo   |
+| [01](01-model-actions.md)       | foundation | deck-core, deck-daemon, deck (tests) | Actions for projects, panels and sessions; lifecycle; frames follow the active panel | DECK-01 | done |
+| [02](02-sidebar.md)             | shippable  | deck-tui, deck-core     | Sidebar, panel and project bindings, prompts, confirmations, help        | 01          | done   |
+| [03](03-session-picker.md)      | shippable  | deck-tui, deck          | Session picker, session CLI (`new`, `kill-session`, `rename-session`)    | 01          | done   |
 
 02 and 03 both change `deck-tui`, so they run one after the other.
 
