@@ -25,7 +25,7 @@ Open tasks the user has not placed in the queue: none.
 
 | ID      | Title                                     | Status     | Depends on       | Spec                                                                  |
 | ------- | ----------------------------------------- | ---------- | ---------------- | --------------------------------------------------------------------- |
-| DECK-01 | Core daemon and terminal                  | ready      | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
+| DECK-01 | Core daemon and terminal                  | in-progress | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
 | DECK-02 | Sessions, projects, panels and sidebar    | ready      | DECK-01          | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)  |
 | DECK-03 | Grid layout                               | ready      | DECK-02, DECK-08 | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)            |
 | DECK-04 | Persistence across daemon restarts        | ready      | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)            |
