@@ -15,7 +15,6 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 1. [DECK-05](#tasks): control API: the `deck` CLI for agents and scripts
 1. [DECK-06](#tasks): agent status in the sidebar, hooks, resume after restart
 1. [DECK-09](#tasks): sidebar titles with program and agent icons
-1. [DECK-07](#deck-07): panels named after what their agent is doing
 
 ### Not ordered yet
 
@@ -31,7 +30,6 @@ Open tasks the user has not placed in the queue: none.
 | DECK-04 | Persistence across daemon restarts        | ready      | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)            |
 | DECK-05 | Control API                               | ready      | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)            |
 | DECK-06 | Agent status, hooks and resume            | ready      | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)          |
-| DECK-07 | Auto-named panels                         | todo       | DECK-06          | — (simple task, [note](#deck-07))                                     |
 | DECK-08 | Config and theming                        | ready      | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)      |
 | DECK-09 | Sidebar titles with icons                 | ready      | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)      |
 
@@ -39,7 +37,9 @@ Open tasks the user has not placed in the queue: none.
 
 A task that will not be built moves here from the Tasks table, with the date and the reason, in a commit on `main` (`docs(backlog): withdraw DECK-NN`, made only when the user asks). It keeps its ID and is never picked.
 
-None.
+| ID      | Title             | Withdrawn   | Reason                                                                                          |
+| ------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------- |
+| DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
 
