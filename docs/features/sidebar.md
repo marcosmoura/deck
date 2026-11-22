@@ -34,14 +34,14 @@ After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previo
 
 `Option+Space Tab` moves the keyboard into the sidebar, starting on the active panel; the status bar shows `SIDEBAR` and the hints. Keys no longer reach the terminal; the prefix still works (`Option+Space d` detaches).
 
-| Keys            | What they do                                                          |
-| --------------- | --------------------------------------------------------------------- |
-| `Up` / `k`, `Down` / `j` | Move the selection (reversed)                                 |
-| `Enter`         | Focus the selected panel and return to the terminal; on a project, fold or unfold it |
-| `Left` / `h`, `Right` / `l` | Fold or unfold the selected row's project                 |
-| `c`, `P`        | New panel in the selected project, new project                        |
-| `r`, `x`        | Rename the selected row, close it (with the confirmation)             |
-| `Esc`, `Tab`    | Return to the terminal                                                |
+| Keys                        | What they do                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| `Up` / `k`, `Down` / `j`    | Move the selection (reversed)                                                        |
+| `Enter`                     | Focus the selected panel and return to the terminal; on a project, fold or unfold it |
+| `Left` / `h`, `Right` / `l` | Fold or unfold the selected row's project                                            |
+| `c`, `P`                    | New panel in the selected project, new project                                       |
+| `r`, `x`                    | Rename the selected row, close it (with the confirmation)                            |
+| `Esc`, `Tab`                | Return to the terminal                                                               |
 
 These keys are fixed in v1. Entering the sidebar ends scroll mode.
 
@@ -62,8 +62,8 @@ When the daemon refuses a name or a directory (empty, too long, a duplicate proj
 ## Configuration
 
 ```toml
-sidebar = true        # false hides it until toggled
-sidebar_width = 28    # 20 to 60
+sidebar = true # false hides it until toggled
+sidebar_width = 28 # 20 to 60
 ```
 
 A width outside 20 to 60 is an error naming `sidebar_width`.

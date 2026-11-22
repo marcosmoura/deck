@@ -12,11 +12,11 @@ The session the user talks to is the **lead**. It runs this flow itself: there i
 
 Subagents never start other agents and never commit. Role definitions live in `.agents/roles/<agent>.md`. The harness files only add model, effort, tools and turn limits: edit the role, not the wrapper. Every brief still tells the subagent to read its role file first, so a harness that fails to load a wrapper falls back to the role text.
 
-| Harness     | Wrappers                                                               | Lead               | Start a subagent                    | Send it fixes                                   | Turn limit |
-| ----------- | ---------------------------------------------------------------------- | ------------------ | ----------------------------------- | ----------------------------------------------- | ---------- |
-| Claude Code | `.claude/agents/*.md`                                                  | the normal session | Agent tool, `subagent_type`         | SendMessage to the agent's ID                   | `maxTurns` |
-| Codex       | `.codex/agents/*.toml` (the repository must be trusted)                | the normal session | `spawn_agent` with `agent_type`     | `followup_task` to the same agent; do not close it before its sub-spec is committed | none |
-| OpenCode    | `.opencode/agents/*.md`, permissions and `steps` in `.opencode/opencode.jsonc` | the `build` agent | the `subagent` tool              | the `subagent` tool with the same `sessionID`   | `steps`    |
+| Harness     | Wrappers                                                                       | Lead               | Start a subagent                | Send it fixes                                                                       | Turn limit |
+| ----------- | ------------------------------------------------------------------------------ | ------------------ | ------------------------------- | ----------------------------------------------------------------------------------- | ---------- |
+| Claude Code | `.claude/agents/*.md`                                                          | the normal session | Agent tool, `subagent_type`     | SendMessage to the agent's ID                                                       | `maxTurns` |
+| Codex       | `.codex/agents/*.toml` (the repository must be trusted)                        | the normal session | `spawn_agent` with `agent_type` | `followup_task` to the same agent; do not close it before its sub-spec is committed | none       |
+| OpenCode    | `.opencode/agents/*.md`, permissions and `steps` in `.opencode/opencode.jsonc` | the `build` agent  | the `subagent` tool             | the `subagent` tool with the same `sessionID`                                       | `steps`    |
 
 Read-only and "never start another agent" are enforced only partly: Claude Code reviewers have Bash, OpenCode denies only file edits to reviewers, and Codex cannot restrict a role at all. Everywhere else they hold by the role text. When a harness cannot reach a finished subagent again, start a new `worker` for the fixes and brief it with the findings and the `git diff --stat` of the work.
 
@@ -94,18 +94,18 @@ One task or spec per lead session. When it is done and the user asks for somethi
 
 The user's yes to the repo flow, the approval of a spec, or a request for a backlog task authorizes exactly these commits for that task, and no others:
 
-| When                                        | Where             | Message                                  |
-| ------------------------------------------- | ----------------- | ---------------------------------------- |
-| A new simple task or `needs spec` row       | `main`            | `docs(spec): add DECK-NN`             |
-| A spec drafted and reviewed                 | `main`            | `docs(spec): draft <slug>`               |
-| A spec approved                             | `main`            | `docs(spec): add <slug> spec`            |
-| A `ready` spec updated after earlier work changed what it relies on ([specs/README.md](specs/README.md)) | `main` | `docs(spec): update <slug>` |
-| Work on a spec starts                       | `main`            | `docs(spec): start <slug>`               |
-| A sub-spec or simple task done              | worktree / `main` | `feat(<scope>): …` / `fix(<scope>): …`   |
-| A fix after the user tried it               | worktree          | `fix(<scope>): …`                        |
-| Merging `main` into the branch              | worktree          | git's merge message                      |
-| The squash merge                            | `main`            | `feat: <spec title> (DECK-NN)`           |
-| A spec discarded                            | `main`            | `docs(spec): stop <slug>`                |
+| When                                                                                                     | Where             | Message                                |
+| -------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------- |
+| A new simple task or `needs spec` row                                                                    | `main`            | `docs(spec): add DECK-NN`              |
+| A spec drafted and reviewed                                                                              | `main`            | `docs(spec): draft <slug>`             |
+| A spec approved                                                                                          | `main`            | `docs(spec): add <slug> spec`          |
+| A `ready` spec updated after earlier work changed what it relies on ([specs/README.md](specs/README.md)) | `main`            | `docs(spec): update <slug>`            |
+| Work on a spec starts                                                                                    | `main`            | `docs(spec): start <slug>`             |
+| A sub-spec or simple task done                                                                           | worktree / `main` | `feat(<scope>): …` / `fix(<scope>): …` |
+| A fix after the user tried it                                                                            | worktree          | `fix(<scope>): …`                      |
+| Merging `main` into the branch                                                                           | worktree          | git's merge message                    |
+| The squash merge                                                                                         | `main`            | `feat: <spec title> (DECK-NN)`         |
+| A spec discarded                                                                                         | `main`            | `docs(spec): stop <slug>`              |
 
 ## Keeping sessions cheap
 
@@ -118,13 +118,13 @@ The cost of a session is its turns times its context.
 
 ## Checks
 
-| When                         | Command                                                          |
-| ---------------------------- | ---------------------------------------------------------------- |
-| While iterating on a crate   | `cargo nextest run -p <crate> <filter>`, `cargo clippy -p <crate>` |
-| A worker, at the end         | for each crate touched: `cargo fmt -p <crate>`, `cargo clippy -p <crate> --all-targets -- -D warnings`, `just test-crate <crate>` |
-| The lead, per sub-spec       | `just check`, before the reviewer and again before the commit    |
-| Only docs or config changed  | none beyond the hooks                                            |
-| On commit (automatic)        | Lefthook: `cargo fmt --check` on staged Rust files, commit message format |
+| When                        | Command                                                                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| While iterating on a crate  | `cargo nextest run -p <crate> <filter>`, `cargo clippy -p <crate>`                                                                       |
+| A worker, at the end        | for each crate touched: `cargo fmt -p <crate>`, `cargo clippy -p <crate> --all-targets -- -D warnings`, `just test-crate <crate>`        |
+| The lead, per sub-spec      | `just check`, before the reviewer and again before the commit                                                                            |
+| Only docs or config changed | none beyond the hooks                                                                                                                    |
+| On commit (automatic)       | Lefthook: `cargo fmt --check` on staged Rust files, `oxfmt --check` on staged Markdown, TOML, JSON and YAML files, commit message format |
 
 Until DECK-01 sub-spec 01 is merged into `main` with the `justfile`, `.mise.toml` and `lefthook.yml` (inside the DECK-01 worktree, from the moment sub-spec 01 is committed there), use plain Cargo instead: `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo nextest run --workspace` (or `cargo test`), and `cargo nextest run -p <crate>` for `just test-crate`. For sub-spec 01 itself, its acceptance criteria are the check.
 

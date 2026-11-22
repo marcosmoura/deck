@@ -19,13 +19,14 @@ The user adds terminals to a panel and sees them in the automatic grid, moves fo
 6. **Mouse**: a click inside an unfocused terminal focuses it (`FocusTerminal`) and is not forwarded; later clicks are forwarded under DECK-01 sub-spec 06 rules. The wheel scrolls the terminal under the pointer, focused or not, by DECK-01 sub-spec 06 rules, without changing focus and without entering the keyboard scroll mode.
 7. **Bindings** (in the `deck-core` table):
 
-   | Action               | Default                | Does                                         |
-   | -------------------- | ---------------------- | -------------------------------------------- |
-   | `new_terminal`       | `t`                    | `NewTerminal` in the active panel             |
-   | `close_terminal`     | `x`                    | Confirm `Close terminal <index>? (y/n)`, then `CloseTerminal` |
-   | `focus_left` …       | `Left` `Right` `Up` `Down`, and `h` `l` `k` `j` | `FocusDirection`                 |
+   | Action           | Default                                         | Does                                                          |
+   | ---------------- | ----------------------------------------------- | ------------------------------------------------------------- |
+   | `new_terminal`   | `t`                                             | `NewTerminal` in the active panel                             |
+   | `close_terminal` | `x`                                             | Confirm `Close terminal <index>? (y/n)`, then `CloseTerminal` |
+   | `focus_left` …   | `Left` `Right` `Up` `Down`, and `h` `l` `k` `j` | `FocusDirection`                                              |
 
    The focus actions take two default keys each (the binding table maps an action to a list of keys since DECK-01). These keys apply after the prefix; the sidebar-focus keys of DECK-02 are a separate table.
+
 8. **Sidebar**: the panel row's terminal count (DECK-02) reflects the count.
 
 ## Screen
@@ -41,7 +42,7 @@ Panel `tests` with 3 terminals, terminal 2 focused (accent), at 100×24 with the
 │                                                ││$ █                                             │
 │                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
- main  terminal-multiplexer › tests · cargo watch                           ⌥Space ? help  d detach 
+ main  terminal-multiplexer › tests · cargo watch                           ⌥Space ? help  d detach
 ```
 
 ## Acceptance criteria

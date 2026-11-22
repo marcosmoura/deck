@@ -47,11 +47,12 @@ The trust boundary is the user's uid: the daemon accepts only same-uid peers ([a
 
 ## Sub-specs
 
-| Sub-spec                  | Type      | Crate                                  | Summary                                                                                     | Depends | Status |
-| ------------------------- | --------- | -------------------------------------- | ------------------------------------------------------------------------------------------- | ------- | ------ |
+| Sub-spec                  | Type      | Crate                                  | Summary                                                                                             | Depends | Status |
+| ------------------------- | --------- | -------------------------------------- | --------------------------------------------------------------------------------------------------- | ------- | ------ |
 | [01](01-tree-commands.md) | shippable | deck, deck-core, deck-daemon, deck-tui | `ls --json`, `new-project`, `new-panel`, `new-terminal`, `focus`, `close`, `rename-panel`; `--keep` | DECK-04 | todo   |
-| [02](02-terminal-io.md)   | shippable | deck, deck-core, deck-daemon           | `send`, `send-keys`, `capture`, `wait`                                                      | 01      | todo   |
-| [03](03-agent-skill.md)   | shippable | deck, root (`skills/`, `README.md`)    | `skills/deck/SKILL.md`, `deck guide`, README                                                | 02      | todo   |
+| [02](02-terminal-io.md)   | shippable | deck, deck-core, deck-daemon           | `send`, `send-keys`, `capture`, `wait`                                                              | 01      | todo   |
+| [03](03-agent-skill.md)   | shippable | deck, root (`skills/`, `README.md`)    | `skills/deck/SKILL.md`, `deck guide`, README                                                        | 02      | todo   |
+
 ## Affected docs
 
 - `docs/features/control-api.md` (new): every command, its options, output, JSON shapes and exit codes, and the security notes.

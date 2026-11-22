@@ -1,5 +1,5 @@
 ---
-description: 'Read-only. Reviews a written deck spec against the request, the code, the docs and the backlog before the user sees it.'
+description: "Read-only. Reviews a written deck spec against the request, the code, the docs and the backlog before the user sees it."
 mode: subagent
 ---
 

@@ -27,7 +27,7 @@ This spec takes over [DECK-07](../../backlog.md#deck-07) (panels named after wha
 
 ## Decisions
 
-- **One name, kept on the panel.** A panel whose `name_source` is not `manual` gets its name from its *source terminal*; the daemon writes it into `Panel.name` with `name_source = auto`, so persistence (DECK-04), `ls --json` and every client see the same name. A manual rename (`prefix ,`, `deck rename-panel`) locks it; `deck rename-panel --auto` unlocks it.
+- **One name, kept on the panel.** A panel whose `name_source` is not `manual` gets its name from its _source terminal_; the daemon writes it into `Panel.name` with `name_source = auto`, so persistence (DECK-04), `ls --json` and every client see the same name. A manual rename (`prefix ,`, `deck rename-panel`) locks it; `deck rename-panel --auto` unlocks it.
 - **Source terminal**: the panel's first terminal in grid order that has an agent; otherwise its focused terminal.
 - **Program**: the daemon records each terminal's foreground program name from DECK-06's detection tick (`program_name(argv)`, shared with `match_argv`: login dash removed, an interpreter unwrapped only when its first argument is not an option, extension removed), keeping the last value when the process cannot be read, so the client can choose an icon without knowing processes.
 - **Icons** are a fixed set of kinds (`claude`, `codex`, `opencode`, `terminal`, `editor`, `git`, `monitor`, `remote`, `build`, `pager`, `repl`) chosen by a pure table in `deck-core`; the glyph of each kind lives in `[theme.icons]`, one cell wide like every theme glyph. `[theme] icons = "unicode"` (default) uses plain Unicode glyphs that every font has; `icons = "nerd"` uses Nerd Font glyphs; `icons = "none"` draws no icons.
@@ -36,10 +36,10 @@ This spec takes over [DECK-07](../../backlog.md#deck-07) (panels named after wha
 
 ## Sub-specs
 
-| Sub-spec                  | Type      | Crate                            | Summary                                                                                 | Depends | Status |
-| ------------------------- | --------- | -------------------------------- | --------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-auto-titles.md)   | shippable | deck-core, deck-daemon, deck     | Foreground program per terminal; panels named after their source terminal; `--auto`     | DECK-06 | todo   |
-| [02](02-icons.md)         | shippable | deck-core, deck-tui              | Icon kinds, `[theme.icons]` and `icons`, icons in the sidebar and status bar             | 01      | todo   |
+| Sub-spec                | Type      | Crate                        | Summary                                                                             | Depends | Status |
+| ----------------------- | --------- | ---------------------------- | ----------------------------------------------------------------------------------- | ------- | ------ |
+| [01](01-auto-titles.md) | shippable | deck-core, deck-daemon, deck | Foreground program per terminal; panels named after their source terminal; `--auto` | DECK-06 | todo   |
+| [02](02-icons.md)       | shippable | deck-core, deck-tui          | Icon kinds, `[theme.icons]` and `icons`, icons in the sidebar and status bar        | 01      | todo   |
 
 ## Affected docs
 

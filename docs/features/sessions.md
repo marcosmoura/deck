@@ -49,14 +49,14 @@ A session stays until it is killed; when its last terminal exits, the project st
 
 ## Messages when deck ends
 
-| Message                                            | Exit | When                                         |
-| -------------------------------------------------- | ---- | -------------------------------------------- |
-| `[detached from <session>]`                        | 0    | you detached                                 |
-| `[session <session> ended]`                        | 0    | the session was killed and no other is left |
-| `[deck daemon stopped]`                            | 0    | `deck kill-server` ran                       |
-| `[lost connection to the deck daemon]`             | 1    | the connection broke                         |
-| `deck: terminal exited at once (status N); see <log>` | 1 | the shell failed to start; the log has details |
-| `deck: <text>`                                     | 1    | any other error from the daemon              |
+| Message                                               | Exit | When                                           |
+| ----------------------------------------------------- | ---- | ---------------------------------------------- |
+| `[detached from <session>]`                           | 0    | you detached                                   |
+| `[session <session> ended]`                           | 0    | the session was killed and no other is left    |
+| `[deck daemon stopped]`                               | 0    | `deck kill-server` ran                         |
+| `[lost connection to the deck daemon]`                | 1    | the connection broke                           |
+| `deck: terminal exited at once (status N); see <log>` | 1    | the shell failed to start; the log has details |
+| `deck: <text>`                                        | 1    | any other error from the daemon                |
 
 A deck and a daemon of different versions refuse to talk: `the daemon speaks protocol N, this deck speaks M; run "deck kill-server" to restart it`.
 

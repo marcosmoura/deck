@@ -3,6 +3,9 @@ pre-commit:
     fmt:
       glob: "*.rs"
       run: cargo fmt --all --check
+    oxfmt:
+      glob: "*.{md,toml,json,jsonc,yml,yaml}"
+      run: oxfmt --check {staged_files}
 
 commit-msg:
   commands:

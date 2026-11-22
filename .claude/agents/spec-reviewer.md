@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: 'Read-only. Reviews a written deck spec against the request, the code, the docs and the backlog before the user sees it.'
+description: "Read-only. Reviews a written deck spec against the request, the code, the docs and the backlog before the user sees it."
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: medium

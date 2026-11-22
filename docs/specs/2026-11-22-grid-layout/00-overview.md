@@ -33,11 +33,11 @@ A panel holds several terminals, placed by the automatic grid: with an odd count
 
 ## Sub-specs
 
-| Sub-spec                         | Type       | Crate                  | Summary                                                       | Depends | Status |
-| -------------------------------- | ---------- | ---------------------- | ------------------------------------------------------------- | ------- | ------ |
-| [01](01-layout-engine.md)        | foundation | deck-core              | `layout`, ratios, adapt, fit, neighbours, resize, hit tests   | DECK-02, DECK-08 | todo |
-| [02](02-panel-terminals.md)      | shippable  | deck-daemon, deck-tui, deck-core | Add, close and focus terminals; per-terminal PTY sizes; clamped fit | 01 | todo |
-| [03](03-resize.md)               | shippable  | deck-tui, deck-daemon, deck-core | Resize with keys and by dragging borders; reset           | 02      | todo   |
+| Sub-spec                    | Type       | Crate                            | Summary                                                             | Depends          | Status |
+| --------------------------- | ---------- | -------------------------------- | ------------------------------------------------------------------- | ---------------- | ------ |
+| [01](01-layout-engine.md)   | foundation | deck-core                        | `layout`, ratios, adapt, fit, neighbours, resize, hit tests         | DECK-02, DECK-08 | todo   |
+| [02](02-panel-terminals.md) | shippable  | deck-daemon, deck-tui, deck-core | Add, close and focus terminals; per-terminal PTY sizes; clamped fit | 01               | todo   |
+| [03](03-resize.md)          | shippable  | deck-tui, deck-daemon, deck-core | Resize with keys and by dragging borders; reset                     | 02               | todo   |
 
 ## Affected docs
 

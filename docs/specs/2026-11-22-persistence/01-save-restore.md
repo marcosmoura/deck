@@ -17,6 +17,7 @@ The user stops the daemon (or it dies) and the next `deck` shows the same sessio
    - writes `state.json.tmp` with mode `0600`, fsyncs it, renames it over `state.json`, and fsyncs the directory.
 
    A failed save is logged and retried on the next change; it never stops the daemon.
+
 3. **Shutdown**: on `kill-server`, `SIGTERM`, `SIGINT` and `SIGHUP`, the daemon first sets a `shutting_down` flag. From then on, terminal exits do not change the model, and the pending save timer is cancelled. Then it saves synchronously, then hangs up the terminals (DECK-01). Terminals that end because of the shutdown therefore stay in the saved state.
 4. **`deck kill-server --forget`**: the CLI stops the daemon as usual (DECK-01 waits until the lock and socket are released), then deletes `state.json` and any `state.json.tmp`. With no daemon running it deletes them anyway and prints `state cleared`. The protocol is unchanged.
 5. **Session end**: `KillSession` removes the session from the state like any other change. When the last session is killed, the daemon saves an empty state before exiting.

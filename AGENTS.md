@@ -15,8 +15,9 @@ Start at [docs/index.md](docs/index.md), then read only the docs your task needs
 - One Cargo workspace at the root, one binary (`deck`). The crates, their
   boundaries, the protocol and the approved dependencies are in
   [docs/architecture.md](docs/architecture.md).
-- Toolchain: mise pins Rust (with rustfmt and Clippy), `just`, cargo-nextest
-  and Lefthook (`.mise.toml`). `just` is the command surface.
+- Toolchain: mise pins Rust (with rustfmt and Clippy), `just`, cargo-nextest,
+  Lefthook and oxfmt (`.mise.toml`). oxfmt formats what rustfmt does not:
+  Markdown, TOML, JSON and YAML. `just` is the command surface.
 - Platforms: macOS and Linux. Unix PTYs and Unix sockets only; no Windows code.
 
 ## Commands
@@ -26,16 +27,16 @@ these commands exist in the DECK-01 worktree once that sub-spec is committed
 there, and on `main` once DECK-01 is merged. Until then, use the plain Cargo
 equivalents in [docs/workflow.md](docs/workflow.md#checks). Run them from the repository root.
 
-| Command                       | What it does                                                    |
-| ----------------------------- | --------------------------------------------------------------- |
-| `mise install`                | Install the pinned toolchain                                    |
-| `lefthook install`            | Install the Git hooks (once per clone)                          |
-| `just check`                  | The gate: format check, Clippy with warnings denied, all tests  |
-| `just fmt`                    | Format everything                                               |
-| `just lint`                   | Clippy on every crate, warnings denied                          |
-| `just test`                   | All tests with cargo-nextest                                    |
+| Command                       | What it does                                                     |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `mise install`                | Install the pinned toolchain                                     |
+| `lefthook install`            | Install the Git hooks (once per clone)                           |
+| `just check`                  | The gate: format check, Clippy with warnings denied, all tests   |
+| `just fmt`                    | Format everything: Rust with rustfmt, the rest with oxfmt        |
+| `just lint`                   | Clippy on every crate, warnings denied                           |
+| `just test`                   | All tests with cargo-nextest                                     |
 | `just test-crate <crate> [f]` | Tests of one crate, optionally filtered, e.g. `deck-core layout` |
-| `just run [args]`             | Build and run `deck` with an isolated socket and state dir      |
+| `just run [args]`             | Build and run `deck` with an isolated socket and state dir       |
 
 `just check` is the gate before a commit. Plain `cargo` commands (`cargo build -p
 <crate>`, `cargo nextest run -p <crate> <filter>`, `cargo clippy -p <crate>`) are

@@ -14,23 +14,23 @@ The user sets colours, the border style and the sidebar glyphs in `[theme]`, and
 1. **Colour syntax** (`deck-core::theme::ThemeColor`, the parsed form, which may name a role; the resolved `Theme` holds `deck-core::protocol::Color` from DECK-01, so there is one colour type for drawing), parsed from a string or an integer: `"default"` (the terminal's own foreground or background), the 16 ANSI names `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` and `bright-black` … `bright-white`, an integer `0`–`255` (the 256-colour palette), `"#rrggbb"` (case-insensitive), or the name of another role (`border_focused = "accent"`). References are resolved after parsing; a reference to an unknown role or a cycle is an error naming the keys involved.
 2. **Roles** and defaults:
 
-   | Role             | Default         | Used for                                                       |
-   | ---------------- | --------------- | -------------------------------------------------------------- |
-   | `accent`         | `blue`          | focused border and title, active panel row, session name       |
-   | `muted`          | `bright-black`  | hints, project names and the terminal title in the status bar, empty states, exited terminals |
-   | `ok`             | `green`         | success states (DECK-06 idle)                                  |
-   | `warning`        | `yellow`        | `PREFIX`, `SCROLL`, `RESIZE` badges, scroll indicator, waiting |
-   | `error`          | `red`           | error flashes                                                  |
-   | `border`         | `bright-black`  | unfocused terminal borders and the sidebar separator           |
-   | `border_focused` | `accent`        | the focused terminal's border                                  |
-   | `title`          | `default`       | unfocused terminal titles                                      |
-   | `sidebar_fg`     | `default`       | sidebar text                                                   |
-   | `sidebar_bg`     | `default`       | sidebar background                                             |
-   | `status_fg`      | `default`       | status bar text                                                |
-   | `status_bg`      | `default`       | status bar background                                          |
-   | `selection_fg`   | `default`       | the sidebar selection and picker selection text (drawn reversed while both selection roles are `default`) |
-   | `selection_bg`   | `default`       | the selection background                                       |
-   | `overlay_bg`     | `default`       | help and picker overlays                                       |
+   | Role             | Default        | Used for                                                                                                  |
+   | ---------------- | -------------- | --------------------------------------------------------------------------------------------------------- |
+   | `accent`         | `blue`         | focused border and title, active panel row, session name                                                  |
+   | `muted`          | `bright-black` | hints, project names and the terminal title in the status bar, empty states, exited terminals             |
+   | `ok`             | `green`        | success states (DECK-06 idle)                                                                             |
+   | `warning`        | `yellow`       | `PREFIX`, `SCROLL`, `RESIZE` badges, scroll indicator, waiting                                            |
+   | `error`          | `red`          | error flashes                                                                                             |
+   | `border`         | `bright-black` | unfocused terminal borders and the sidebar separator                                                      |
+   | `border_focused` | `accent`       | the focused terminal's border                                                                             |
+   | `title`          | `default`      | unfocused terminal titles                                                                                 |
+   | `sidebar_fg`     | `default`      | sidebar text                                                                                              |
+   | `sidebar_bg`     | `default`      | sidebar background                                                                                        |
+   | `status_fg`      | `default`      | status bar text                                                                                           |
+   | `status_bg`      | `default`      | status bar background                                                                                     |
+   | `selection_fg`   | `default`      | the sidebar selection and picker selection text (drawn reversed while both selection roles are `default`) |
+   | `selection_bg`   | `default`      | the selection background                                                                                  |
+   | `overlay_bg`     | `default`      | help and picker overlays                                                                                  |
 
 3. **Styles**: `border_style = "rounded" | "plain" | "thick" | "double"` (default `rounded`) for terminal borders and overlays. `[theme.glyphs]`: `expanded = "▾"`, `collapsed = "▸"`, `active = "▌"` (DECK-06 adds its status and unseen glyphs here). A glyph must be exactly one cell wide (measured with `unicode-width`, approved for `deck-core` by this spec), because the sidebar's gutter and marker columns are one cell; anything else is an error naming the key.
 4. **`Theme`** in `deck-core` holds the resolved roles, styles and glyphs; `Theme::default()` equals the tables above. `deck-tui` draws every non-terminal element from the `Theme` it was given; no colour or theme glyph literal remains in `deck-tui` outside the defaults. The module that converts `protocol::Color` to ratatui colours is allowed to construct colours. Allowed glyph literals: `…` (truncation), `›` (status-bar path), the box-drawing characters of the chosen `border_style`, and the separator `│`.

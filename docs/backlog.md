@@ -20,23 +20,23 @@ Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
-| ID      | Title                                     | Status     | Depends on       | Spec                                                                  |
-| ------- | ----------------------------------------- | ---------- | ---------------- | --------------------------------------------------------------------- |
-| DECK-01 | Core daemon and terminal                  | done       | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
-| DECK-02 | Sessions, projects, panels and sidebar    | done       | DECK-01          | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)  |
-| DECK-03 | Grid layout                               | in-progress | DECK-02, DECK-08 | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)            |
-| DECK-04 | Persistence across daemon restarts        | ready      | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)            |
-| DECK-05 | Control API                               | ready      | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)            |
-| DECK-06 | Agent status, hooks and resume            | ready      | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)          |
-| DECK-08 | Config and theming                        | done       | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)      |
-| DECK-09 | Sidebar titles with icons                 | ready      | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)      |
+| ID      | Title                                  | Status      | Depends on       | Spec                                                                         |
+| ------- | -------------------------------------- | ----------- | ---------------- | ---------------------------------------------------------------------------- |
+| DECK-01 | Core daemon and terminal               | done        | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
+| DECK-02 | Sessions, projects, panels and sidebar | done        | DECK-01          | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
+| DECK-03 | Grid layout                            | in-progress | DECK-02, DECK-08 | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
+| DECK-04 | Persistence across daemon restarts     | ready       | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
+| DECK-05 | Control API                            | ready       | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
+| DECK-06 | Agent status, hooks and resume         | ready       | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
+| DECK-08 | Config and theming                     | done        | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
+| DECK-09 | Sidebar titles with icons              | ready       | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
 
 ### Withdrawn
 
 A task that will not be built moves here from the Tasks table, with the date and the reason, in a commit on `main` (`docs(backlog): withdraw DECK-NN`, made only when the user asks). It keeps its ID and is never picked.
 
-| ID      | Title             | Withdrawn   | Reason                                                                                          |
-| ------- | ----------------- | ----------- | ----------------------------------------------------------------------------------------------- |
+| ID      | Title             | Withdrawn   | Reason                                                                                                        |
+| ------- | ----------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
@@ -53,14 +53,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 
 A status says where the task stands. Dependencies are a separate column and never change the status.
 
-| Status        | Meaning                                                                                       |
-| ------------- | --------------------------------------------------------------------------------------------- |
-| `todo`        | A simple task, described in its note. The next step is to do it.                              |
-| `needs spec`  | Agreed substantial work with no spec yet. The next step is to write one.                      |
-| `draft spec`  | A spec is written and waits for the user's approval.                                          |
-| `ready`       | The spec is approved and no work on it has started.                                           |
+| Status        | Meaning                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------ |
+| `todo`        | A simple task, described in its note. The next step is to do it.                                       |
+| `needs spec`  | Agreed substantial work with no spec yet. The next step is to write one.                               |
+| `draft spec`  | A spec is written and waits for the user's approval.                                                   |
+| `ready`       | The spec is approved and no work on it has started.                                                    |
 | `in-progress` | Work has started: a worktree or branch exists, or a sub-spec is committed. Another session may own it. |
-| `done`        | A simple task is committed; a spec has every sub-spec `done` and its branch merged.           |
+| `done`        | A simple task is committed; a spec has every sub-spec `done` and its branch merged.                    |
 
 ## Dependencies
 

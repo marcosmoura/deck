@@ -24,24 +24,24 @@ On macOS:
 
 Pressed after the prefix.
 
-| Action           | Default   | What it does                                                          |
-| ---------------- | --------- | --------------------------------------------------------------------- |
-| `detach`         | `d`       | Detach from the session ([sessions](sessions.md))                     |
-| `sessions`       | `s`       | Open the session picker ([sessions](sessions.md#switching-sessions))  |
-| `rename_session` | `$`       | Rename the session you are in                                         |
-| `scroll`         | `[`       | Enter [scroll mode](#scroll-mode) for the focused terminal            |
-| `new_panel`      | `c`       | New panel in the active project ([sidebar](sidebar.md))               |
-| `next_panel`     | `n`       | Focus the next panel                                                  |
-| `prev_panel`     | `p`       | Focus the previous panel                                              |
-| `panel_1`..`panel_9` | `1`..`9` | Focus the N-th panel of the active project                          |
-| `rename_panel`   | `,`       | Rename the active panel                                               |
-| `close_panel`    | `X`       | Close the active panel, after a confirmation                          |
-| `new_project`    | `P`       | New project: asks a directory, then a name                            |
-| `rename_project` | `.`       | Rename the active project                                            |
-| `close_project`  | `Q`       | Close the active project, after a confirmation                        |
-| `toggle_sidebar` | `b`       | Show or hide the sidebar                                              |
-| `focus_sidebar`  | `Tab`     | Move the keyboard into the sidebar                                    |
-| `help`           | `?`       | Show the help overlay                                                 |
+| Action               | Default  | What it does                                                         |
+| -------------------- | -------- | -------------------------------------------------------------------- |
+| `detach`             | `d`      | Detach from the session ([sessions](sessions.md))                    |
+| `sessions`           | `s`      | Open the session picker ([sessions](sessions.md#switching-sessions)) |
+| `rename_session`     | `$`      | Rename the session you are in                                        |
+| `scroll`             | `[`      | Enter [scroll mode](#scroll-mode) for the focused terminal           |
+| `new_panel`          | `c`      | New panel in the active project ([sidebar](sidebar.md))              |
+| `next_panel`         | `n`      | Focus the next panel                                                 |
+| `prev_panel`         | `p`      | Focus the previous panel                                             |
+| `panel_1`..`panel_9` | `1`..`9` | Focus the N-th panel of the active project                           |
+| `rename_panel`       | `,`      | Rename the active panel                                              |
+| `close_panel`        | `X`      | Close the active panel, after a confirmation                         |
+| `new_project`        | `P`      | New project: asks a directory, then a name                           |
+| `rename_project`     | `.`      | Rename the active project                                            |
+| `close_project`      | `Q`      | Close the active project, after a confirmation                       |
+| `toggle_sidebar`     | `b`      | Show or hide the sidebar                                             |
+| `focus_sidebar`      | `Tab`    | Move the keyboard into the sidebar                                   |
+| `help`               | `?`      | Show the help overlay                                                |
 
 A key you set replaces the same key on any other action's default keys, with a warning (`key "c" of toggle_sidebar replaces new_panel's`). When you set two actions to one key, that is an error naming both actions and the key (`deck config check` shows it, and a running deck keeps the previous config). `detach = []` unbinds an action; the help overlay lists it as `unbound`.
 
@@ -49,13 +49,13 @@ A key you set replaces the same key on any other action's default keys, with a w
 
 `Option+Space [` scrolls back through the focused terminal's history. The status bar shows a `SCROLL` badge instead of the session name, with the hints `q exit  g top  G bottom`, and `[offset/history]` follows the badge: how many lines the terminal is scrolled back out of how many it holds.
 
-| Keys                       | What they do                         |
-| -------------------------- | ------------------------------------ |
-| `Up` / `k`, `Down` / `j`   | One line up or down                  |
-| `PageUp` / `Ctrl+b`, `PageDown` / `Ctrl+f` | One page up or down  |
-| `Ctrl+u`, `Ctrl+d`         | Half a page up or down               |
-| `g` / `Home`, `G` / `End`  | The top of the history, the bottom   |
-| `q`, `Esc`                 | Leave scroll mode, back at the bottom |
+| Keys                                       | What they do                          |
+| ------------------------------------------ | ------------------------------------- |
+| `Up` / `k`, `Down` / `j`                   | One line up or down                   |
+| `PageUp` / `Ctrl+b`, `PageDown` / `Ctrl+f` | One page up or down                   |
+| `Ctrl+u`, `Ctrl+d`                         | Half a page up or down                |
+| `g` / `Home`, `G` / `End`                  | The top of the history, the bottom    |
+| `q`, `Esc`                                 | Leave scroll mode, back at the bottom |
 
 - No key reaches the terminal in scroll mode, and pastes are dropped. Other keys do nothing. Reaching the bottom does not leave the mode.
 - The prefix works in scroll mode: its bindings run, and `detach` leaves scroll mode first. Pressing the prefix twice sends it to the terminal and leaves scroll mode.
@@ -83,7 +83,7 @@ sidebar = true
 sidebar_width = 28
 
 [keys]
-detach = "d"          # one key
+detach = "d" # one key
 # detach = ["d", "q"] # or a list
 ```
 

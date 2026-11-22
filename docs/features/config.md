@@ -8,11 +8,11 @@ deck reads one file, `~/.config/deck/config.toml` (`$XDG_CONFIG_HOME/deck/config
 
 None of them starts a daemon.
 
-| Command                    | What it does                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Command                    | What it does                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `deck config default`      | Prints the commented default config, with every key: the key reference. Save it as your config to start. |
-| `deck config check [file]` | Validates the file (the one in use without an argument). Prints `ok: <path>` or one line per finding.   |
-| `deck config path`         | Prints the path in use, with ` (not found)` after it when the file does not exist.                      |
+| `deck config check [file]` | Validates the file (the one in use without an argument). Prints `ok: <path>` or one line per finding.    |
+| `deck config path`         | Prints the path in use, with ` (not found)` after it when the file does not exist.                       |
 
 ```sh
 deck config default > ~/.config/deck/config.toml

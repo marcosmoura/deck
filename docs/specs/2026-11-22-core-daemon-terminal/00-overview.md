@@ -31,20 +31,20 @@ None. Uses the decisions in [architecture.md](../../architecture.md): process mo
 - **Colours**: the client asks the outer terminal for its foreground and background (OSC 10/11) at attach, so programs inside deck that ask the same question (Codex, OpenCode, nvim) pick a matching light or dark theme.
 - **Upgrades**: `deck kill-server` stops a daemon of any protocol version (the pid is in `deck.lock`; `SIGTERM` when the daemon cannot answer), so the advice printed on a version mismatch always works.
 - **First size**: the creating client sends its panel area in `Hello`, so the first shell starts at the right size.
-- **Lifecycle until DECK-02**: a session whose last terminal exits ends. *Superseded by [DECK-02](../2026-11-22-sessions-sidebar/00-overview.md): the session now stays, with an empty project.*
+- **Lifecycle until DECK-02**: a session whose last terminal exits ends. _Superseded by [DECK-02](../2026-11-22-sessions-sidebar/00-overview.md): the session now stays, with an empty project._
 - Scrollback: 10,000 lines per terminal by default (`scrollback_lines`).
 - A version mismatch between client and daemon is reported, never worked around ([architecture.md](../../architecture.md#protocol)).
 
 ## Sub-specs
 
-| Sub-spec                          | Type       | Crate                         | Summary                                                              | Depends | Status |
-| --------------------------------- | ---------- | ----------------------------- | -------------------------------------------------------------------- | ------- | ------ |
-| [01](01-workspace-tooling.md)     | foundation | root, all crates (skeletons)  | Cargo workspace, four crates, mise, just, Lefthook, lints            | —       | done   |
-| [02](02-core-types.md)            | foundation | deck-core                     | Model, protocol and framing, paths, config, `KeySpec`, bindings, `keys::encode` | 01 | done   |
-| [03](03-daemon.md)                | foundation | deck-daemon, deck             | Daemon: socket, lock, sessions, PTYs, emulation, frames, `deck daemon` | 02    | done   |
-| [04](04-cli-harness.md)           | foundation | deck                          | CLI (`ls`, `kill-server`, daemon start-up, guards), e2e harness       | 03      | done   |
-| [05](05-attach-client.md)         | shippable  | deck-tui, deck                | `deck` attaches, draws, types, resizes, detaches; colours; clipboard  | 04      | done   |
-| [06](06-scrollback-mouse.md)      | shippable  | deck-core, deck-daemon, deck-tui | Scroll mode, mouse wheel, mouse reporting, focus events            | 05      | done   |
+| Sub-spec                      | Type       | Crate                            | Summary                                                                         | Depends | Status |
+| ----------------------------- | ---------- | -------------------------------- | ------------------------------------------------------------------------------- | ------- | ------ |
+| [01](01-workspace-tooling.md) | foundation | root, all crates (skeletons)     | Cargo workspace, four crates, mise, just, Lefthook, lints                       | —       | done   |
+| [02](02-core-types.md)        | foundation | deck-core                        | Model, protocol and framing, paths, config, `KeySpec`, bindings, `keys::encode` | 01      | done   |
+| [03](03-daemon.md)            | foundation | deck-daemon, deck                | Daemon: socket, lock, sessions, PTYs, emulation, frames, `deck daemon`          | 02      | done   |
+| [04](04-cli-harness.md)       | foundation | deck                             | CLI (`ls`, `kill-server`, daemon start-up, guards), e2e harness                 | 03      | done   |
+| [05](05-attach-client.md)     | shippable  | deck-tui, deck                   | `deck` attaches, draws, types, resizes, detaches; colours; clipboard            | 04      | done   |
+| [06](06-scrollback-mouse.md)  | shippable  | deck-core, deck-daemon, deck-tui | Scroll mode, mouse wheel, mouse reporting, focus events                         | 05      | done   |
 
 The sub-specs run in order: each one's tests need the one before.
 

@@ -16,20 +16,20 @@ The user sees the attached session's projects in a sidebar with their panels nes
 3. **Active and selected**: the active panel's row is drawn in the accent colour, bold, with a `▌` marker in the left gutter; the active project's name is bold. In sidebar focus, the selected row is drawn reversed.
 4. **Bindings** (added to the table in `deck-core::config`, overridable under `[keys]`):
 
-   | Action            | Default | Does                                                                 |
-   | ----------------- | ------- | -------------------------------------------------------------------- |
-   | `new_panel`       | `c`     | New panel in the active project                                      |
-   | `next_panel`      | `n`     | `CyclePanel { delta: 1 }`                                             |
-   | `prev_panel`      | `p`     | `CyclePanel { delta: -1 }`                                            |
-   | `panel_1`…`panel_9` | `1`…`9` | Focus the N-th panel of the active project                          |
-   | `rename_panel`    | `,`     | Prompt `Rename panel:` prefilled with its name                        |
-   | `close_panel`     | `X`     | Confirm `Close panel "<name>" and its terminal? (y/n)`                |
-   | `new_project`     | `P`     | Prompt `Directory:` (prefilled with the client's start cwd), then `Project name:` (prefilled with the directory's basename) |
-   | `rename_project`  | `.`     | Prompt `Rename project:`                                             |
-   | `close_project`   | `Q`     | Confirm `Close project "<name>" and its N terminals? (y/n)`           |
-   | `toggle_sidebar`  | `b`     | Show or hide the sidebar                                             |
-   | `focus_sidebar`   | `Tab`   | Move keyboard focus into the sidebar                                 |
-   | `help`            | `?`     | Help overlay                                                         |
+   | Action              | Default | Does                                                                                                                        |
+   | ------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+   | `new_panel`         | `c`     | New panel in the active project                                                                                             |
+   | `next_panel`        | `n`     | `CyclePanel { delta: 1 }`                                                                                                   |
+   | `prev_panel`        | `p`     | `CyclePanel { delta: -1 }`                                                                                                  |
+   | `panel_1`…`panel_9` | `1`…`9` | Focus the N-th panel of the active project                                                                                  |
+   | `rename_panel`      | `,`     | Prompt `Rename panel:` prefilled with its name                                                                              |
+   | `close_panel`       | `X`     | Confirm `Close panel "<name>" and its terminal? (y/n)`                                                                      |
+   | `new_project`       | `P`     | Prompt `Directory:` (prefilled with the client's start cwd), then `Project name:` (prefilled with the directory's basename) |
+   | `rename_project`    | `.`     | Prompt `Rename project:`                                                                                                    |
+   | `close_project`     | `Q`     | Confirm `Close project "<name>" and its N terminals? (y/n)`                                                                 |
+   | `toggle_sidebar`    | `b`     | Show or hide the sidebar                                                                                                    |
+   | `focus_sidebar`     | `Tab`   | Move keyboard focus into the sidebar                                                                                        |
+   | `help`              | `?`     | Help overlay                                                                                                                |
 
 5. **Input modes** follow the precedence list in the overview's decisions. The prefix key still works in sidebar focus and scroll mode; inside prompts it is typed as text. The sidebar-focus keys below are fixed in v1 (not under `[keys]`).
 6. **Sidebar focus** keys: `Up`/`k`, `Down`/`j` move the selection; `Enter` focuses the selected panel (or, on a project row, toggles collapse); `Left`/`h` collapses and `Right`/`l` expands the selected project; `c` new panel in the selected project; `P` new project; `r` rename the selected row; `x` close the selected row (with the confirmation); `Esc`/`Tab` returns focus to the terminal. The status-bar hints show these keys while the sidebar has focus.
@@ -38,6 +38,7 @@ The user sees the attached session's projects in a sidebar with their panels nes
 9. **Confirmations**: `y` confirms, `n` or `Esc` cancels; any other key is ignored.
 
    A prompt or confirmation whose target (panel or project) is removed meanwhile, by another client or by its process exiting, closes with the flash `panel "<name>" was closed` (or `project …`).
+
 10. **Empty states** in the panel area, centered and muted: `No panels in <project> — ⌥Space c to create one` and `No projects — ⌥Space P to add one`. Typing goes nowhere (no `Input` is sent) while the panel area is empty.
 11. **Help overlay**: a centered rounded box listing every action with its key (prefix first), grouped (Session, Panels, Projects, Terminal, Sidebar), generated from the binding table so overrides show; each action names its group in the table, and actions added by later specs (DECK-01's `detach` and `scroll`, DECK-03's terminal and resize actions) land in the open-ended Terminal group unless they name another; `Esc`, `q` or `?` closes it.
 12. **Status bar** gains the active panel's name after the project name.
@@ -61,7 +62,7 @@ The user sees the attached session's projects in a sidebar with their panels nes
  ▸ dotfiles               2 ││                                                                     │
                             ││                                                                     │
                             │╰─────────────────────────────────────────────────────────────────────╯
- main  terminal-multiplexer › editor                                        ⌥Space ? help  d detach 
+ main  terminal-multiplexer › editor                                        ⌥Space ? help  d detach
 ```
 
 - Header row: session name, bold. A blank row separates it from the projects.

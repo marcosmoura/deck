@@ -35,11 +35,12 @@ Users tweak deck through `~/.config/deck/config.toml`: key bindings (already the
 
 ## Sub-specs
 
-| Sub-spec                    | Type      | Crate                          | Summary                                                                 | Depends | Status |
-| --------------------------- | --------- | ------------------------------ | ----------------------------------------------------------------------- | ------- | ------ |
-| [01](01-theme.md)           | shippable | deck-core, deck-tui            | `[theme]`: colour roles, colour syntax, border style, glyphs; applied everywhere | DECK-02 | done  |
-| [02](02-config-commands.md) | shippable | deck-core, deck                | `default.toml` reference, `deck config default`, `check`, `path`         | 01      | done   |
-| [03](03-live-reload.md)     | shippable | deck-daemon, deck-tui, deck-core | Daemon reads and watches the file, pushes config to clients; `Notice`   | 02      | done   |
+| Sub-spec                    | Type      | Crate                            | Summary                                                                          | Depends | Status |
+| --------------------------- | --------- | -------------------------------- | -------------------------------------------------------------------------------- | ------- | ------ |
+| [01](01-theme.md)           | shippable | deck-core, deck-tui              | `[theme]`: colour roles, colour syntax, border style, glyphs; applied everywhere | DECK-02 | done   |
+| [02](02-config-commands.md) | shippable | deck-core, deck                  | `default.toml` reference, `deck config default`, `check`, `path`                 | 01      | done   |
+| [03](03-live-reload.md)     | shippable | deck-daemon, deck-tui, deck-core | Daemon reads and watches the file, pushes config to clients; `Notice`            | 02      | done   |
+
 ## Affected docs
 
 - `docs/features/config.md` (new): where the file lives, live reload, `deck config` commands, and that `deck config default` is the key reference.

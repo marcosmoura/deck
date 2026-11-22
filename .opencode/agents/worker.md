@@ -1,5 +1,5 @@
 ---
-description: 'Implements one deck sub-spec or a defined task in the given checkout, with tests, then fixes its review findings. Does not commit.'
+description: "Implements one deck sub-spec or a defined task in the given checkout, with tests, then fixes its review findings. Does not commit."
 mode: subagent
 ---
 

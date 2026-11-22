@@ -24,30 +24,30 @@ sidebar_width = 28
 # is taken from any other action that only has it by default, with a warning; one key set
 # on two of your actions is an error.
 [keys]
-detach = "d"              # Detach from the session
-sessions = "s"            # Switch, create or kill sessions
-rename_session = "$"      # Rename the session
-scroll = "["              # Scroll back through the history
-new_panel = "c"           # New panel
-next_panel = "n"          # Next panel
-prev_panel = "p"          # Previous panel
-panel_1 = "1"             # Focus panel 1
-panel_2 = "2"             # Focus panel 2
-panel_3 = "3"             # Focus panel 3
-panel_4 = "4"             # Focus panel 4
-panel_5 = "5"             # Focus panel 5
-panel_6 = "6"             # Focus panel 6
-panel_7 = "7"             # Focus panel 7
-panel_8 = "8"             # Focus panel 8
-panel_9 = "9"             # Focus panel 9
-rename_panel = ","        # Rename the panel
-close_panel = "X"         # Close the panel
-new_project = "P"         # New project
-rename_project = "."      # Rename the project
-close_project = "Q"       # Close the project
-toggle_sidebar = "b"      # Show or hide the sidebar
-focus_sidebar = "Tab"     # Move focus into the sidebar
-help = "?"                # This help
+detach = "d" # Detach from the session
+sessions = "s" # Switch, create or kill sessions
+rename_session = "$" # Rename the session
+scroll = "[" # Scroll back through the history
+new_panel = "c" # New panel
+next_panel = "n" # Next panel
+prev_panel = "p" # Previous panel
+panel_1 = "1" # Focus panel 1
+panel_2 = "2" # Focus panel 2
+panel_3 = "3" # Focus panel 3
+panel_4 = "4" # Focus panel 4
+panel_5 = "5" # Focus panel 5
+panel_6 = "6" # Focus panel 6
+panel_7 = "7" # Focus panel 7
+panel_8 = "8" # Focus panel 8
+panel_9 = "9" # Focus panel 9
+rename_panel = "," # Rename the panel
+close_panel = "X" # Close the panel
+new_project = "P" # New project
+rename_project = "." # Rename the project
+close_project = "Q" # Close the project
+toggle_sidebar = "b" # Show or hide the sidebar
+focus_sidebar = "Tab" # Move focus into the sidebar
+help = "?" # This help
 
 # Colours and glyphs of deck's own UI; terminal contents keep their programs' colours.
 # A colour is "default" (the terminal's own), a name (black, red, green, yellow, blue,
@@ -55,21 +55,21 @@ help = "?"                # This help
 # "#rrggbb", or the name of another role. Without truecolor, "#rrggbb" is drawn as the
 # nearest palette colour.
 [theme]
-accent = "blue"                # focused border and title, active panel row, session name
-muted = "bright-black"         # hints, project names, empty states, exited terminals
-ok = "green"                   # success states
-warning = "yellow"             # PREFIX, SCROLL and RESIZE badges, scroll indicator
-error = "red"                  # error flashes
-border = "bright-black"        # unfocused terminal borders and the sidebar separator
-border_focused = "accent"      # the focused terminal's border
-title = "default"              # unfocused terminal titles
-sidebar_fg = "default"         # sidebar text
-sidebar_bg = "default"         # sidebar background
-status_fg = "default"          # status bar text
-status_bg = "default"          # status bar background
-selection_fg = "default"       # selected row text (reversed while both selection roles are default)
-selection_bg = "default"       # selected row background
-overlay_bg = "default"         # help and picker overlays
+accent = "blue" # focused border and title, active panel row, session name
+muted = "bright-black" # hints, project names, empty states, exited terminals
+ok = "green" # success states
+warning = "yellow" # PREFIX, SCROLL and RESIZE badges, scroll indicator
+error = "red" # error flashes
+border = "bright-black" # unfocused terminal borders and the sidebar separator
+border_focused = "accent" # the focused terminal's border
+title = "default" # unfocused terminal titles
+sidebar_fg = "default" # sidebar text
+sidebar_bg = "default" # sidebar background
+status_fg = "default" # status bar text
+status_bg = "default" # status bar background
+selection_fg = "default" # selected row text (reversed while both selection roles are default)
+selection_bg = "default" # selected row background
+overlay_bg = "default" # help and picker overlays
 # rounded, plain, thick or double: borders of terminals and overlays.
 border_style = "rounded"
 

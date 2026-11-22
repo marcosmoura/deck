@@ -40,13 +40,13 @@ The sidebar shows what every coding agent (Claude Code, Codex, OpenCode) is doin
 
 ## Sub-specs
 
-| Sub-spec                      | Type      | Crate                            | Summary                                                                       | Depends               | Status |
-| ----------------------------- | --------- | -------------------------------- | ----------------------------------------------------------------------------- | --------------------- | ------ |
-| [01](01-detection-state.md)   | shippable | deck-daemon, deck-tui, deck-core | Process detection on a 1 s tick, state model, `AgentEvent`, glyphs, `ls --json` | DECK-05               | todo   |
-| [02](02-attention.md)         | shippable | deck-daemon, deck-tui, deck-core | Unseen panels, `AgentAlert`, notifications, `ClientMsg::Focus`, waiting count, `prefix a` | 01           | todo   |
-| [03](03-hooks.md)             | shippable | deck, deck-core                  | `deck agent-event`, mapping and `deck hooks` for Claude Code and Codex         | 01                    | todo   |
-| [04](04-opencode.md)          | shippable | deck-core, deck-daemon, deck     | OpenCode plugin forwarding raw events; the OpenCode state machine              | 03                    | todo   |
-| [05](05-resume.md)            | shippable | deck-daemon, deck-core           | Save agent kind and session id; relaunch with the resume command               | 03, DECK-04           | todo   |
+| Sub-spec                    | Type      | Crate                            | Summary                                                                                   | Depends     | Status |
+| --------------------------- | --------- | -------------------------------- | ----------------------------------------------------------------------------------------- | ----------- | ------ |
+| [01](01-detection-state.md) | shippable | deck-daemon, deck-tui, deck-core | Process detection on a 1 s tick, state model, `AgentEvent`, glyphs, `ls --json`           | DECK-05     | todo   |
+| [02](02-attention.md)       | shippable | deck-daemon, deck-tui, deck-core | Unseen panels, `AgentAlert`, notifications, `ClientMsg::Focus`, waiting count, `prefix a` | 01          | todo   |
+| [03](03-hooks.md)           | shippable | deck, deck-core                  | `deck agent-event`, mapping and `deck hooks` for Claude Code and Codex                    | 01          | todo   |
+| [04](04-opencode.md)        | shippable | deck-core, deck-daemon, deck     | OpenCode plugin forwarding raw events; the OpenCode state machine                         | 03          | todo   |
+| [05](05-resume.md)          | shippable | deck-daemon, deck-core           | Save agent kind and session id; relaunch with the resume command                          | 03, DECK-04 | todo   |
 
 02 and 03 both build on 01 only, but share `deck-core::agents` and the end-to-end tests, so they run one after the other.
 

@@ -13,19 +13,19 @@ Every panel row in the sidebar, and the panel in the status bar, starts with an 
 
 1. **Icon kinds** (`deck-core::icons::IconKind`) and the pure choice `icon_for(agent: Option<AgentKind>, program: Option<&str>) -> IconKind`. An agent picks its own kind; otherwise the program (compared case-insensitively) picks from this table; anything else, or no program, is `terminal`:
 
-   | Kind       | Programs                                                       | `unicode` glyph | `nerd` glyph (Nerd Fonts name, codepoint) |
-   | ---------- | -------------------------------------------------------------- | --------------- | ----------------------------------------- |
-   | `claude`   | Claude Code agent                                              | `✻`             | `nf-fa-asterisk`, U+F069 |
-   | `codex`    | Codex agent                                                    | `◎`             | `nf-fa-circle_o_notch`, U+F1CE |
-   | `opencode` | OpenCode agent                                                 | `◇`             | `nf-fa-cube`, U+F1B2 |
-   | `terminal` | `sh`, `bash`, `zsh`, `fish`, `dash`, `nu`, `ksh`, `tcsh`, and every unknown program | `❯` | `nf-fa-terminal`, U+F120 |
-   | `editor`   | `vi`, `vim`, `nvim`, `hx`, `helix`, `nano`, `emacs`, `micro`, `kak` | `✎`        | `nf-fa-pencil`, U+F040 |
-   | `git`      | `git`, `lazygit`, `tig`, `gitui`                                | `±`             | `nf-fa-code_fork`, U+F126 |
-   | `monitor`  | `top`, `htop`, `btop`, `glances`                                | `◔`             | `nf-fa-tachometer`, U+F0E4 |
-   | `remote`   | `ssh`, `mosh`, `et`                                             | `⇄`             | `nf-fa-exchange`, U+F0EC |
-   | `build`    | `cargo`, `make`, `just`, `npm`, `pnpm`, `yarn`, `go`            | `▲`             | `nf-fa-cog`, U+F013 |
-   | `pager`    | `less`, `more`, `man`, `bat`                                    | `¶`             | `nf-fa-book`, U+F02D |
-   | `repl`     | `python`, `python3`, `node`, `irb`, `ghci`, `iex`               | `λ`             | `nf-fa-code`, U+F121 |
+   | Kind       | Programs                                                                            | `unicode` glyph | `nerd` glyph (Nerd Fonts name, codepoint) |
+   | ---------- | ----------------------------------------------------------------------------------- | --------------- | ----------------------------------------- |
+   | `claude`   | Claude Code agent                                                                   | `✻`             | `nf-fa-asterisk`, U+F069                  |
+   | `codex`    | Codex agent                                                                         | `◎`             | `nf-fa-circle_o_notch`, U+F1CE            |
+   | `opencode` | OpenCode agent                                                                      | `◇`             | `nf-fa-cube`, U+F1B2                      |
+   | `terminal` | `sh`, `bash`, `zsh`, `fish`, `dash`, `nu`, `ksh`, `tcsh`, and every unknown program | `❯`             | `nf-fa-terminal`, U+F120                  |
+   | `editor`   | `vi`, `vim`, `nvim`, `hx`, `helix`, `nano`, `emacs`, `micro`, `kak`                 | `✎`             | `nf-fa-pencil`, U+F040                    |
+   | `git`      | `git`, `lazygit`, `tig`, `gitui`                                                    | `±`             | `nf-fa-code_fork`, U+F126                 |
+   | `monitor`  | `top`, `htop`, `btop`, `glances`                                                    | `◔`             | `nf-fa-tachometer`, U+F0E4                |
+   | `remote`   | `ssh`, `mosh`, `et`                                                                 | `⇄`             | `nf-fa-exchange`, U+F0EC                  |
+   | `build`    | `cargo`, `make`, `just`, `npm`, `pnpm`, `yarn`, `go`                                | `▲`             | `nf-fa-cog`, U+F013                       |
+   | `pager`    | `less`, `more`, `man`, `bat`                                                        | `¶`             | `nf-fa-book`, U+F02D                      |
+   | `repl`     | `python`, `python3`, `node`, `irb`, `ghci`, `iex`                                   | `λ`             | `nf-fa-code`, U+F121                      |
 
 2. **Config**: `[theme] icons = "unicode" | "nerd" | "none"` (default `unicode`, next to DECK-08's `border_style`) picks the preset; `[theme.icons]` overrides single kinds (`claude = "C"`). Every icon glyph follows DECK-08's one-cell rule; a wider glyph or an unknown kind is an error naming the key. With `icons = "none"` no icon is drawn anywhere and `[theme.icons]` is ignored. All of it is documented in `default.toml`, which the DECK-08 sync test checks.
 3. **The `nerd` preset** is the table's last column: Font Awesome glyphs, which every Nerd Font carries at these codepoints. Nerd Fonts has no Anthropic or OpenAI logo, so the agents get generic glyphs (Claude Code's asterisk-like mark, a notch circle, a cube). Before using them, the worker checks each name and codepoint against Nerd Fonts' `glyphnames.json` and, if one is wrong, fixes the table and records it in Notes.

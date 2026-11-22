@@ -20,12 +20,12 @@ Read when you write a spec or touch code. This page holds the decisions every sp
 
 ## Crates
 
-| Crate         | Path                  | Owns                                                                                       |
-| ------------- | --------------------- | ------------------------------------------------------------------------------------------ |
+| Crate         | Path                  | Owns                                                                                                                                                   |
+| ------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `deck-core`   | `crates/deck-core/`   | Model types, layout engine, protocol messages and framing, key encoding, config parsing, paths. Pure: no I/O beyond `std::path`, no threads, no async. |
-| `deck-daemon` | `crates/deck-daemon/` | The daemon: socket server, sessions, PTYs, emulation (alacritty_terminal), frames, persistence, agent status. Library crate. |
-| `deck-tui`    | `crates/deck-tui/`    | The attach client: screen mirror, rendering (ratatui), input handling, key bindings. Library crate. |
-| `deck`        | `crates/deck/`        | The binary: CLI (clap), daemon start-up, control commands, wiring. Holds the end-to-end tests in `crates/deck/tests/`. |
+| `deck-daemon` | `crates/deck-daemon/` | The daemon: socket server, sessions, PTYs, emulation (alacritty_terminal), frames, persistence, agent status. Library crate.                           |
+| `deck-tui`    | `crates/deck-tui/`    | The attach client: screen mirror, rendering (ratatui), input handling, key bindings. Library crate.                                                    |
+| `deck`        | `crates/deck/`        | The binary: CLI (clap), daemon start-up, control commands, wiring. Holds the end-to-end tests in `crates/deck/tests/`.                                 |
 
 `deck-daemon` and `deck-tui` never depend on each other. Both depend on `deck-core`.
 
@@ -105,12 +105,12 @@ The daemon and the client both call `layout` with the same inputs: the daemon to
 
 ## Paths
 
-| What                 | Path                                                                                    |
-| -------------------- | --------------------------------------------------------------------------------------- |
-| Config               | `$XDG_CONFIG_HOME/deck/config.toml`, default `~/.config/deck/config.toml` (both OSes)   |
+| What                 | Path                                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Config               | `$XDG_CONFIG_HOME/deck/config.toml`, default `~/.config/deck/config.toml` (both OSes)                                                                          |
 | State and log        | `$XDG_STATE_HOME/deck/`, default `~/.local/state/deck/`: `state.json`, `state.lock`, `daemon.log` (rotated at start when over 10 MiB, one `daemon.log.1` kept) |
-| Socket and lock      | `$XDG_RUNTIME_DIR/deck/` if set, else `$TMPDIR/deck-<uid>/`, else `/tmp/deck-<uid>/`: `deck.sock`, `deck.lock` (holds the daemon's pid) |
-| Everything, isolated | `DECK_HOME=<dir>` puts the config at `<dir>/config.toml`, state in `<dir>/state/` and the socket in `<dir>/run/`. Used by tests and `just run`. |
+| Socket and lock      | `$XDG_RUNTIME_DIR/deck/` if set, else `$TMPDIR/deck-<uid>/`, else `/tmp/deck-<uid>/`: `deck.sock`, `deck.lock` (holds the daemon's pid)                        |
+| Everything, isolated | `DECK_HOME=<dir>` puts the config at `<dir>/config.toml`, state in `<dir>/state/` and the socket in `<dir>/run/`. Used by tests and `just run`.                |
 
 Socket paths must stay under 100 bytes (the macOS limit is 104); `deck` refuses a longer one with a clear error. That is why `just run` puts its `DECK_HOME` in `${TMPDIR:-/tmp}/deck-dev-<8 hex characters of just's sha256() of the checkout path>` rather than under `target/`: a socket inside `.worktrees/<slug>/target/` would exceed the limit.
 
@@ -132,37 +132,37 @@ Socket paths must stay under 100 bytes (the macOS limit is 104); `deck` refuses 
 
 Declared once in the root `[workspace.dependencies]` with these versions (the newest patch at implementation time is fine); `Cargo.lock` is committed. Adding anything else needs an approved spec or task and a line here.
 
-| Crate                | Version | Used by              | For                                              |
-| -------------------- | ------- | -------------------- | ------------------------------------------------ |
-| `serde`              | 1.0     | all                  | derive for protocol, state and config            |
-| `postcard`           | 1.2     | core                 | protocol payloads (`use-std`)                    |
-| `serde_json`         | 1.0     | daemon, deck         | `state.json`, `--json` output, hook payloads; `preserve_order` feature in `deck` for editing agent config files (DECK-06), which brings in `indexmap` (approved with it) |
-| `toml`               | 1.2     | core                 | config parsing                                   |
-| `thiserror`          | 2.0     | core, daemon, tui    | error types in libraries                         |
-| `anyhow`             | 1.0     | deck                 | errors in the binary                             |
-| `tokio`              | 1.54    | daemon, tui, deck    | async runtime, Unix sockets, timers, signals     |
-| `portable-pty`       | 0.9     | daemon, deck (tests) | PTYs and child processes; the e2e harness's PTY  |
-| `alacritty_terminal` | 0.26    | daemon, deck (tests) | terminal emulation; the e2e harness's screen     |
-| `ratatui`            | 0.30    | tui                  | rendering, with its `crossterm` re-export        |
-| `clap`               | 4.6     | deck                 | CLI (derive)                                     |
-| `tracing`            | 0.1     | daemon, tui, deck    | logging                                          |
-| `tracing-subscriber` | 0.3     | deck                 | log output to `daemon.log`                       |
-| `libc`               | 0.2     | daemon, deck (+ tests) | the platform modules; `tcgetattr` and `kill` in `tests/support/sys.rs` |
-| `unicode-width`      | 0.2     | core                 | glyph width checks in `[theme]` (DECK-08); already in the tree through ratatui |
-| `tempfile`           | 3.27    | dev-dependency       | temp `DECK_HOME` in tests                        |
+| Crate                | Version | Used by                | For                                                                                                                                                                      |
+| -------------------- | ------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `serde`              | 1.0     | all                    | derive for protocol, state and config                                                                                                                                    |
+| `postcard`           | 1.2     | core                   | protocol payloads (`use-std`)                                                                                                                                            |
+| `serde_json`         | 1.0     | daemon, deck           | `state.json`, `--json` output, hook payloads; `preserve_order` feature in `deck` for editing agent config files (DECK-06), which brings in `indexmap` (approved with it) |
+| `toml`               | 1.2     | core                   | config parsing                                                                                                                                                           |
+| `thiserror`          | 2.0     | core, daemon, tui      | error types in libraries                                                                                                                                                 |
+| `anyhow`             | 1.0     | deck                   | errors in the binary                                                                                                                                                     |
+| `tokio`              | 1.54    | daemon, tui, deck      | async runtime, Unix sockets, timers, signals                                                                                                                             |
+| `portable-pty`       | 0.9     | daemon, deck (tests)   | PTYs and child processes; the e2e harness's PTY                                                                                                                          |
+| `alacritty_terminal` | 0.26    | daemon, deck (tests)   | terminal emulation; the e2e harness's screen                                                                                                                             |
+| `ratatui`            | 0.30    | tui                    | rendering, with its `crossterm` re-export                                                                                                                                |
+| `clap`               | 4.6     | deck                   | CLI (derive)                                                                                                                                                             |
+| `tracing`            | 0.1     | daemon, tui, deck      | logging                                                                                                                                                                  |
+| `tracing-subscriber` | 0.3     | deck                   | log output to `daemon.log`                                                                                                                                               |
+| `libc`               | 0.2     | daemon, deck (+ tests) | the platform modules; `tcgetattr` and `kill` in `tests/support/sys.rs`                                                                                                   |
+| `unicode-width`      | 0.2     | core                   | glyph width checks in `[theme]` (DECK-08); already in the tree through ratatui                                                                                           |
+| `tempfile`           | 3.27    | dev-dependency         | temp `DECK_HOME` in tests                                                                                                                                                |
 
-Tools, pinned in `.mise.toml`: Rust (stable channel at a pinned version, with rustfmt and Clippy), `just`, `cargo-nextest`, `lefthook`.
+Tools, pinned in `.mise.toml`: Rust (stable channel at a pinned version, with rustfmt and Clippy), `just`, `cargo-nextest`, `lefthook`, `oxfmt` (the native binary from the aqua backend, no Node; formats the Markdown, TOML, JSON and YAML files rustfmt does not, with its default settings).
 
 ## Decisions
 
-| Date        | Decision                                                                                                      |
-| ----------- | ------------------------------------------------------------------------------------------------------------- |
-| 22 Nov 2026 | Client/daemon split over a Unix socket; the daemon owns emulation so sessions keep running while detached.    |
-| 22 Nov 2026 | alacritty_terminal for emulation (maintained, damage tracking, used as a library by other multiplexers).      |
+| Date        | Decision                                                                                                                                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 22 Nov 2026 | Client/daemon split over a Unix socket; the daemon owns emulation so sessions keep running while detached.                                                                                                                                  |
+| 22 Nov 2026 | alacritty_terminal for emulation (maintained, damage tracking, used as a library by other multiplexers).                                                                                                                                    |
 | 22 Nov 2026 | Automatic grid only, with resizable ratios that adapt relative to the defaults when the terminal count changes and are never overwritten by a small window (clamped copy instead). No free-form splits, no swapping or promoting terminals. |
-| 22 Nov 2026 | Configurable prefix key, default `Option+Space` (`Ctrl+Space` is taken by macOS). No modal UI.                |
-| 22 Nov 2026 | Restore after a daemon restart: layout, cwd, explicit commands and agents (resumed); no scrollback.           |
-| 22 Nov 2026 | macOS and Linux only.                                                                                         |
-| 22 Nov 2026 | One config file, `~/.config/deck/config.toml`, read only by the daemon and reloaded live; `[theme]` with semantic colour roles and border style; `deck config default/check/path`. |
-| 22 Nov 2026 | OSC 52 copy is forwarded to the outer terminal; clipboard reads are denied. No copy mode in v1. |
-| 22 Nov 2026 | `kill-server` stops a daemon of any version (pid in `deck.lock`, `SIGTERM`); a second lock next to `state.json` keeps one daemon per state. |
+| 22 Nov 2026 | Configurable prefix key, default `Option+Space` (`Ctrl+Space` is taken by macOS). No modal UI.                                                                                                                                              |
+| 22 Nov 2026 | Restore after a daemon restart: layout, cwd, explicit commands and agents (resumed); no scrollback.                                                                                                                                         |
+| 22 Nov 2026 | macOS and Linux only.                                                                                                                                                                                                                       |
+| 22 Nov 2026 | One config file, `~/.config/deck/config.toml`, read only by the daemon and reloaded live; `[theme]` with semantic colour roles and border style; `deck config default/check/path`.                                                          |
+| 22 Nov 2026 | OSC 52 copy is forwarded to the outer terminal; clipboard reads are denied. No copy mode in v1.                                                                                                                                             |
+| 22 Nov 2026 | `kill-server` stops a daemon of any version (pid in `deck.lock`, `SIGTERM`); a second lock next to `state.json` keeps one daemon per state.                                                                                                 |

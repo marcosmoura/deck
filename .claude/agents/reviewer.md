@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: 'Read-only. Reviews finished deck work (a sub-spec or a simple task) against its spec or task description.'
+description: "Read-only. Reviews finished deck work (a sub-spec or a simple task) against its spec or task description."
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: medium
