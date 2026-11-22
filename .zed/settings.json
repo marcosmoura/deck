@@ -1,0 +1,205 @@
+// Zed project settings.
+//
+// JavaScript, TypeScript, JSON, CSS, HTML, Markdown and YAML format and lint
+// through the Oxc extension, which starts the project-local `oxfmt` / `oxlint`
+// binaries via `--lsp`. Nested configs are enabled, so each package's
+// `oxfmt.config.ts` / `oxlint.config.ts` applies to its own files.
+//
+// Stylelint (packages/web/stylelint.config.ts) fixes CSS files and CSS-in-JS
+// templates in TypeScript files on save.
+//
+// Swift formats through SwiftFormat (provisioned by mise). It reads the nearest
+// `.swiftformat` file from the buffer path, so packages/ios settings apply.
+{
+  "languages": {
+    "CSS": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.stylelint"
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "HTML": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "JSON": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "JSONC": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "JSX": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "JavaScript": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "Markdown": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "Swift": {
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "swiftformat",
+          "arguments": ["--stdinpath", "{buffer_path}"]
+        }
+      },
+      "tab_size": 4
+    },
+    "TSX": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
+        },
+        {
+          "code_action": "source.fixAll.stylelint"
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "TypeScript": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        },
+        {
+          "code_action": "source.fixAll.oxc"
+        },
+        {
+          "code_action": "source.fixAll.stylelint"
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    },
+    "YAML": {
+      "format_on_save": "on",
+      "formatter": [
+        {
+          "language_server": {
+            "name": "oxfmt"
+          }
+        }
+      ],
+      "prettier": {
+        "allowed": false
+      }
+    }
+  },
+  "lsp": {
+    "oxfmt": {
+      "initialization_options": {
+        "settings": {
+          "fmt.configPath": null,
+          "run": "onSave"
+        }
+      }
+    },
+    "oxlint": {
+      "initialization_options": {
+        "settings": {
+          "configPath": null,
+          "disableNestedConfig": false,
+          "fixKind": "safe_fix",
+          "run": "onType",
+          "unusedDisableDirectives": "deny"
+        }
+      }
+    },
+    "stylelint-lsp": {
+      "settings": {
+        "stylelint": {
+          "validate": ["css", "typescript", "typescriptreact"]
+        }
+      }
+    }
+  }
+}
