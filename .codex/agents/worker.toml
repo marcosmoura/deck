@@ -1,0 +1,7 @@
+name = "worker"
+description = "Implements one deck sub-spec or a defined task in the given checkout, with tests, then fixes its review findings. Does not commit."
+model = "gpt-6.1-terra"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Read `.agents/roles/worker.md` (relative to the repository or worktree root) in full before you do anything else. It is your complete role definition. Follow it exactly.
+"""
