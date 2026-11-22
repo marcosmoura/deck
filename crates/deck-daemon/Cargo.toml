@@ -1,0 +1,21 @@
+[package]
+name = "deck-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+deck-core = { path = "../deck-core" }
+alacritty_terminal = { workspace = true }
+portable-pty = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+libc = { workspace = true }
+tempfile = { workspace = true }

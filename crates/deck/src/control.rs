@@ -1,0 +1,420 @@
+//! The commands that talk to the daemon: start-up, `ls`, `kill-server`, `_probe` and the
+//! guards of attaching.
+
+use std::fs::{self, File, TryLockError};
+use std::io::{self, IsTerminal, Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::process::{Command, ExitCode};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, anyhow, bail};
+use deck_core::protocol::{
+    ByeReason, ClientMsg, FrameReader, PROTOCOL_VERSION, Request, Response, Role, ServerMsg,
+    SessionSummary, encode,
+};
+use deck_daemon::{DaemonPaths, check_runtime_dir};
+
+use crate::platform;
+
+/// How long the launcher waits for a daemon it started to accept connections.
+const START_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long `kill-server` waits for the daemon to answer before it sends `SIGTERM`.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long `kill-server` waits for the lock to be released.
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+/// Read timeout of commands that expect an answer from a healthy daemon.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Most daemons one launcher starts while it waits for a socket.
+const START_ATTEMPTS: u32 = 20;
+const RESTART_BACKOFF: Duration = Duration::from_millis(100);
+const POLL: Duration = Duration::from_millis(20);
+
+/// The terminal size `_probe` attaches with; it never shows a screen.
+const PROBE_SIZE: (u16, u16) = (80, 24);
+
+fn daemon_paths() -> anyhow::Result<DaemonPaths> {
+    let env = |name: &str| std::env::var(name).ok();
+    Ok(DaemonPaths::from_env(&env, platform::effective_uid())?)
+}
+
+/// The paths, after the runtime directory check every connecting command makes.
+fn checked_paths() -> anyhow::Result<DaemonPaths> {
+    let paths = daemon_paths()?;
+    check_runtime_dir(&paths.runtime_dir, platform::effective_uid())?;
+    Ok(paths)
+}
+
+/// The refusals that come before anything else when attaching.
+pub fn attach_guards() -> anyhow::Result<()> {
+    if std::env::var_os("DECK").is_some() {
+        bail!("already inside deck (unset DECK to nest)");
+    }
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        bail!("attach needs a terminal (stdin and stdout must be a TTY)");
+    }
+    Ok(())
+}
+
+/// `deck` and `deck attach`: the guards, the start-up, then the attach client.
+///
+/// Without a name the client attaches to the most recent session or creates `main`; with a
+/// name the session must exist.
+pub fn attach(session: Option<String>) -> anyhow::Result<ExitCode> {
+    attach_guards()?;
+    let paths = checked_paths()?;
+    ensure_daemon(&paths)?;
+    let env = |name: &str| std::env::var(name).ok();
+    let config = deck_core::paths::config_file(&env)?;
+    let config = crate::daemon_cmd::load_config(&config)?;
+    let exit = deck_tui::run(deck_tui::Options {
+        socket: paths.socket,
+        create: session.is_none(),
+        session,
+        config,
+        read_stdin: Box::new(platform::read_stdin),
+    });
+    finish(exit)
+}
+
+/// Prints the message that ends an attach, now that the terminal is restored, and picks
+/// the exit code.
+fn finish(exit: deck_tui::Exit) -> anyhow::Result<ExitCode> {
+    use deck_tui::Exit;
+    match exit {
+        Exit::Detached(name) => println!("[detached from {name}]"),
+        Exit::SessionEnded(name) => println!("[session {name} ended]"),
+        Exit::DaemonStopped => println!("[deck daemon stopped]"),
+        Exit::Lost => {
+            eprintln!("[lost connection to the deck daemon]");
+            return Ok(ExitCode::FAILURE);
+        }
+        Exit::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
+        Exit::Error(text) => bail!("{text}"),
+        Exit::Signal => return Ok(ExitCode::FAILURE),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A connection to the daemon.
+struct Conn {
+    stream: UnixStream,
+    reader: FrameReader,
+}
+
+/// What the daemon answered to a control request.
+enum Outcome {
+    Response(Response),
+    Mismatch(u32),
+    /// Anything else: a timeout, a closed connection, another `Bye`.
+    Other(anyhow::Error),
+}
+
+impl Conn {
+    fn open(socket: &Path, timeout: Duration) -> io::Result<Self> {
+        let stream = UnixStream::connect(socket)?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        Ok(Self {
+            stream,
+            reader: FrameReader::new(),
+        })
+    }
+
+    fn send(&mut self, msg: &ClientMsg) -> anyhow::Result<()> {
+        self.stream.write_all(&encode(msg)?)?;
+        Ok(())
+    }
+
+    fn hello(&mut self, role: Role) -> anyhow::Result<()> {
+        self.send(&ClientMsg::Hello {
+            version: PROTOCOL_VERSION,
+            role,
+            cwd: std::env::current_dir().context("cannot read the current directory")?,
+            env: std::env::vars_os().collect(),
+            colors: None,
+        })
+    }
+
+    /// The next message; `None` when the daemon closed the connection.
+    fn recv(&mut self) -> anyhow::Result<Option<ServerMsg>> {
+        let mut buf = [0u8; 16 * 1024];
+        loop {
+            if let Some(msg) = self.reader.next_message::<ServerMsg>()? {
+                return Ok(Some(msg));
+            }
+            match self.stream.read(&mut buf) {
+                Ok(0) => return Ok(None),
+                Ok(n) => self.reader.push(&buf[..n]),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    bail!("the daemon did not answer");
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    /// Says hello as a control client, sends `request` and waits for the answer.
+    fn control(&mut self, request: Request) -> Outcome {
+        let sent = self
+            .hello(Role::Control)
+            .and_then(|()| self.send(&ClientMsg::Request(request)));
+        if let Err(e) = sent {
+            return Outcome::Other(e);
+        }
+        loop {
+            match self.recv() {
+                Ok(Some(ServerMsg::Response(r))) => return Outcome::Response(r),
+                Ok(Some(ServerMsg::Bye {
+                    reason: ByeReason::VersionMismatch { daemon },
+                })) => return Outcome::Mismatch(daemon),
+                Ok(Some(ServerMsg::Bye { reason })) => {
+                    return Outcome::Other(anyhow!(bye_text(&reason)));
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => return Outcome::Other(anyhow!("the daemon closed the connection")),
+                Err(e) => return Outcome::Other(e),
+            }
+        }
+    }
+}
+
+fn bye_text(reason: &ByeReason) -> String {
+    match reason {
+        ByeReason::Error(text) => text.clone(),
+        ByeReason::SessionEnded => "the session ended".into(),
+        ByeReason::ServerShutdown => "the daemon is shutting down".into(),
+        ByeReason::VersionMismatch { daemon } => mismatch_text(*daemon),
+    }
+}
+
+fn mismatch_text(daemon: u32) -> String {
+    format!(
+        "the daemon speaks protocol {daemon}, this deck speaks {PROTOCOL_VERSION}; \
+         run \"deck kill-server\" to restart it (sessions are kept from DECK-04 on)"
+    )
+}
+
+/// Connects to the daemon, starting it when the socket does not accept a connection.
+///
+/// A daemon this launcher spawns can exit at once: it lost the race for the lock to another
+/// starter, or an old daemon still holds the lock while it shuts down. So the launcher keeps
+/// polling the socket until the deadline and, once its daemon is gone, starts another after
+/// a short back-off (a few times at most).
+fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
+    if UnixStream::connect(&paths.socket).is_ok() {
+        return Ok(());
+    }
+    let exe = std::env::current_exe().context("cannot find the deck executable")?;
+    let deadline = Instant::now() + START_TIMEOUT;
+    let mut attempts = 0;
+    let mut exited: Option<Arc<AtomicBool>> = None;
+    loop {
+        if UnixStream::connect(&paths.socket).is_ok() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            bail!(
+                "could not start the daemon; see {}",
+                paths.log_file.display()
+            );
+        }
+        let gone = exited.as_ref().is_none_or(|e| e.load(Ordering::Acquire));
+        if gone && attempts < START_ATTEMPTS {
+            if attempts > 0 {
+                std::thread::sleep(RESTART_BACKOFF);
+                if UnixStream::connect(&paths.socket).is_ok() {
+                    return Ok(());
+                }
+            }
+            attempts += 1;
+            exited = Some(
+                platform::detach_spawn(Command::new(&exe).arg("daemon"))
+                    .context("cannot start the daemon")?,
+            );
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// `deck _probe`: starts the daemon if needed, attaches, prints the session name and the
+/// protocol version, detaches.
+pub fn probe(session: Option<String>) -> anyhow::Result<ExitCode> {
+    let paths = checked_paths()?;
+    ensure_daemon(&paths)?;
+    let mut conn = Conn::open(&paths.socket, REPLY_TIMEOUT).context("cannot connect")?;
+    conn.hello(Role::Attach {
+        session,
+        create: true,
+        cols: PROBE_SIZE.0,
+        rows: PROBE_SIZE.1,
+    })?;
+    let (mut welcomed, mut name) = (false, None);
+    while !(welcomed && name.is_some()) {
+        match conn.recv()? {
+            Some(ServerMsg::Welcome { .. }) => welcomed = true,
+            Some(ServerMsg::SessionView(view)) => name = Some(view.name),
+            Some(ServerMsg::Bye { reason }) => bail!("{}", bye_text(&reason)),
+            Some(_) => {}
+            None => bail!("the daemon closed the connection"),
+        }
+    }
+    conn.send(&ClientMsg::Detach)?;
+    println!("{}", name.unwrap_or_default());
+    println!("protocol {PROTOCOL_VERSION}");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `deck ls`.
+pub fn ls() -> anyhow::Result<ExitCode> {
+    let paths = checked_paths()?;
+    let Ok(mut conn) = Conn::open(&paths.socket, REPLY_TIMEOUT) else {
+        println!("no sessions");
+        return Ok(ExitCode::SUCCESS);
+    };
+    match conn.control(Request::ListSessions) {
+        Outcome::Response(Response::Sessions(sessions)) if sessions.is_empty() => {
+            println!("no sessions");
+        }
+        Outcome::Response(Response::Sessions(sessions)) => print!("{}", session_lines(&sessions)),
+        Outcome::Response(Response::Error(text)) => bail!("{text}"),
+        Outcome::Response(Response::Ok) => bail!("unexpected answer from the daemon"),
+        Outcome::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
+        Outcome::Other(e) => return Err(e),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// One line per session, in columns.
+fn session_lines(sessions: &[SessionSummary]) -> String {
+    let width = sessions.iter().map(|s| s.name.len()).max().unwrap_or(0);
+    let mut out = String::new();
+    for s in sessions {
+        let terminals = if s.terminals == 1 {
+            "1 terminal".to_string()
+        } else {
+            format!("{} terminals", s.terminals)
+        };
+        let attached = if s.attached_clients > 0 {
+            "  (attached)"
+        } else {
+            ""
+        };
+        out.push_str(&format!("{:<width$}  {terminals}{attached}\n", s.name));
+    }
+    out
+}
+
+/// True while a daemon holds `deck.lock`.
+fn lock_held(lock: &Path) -> bool {
+    let Ok(file) = File::open(lock) else {
+        return false;
+    };
+    matches!(file.try_lock(), Err(TryLockError::WouldBlock))
+}
+
+/// Waits until the lock is released; false when it is still held at the deadline.
+fn wait_unlocked(lock: &Path, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while lock_held(lock) {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(POLL);
+    }
+    true
+}
+
+/// The pid in the lock file; the daemon writes it just after taking the lock, so retry
+/// briefly. Never a pid that `kill` would treat as a group (0 or below).
+fn read_pid(lock: &Path) -> Option<i32> {
+    let deadline = Instant::now() + ANSWER_TIMEOUT;
+    loop {
+        let pid = fs::read_to_string(lock)
+            .ok()
+            .and_then(|text| text.trim().parse::<i32>().ok())
+            .filter(|pid| *pid > 0);
+        if pid.is_some() || Instant::now() >= deadline {
+            return pid;
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// `deck kill-server`.
+pub fn kill_server() -> anyhow::Result<ExitCode> {
+    let paths = checked_paths()?;
+    if !lock_held(&paths.lock) {
+        println!("no deck daemon running");
+        return Ok(ExitCode::SUCCESS);
+    }
+    // The daemon may still be binding its socket: retry until the answer timeout.
+    let deadline = Instant::now() + ANSWER_TIMEOUT;
+    let outcome = loop {
+        match Conn::open(&paths.socket, ANSWER_TIMEOUT) {
+            Ok(mut conn) => break conn.control(Request::KillServer),
+            Err(e) if Instant::now() >= deadline => break Outcome::Other(e.into()),
+            Err(_) => std::thread::sleep(POLL),
+        }
+    };
+    match outcome {
+        Outcome::Response(Response::Ok) => {}
+        Outcome::Response(Response::Error(text)) => bail!("{text}"),
+        // The daemon cannot be asked: it takes the clean shutdown path on `SIGTERM`.
+        Outcome::Response(_) | Outcome::Mismatch(_) | Outcome::Other(_) => {
+            if lock_held(&paths.lock) {
+                let pid = read_pid(&paths.lock)
+                    .context("cannot read the daemon's pid from the lock file")?;
+                if let Err(e) = platform::terminate(pid)
+                    && e.raw_os_error() != Some(libc::ESRCH)
+                {
+                    bail!("cannot stop the daemon (pid {pid}): {e}");
+                }
+            }
+        }
+    }
+    if !wait_unlocked(&paths.lock, STOP_TIMEOUT) {
+        bail!("the daemon did not stop; see {}", paths.log_file.display());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deck_core::model::SessionId;
+
+    #[test]
+    fn sessions_are_listed_in_columns() {
+        let summary = |name: &str, attached, terminals| SessionSummary {
+            id: SessionId(1),
+            name: name.into(),
+            attached_clients: attached,
+            terminals,
+        };
+        let text = session_lines(&[summary("main", 1, 1), summary("work-long", 0, 3)]);
+        assert_eq!(
+            text,
+            "main       1 terminal  (attached)\nwork-long  3 terminals\n"
+        );
+    }
+
+    #[test]
+    fn a_missing_or_free_lock_is_not_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = dir.path().join("deck.lock");
+        assert!(!lock_held(&lock));
+        let file = File::create(&lock).unwrap();
+        assert!(!lock_held(&lock));
+        file.lock().unwrap();
+        assert!(lock_held(&lock));
+    }
+}

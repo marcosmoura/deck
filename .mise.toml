@@ -1,0 +1,5 @@
+[tools]
+rust = { version = "1.100.0", components = "rustfmt,clippy" }
+just = "1.59.0"
+"github:nextest-rs/nextest" = "0.9.152"
+lefthook = "2.1.0"

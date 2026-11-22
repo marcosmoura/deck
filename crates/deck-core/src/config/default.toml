@@ -1,0 +1,21 @@
+# deck configuration. Every key is optional; the values below are the defaults.
+
+# The prefix key that starts a binding. On macOS, Option+Space needs Option to act as Alt in
+# the terminal; the non-breaking space some terminals send instead is accepted too. Launchers
+# such as Raycast and Alfred may claim Option+Space: change either one.
+prefix = "M-Space"
+
+# The shell for new terminals; unset means $SHELL, else /bin/sh.
+# shell = "/bin/zsh"
+
+# Arguments passed to the shell.
+shell_args = ["-l"]
+
+# Lines of scrollback kept per terminal.
+scrollback_lines = 10000
+
+# Key bindings, pressed after the prefix. An action takes one key or a list of keys, and
+# replaces that action's default keys.
+[keys]
+detach = "d"
+scroll = "["

@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 06 — Scrollback, mouse and focus
@@ -35,8 +35,8 @@ The user can scroll back through a terminal's history with the mouse wheel or a 
 
 ## Acceptance criteria
 
-- [ ] After `seq 1 500` in a 24-row window, `Ctrl+Space [` then `PageUp` shows earlier numbers, the `[offset/history]` indicator and the `SCROLL` badge (capture `scrolled`); `G` returns to the bottom without leaving the mode; `q` leaves it.
-- [ ] In scroll mode, `Ctrl+Space d` detaches.
+- [ ] After `seq 1 500` in a 24-row window, `Option+Space [` then `PageUp` shows earlier numbers, the `[offset/history]` indicator and the `SCROLL` badge (capture `scrolled`); `G` returns to the bottom without leaving the mode; `q` leaves it.
+- [ ] In scroll mode, `Option+Space d` detaches.
 - [ ] The wheel over a shell with history scrolls it and shows the indicator but not the `SCROLL` badge; typing a character then returns the terminal to the bottom and the character reaches the shell. In a fresh shell with no history, the wheel does nothing.
 - [ ] While scrolled back, output from a background job started before scrolling (`(sleep 1; seq 1 50) &`) makes the indicator's history count grow without leaving scroll mode.
 - [ ] With `less` open on a long file, the wheel moves through the file; with a program in application cursor mode on the alternate screen, the wheel sends `ESC O A`/`ESC O B` (checked by a program that echoes its input bytes); after the program sends `ESC[?1007l`, the wheel sends nothing.

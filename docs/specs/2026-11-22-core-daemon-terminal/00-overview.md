@@ -7,7 +7,7 @@ backlog: DECK-01
 
 ## Goal
 
-Lay down the repository and the client/daemon core, and ship the first thing the user can run: `deck` opens a session with one shell in a rounded frame, `Ctrl+Space d` detaches, the shell keeps running, and `deck` again brings it back exactly as it was. Then scrollback, the mouse and focus events work inside it.
+Lay down the repository and the client/daemon core, and ship the first thing the user can run: `deck` opens a session with one shell in a rounded frame, `Option+Space d` detaches, the shell keeps running, and `deck` again brings it back exactly as it was. Then scrollback, the mouse and focus events work inside it.
 
 ## Builds on
 
@@ -23,7 +23,7 @@ None. Uses the decisions in [architecture.md](../../architecture.md): process mo
 ## Decisions
 
 - `deck` with no arguments attaches to the most recently attached session, or creates one named `main` (then `main-2`, …) whose single project is the current directory (named after its basename; the home dir is `~` and the filesystem root `root`, since names may not contain `/`).
-- Default prefix `Ctrl+Space`; pressing it twice sends it to the terminal. While armed, the status bar shows `PREFIX`; `Esc` disarms. An unbound key after the prefix disarms and flashes `no binding for <key>` for 2 s.
+- Default prefix `Option+Space` (`M-Space`; macOS reserves `Option+Space` for input-source switching); pressing it twice sends the key as received to the terminal. The non-breaking space macOS terminals send for Option+Space when Option is not Alt also counts as the prefix. While armed, the status bar shows `PREFIX`; `Esc` disarms. An unbound key after the prefix disarms and flashes `no binding for <key>` for 2 s.
 - The terminal gets `TERM=xterm-256color` and `COLORTERM=truecolor`, plus the `DECK_*` variables of [architecture.md](../../architecture.md#agents).
 - The shell is the config's `shell`, else the client's `$SHELL`, else `/bin/sh`, started with `shell_args` (default `["-l"]`, a login shell). No argv0 tricks: portable-pty sets argv0 to the program.
 - **Environment**: the terminals of a session inherit the environment of the client that created the session (sent in `Hello`), minus `DECK_*`, `TMUX`, `TMUX_PANE`, `COLUMNS`, `LINES` and `TERM_PROGRAM*`; deck then sets `TERM`, `COLORTERM` and the `DECK_*` variables. The locale is passed through untouched. Each attach refreshes `SSH_AUTH_SOCK`, `SSH_CONNECTION`, `SSH_TTY`, `DISPLAY`, `WAYLAND_DISPLAY` and `XAUTHORITY` from the attaching client for terminals started afterwards ([architecture.md#model](../../architecture.md#model)).
@@ -39,12 +39,12 @@ None. Uses the decisions in [architecture.md](../../architecture.md): process mo
 
 | Sub-spec                          | Type       | Crate                         | Summary                                                              | Depends | Status |
 | --------------------------------- | ---------- | ----------------------------- | -------------------------------------------------------------------- | ------- | ------ |
-| [01](01-workspace-tooling.md)     | foundation | root, all crates (skeletons)  | Cargo workspace, four crates, mise, just, Lefthook, lints            | —       | todo   |
-| [02](02-core-types.md)            | foundation | deck-core                     | Model, protocol and framing, paths, config, `KeySpec`, bindings, `keys::encode` | 01 | todo |
-| [03](03-daemon.md)                | foundation | deck-daemon, deck             | Daemon: socket, lock, sessions, PTYs, emulation, frames, `deck daemon` | 02    | todo   |
-| [04](04-cli-harness.md)           | foundation | deck                          | CLI (`ls`, `kill-server`, daemon start-up, guards), e2e harness       | 03      | todo   |
-| [05](05-attach-client.md)         | shippable  | deck-tui, deck                | `deck` attaches, draws, types, resizes, detaches; colours; clipboard  | 04      | todo   |
-| [06](06-scrollback-mouse.md)      | shippable  | deck-core, deck-daemon, deck-tui | Scroll mode, mouse wheel, mouse reporting, focus events            | 05      | todo   |
+| [01](01-workspace-tooling.md)     | foundation | root, all crates (skeletons)  | Cargo workspace, four crates, mise, just, Lefthook, lints            | —       | done   |
+| [02](02-core-types.md)            | foundation | deck-core                     | Model, protocol and framing, paths, config, `KeySpec`, bindings, `keys::encode` | 01 | done   |
+| [03](03-daemon.md)                | foundation | deck-daemon, deck             | Daemon: socket, lock, sessions, PTYs, emulation, frames, `deck daemon` | 02    | done   |
+| [04](04-cli-harness.md)           | foundation | deck                          | CLI (`ls`, `kill-server`, daemon start-up, guards), e2e harness       | 03      | done   |
+| [05](05-attach-client.md)         | shippable  | deck-tui, deck                | `deck` attaches, draws, types, resizes, detaches; colours; clipboard  | 04      | done   |
+| [06](06-scrollback-mouse.md)      | shippable  | deck-core, deck-daemon, deck-tui | Scroll mode, mouse wheel, mouse reporting, focus events            | 05      | done   |
 
 The sub-specs run in order: each one's tests need the one before.
 

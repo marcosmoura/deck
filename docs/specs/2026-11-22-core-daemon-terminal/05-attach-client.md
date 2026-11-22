@@ -1,23 +1,23 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 05 — Attach client
 
 ## Scope
 
-The user can run `deck`: a shell opens in a rounded frame with a status bar, typing works like in any terminal, resizing the window resizes the shell, `Ctrl+Space d` detaches and `deck` reattaches to the same running shell. Programs inside see the outer terminal's colours, and their OSC 52 copies reach the clipboard. Owning crates: `deck-tui` (the client), `deck` (wiring `deck` and `deck attach` to it).
+The user can run `deck`: a shell opens in a rounded frame with a status bar, typing works like in any terminal, resizing the window resizes the shell, `Option+Space d` detaches and `deck` reattaches to the same running shell. Programs inside see the outer terminal's colours, and their OSC 52 copies reach the clipboard. Owning crates: `deck-tui` (the client), `deck` (wiring `deck` and `deck attach` to it).
 
 ## Requirements
 
 1. **Attach**: `deck` and `deck attach [<name>]` (sub-spec 04 does the start-up and guards) attach: with no name, to the most recent session or a new `main`; with a name, to that session (error and exit code 1 when it does not exist). `Hello` carries the current dir, the process environment, the panel area of the current window (clamped to at least 20×4) and the outer colours (requirement 3).
 2. **Terminal setup** as in [architecture.md#client](../../architecture.md#client): raw mode, alternate screen, mouse capture, bracketed paste, focus events. A guard restores the outer terminal on normal exit, on error, on panic (panic hook) and on `SIGTERM` and `SIGHUP`: leave the alternate screen, disable the modes, show the cursor and reset its shape (`SetCursorStyle::DefaultUserShape`); a panic message is printed after the restore.
-3. **Outer colours**: before entering the alternate screen, the client asks the outer terminal for its foreground and background (`OSC 10;?` and `OSC 11;?`) and waits up to 200 ms for the answers; it sends them in `Hello` as `OuterColors`, or `None` when the terminal does not answer. Bytes read while waiting that are not part of an answer are passed on as input.
+3. **Outer colours**: before entering the alternate screen, the client asks the outer terminal for its foreground and background (`OSC 10;?` and `OSC 11;?`) followed by a DA1 query (`ESC[c`), and reads until the DA1 reply arrives or 200 ms pass, so late answers never reach a program; it sends them in `Hello` as `OuterColors`, or `None` when the terminal does not answer. Bytes read while waiting that are not part of an answer go through the normal key path (prefix bindings included); unterminated answer fragments are dropped.
 4. **Event loop**: a blocking thread reads crossterm events and forwards them to the tokio runtime over a channel (no crossterm `event-stream` feature); the runtime also reads server messages and a redraw timer.
 5. **Mirror**: the client keeps the lines, cursor and modes of each terminal from `Frame`s (full frames replace, others patch lines) and the latest `SessionView`.
 6. **Layout and drawing** (see [Screen](#screen)): the panel area is the whole screen minus the bottom status-bar row. The client sends `Viewport` with the panel area's size on every resize. It draws with the `SessionView.layout_viewport` the daemon used: the terminal's border and contents are laid out for that size and cropped or padded (blank) to the client's own panel area when the two differ (another client is driving the size). The title goes in the top border, the lines inside by the cell model of [02-core-types](02-core-types.md) (runs placed at their column, wide characters taking two cells), and the cursor at the terminal's cursor when visible, with its shape set through crossterm's `SetCursorStyle`. Runs keep their colours and attributes (bold, dim, italic, underline, reverse, strikethrough). Every non-terminal colour and glyph comes from `Theme::default()` ([02-core-types](02-core-types.md) notes). Redraws happen at most every 16 ms and only when something changed.
-7. **Too small**: below 20 columns or 5 rows the client draws only `deck: window too small` centered, sends no `Viewport` (the PTY keeps its last size), and still detaches on the binding.
+7. **Too small**: below 20 columns or 5 rows the client draws only `deck: window too small` centered (word-wrapped when the window is narrower than the message), sends no `Viewport` (the PTY keeps its last size), and still detaches on the binding.
 8. **Input**: keys go through the prefix state machine of the overview's decisions. Bound keys run their action (character bindings ignore `Shift`, [02-core-types](02-core-types.md) requirement 5); other keys are converted to `deck-core::KeyEvent`, encoded with `keys::encode` and the focused terminal's modes, and sent as `Input`. Paste events send the text, wrapped in `ESC[200~`/`ESC[201~` when the terminal's modes ask for bracketed paste.
 9. **Bindings**: the default table of [02-core-types](02-core-types.md) (requirement 6) with the config's `[keys]` overrides; this sub-spec implements `detach`.
 10. **Clipboard**: on `ServerMsg::Clipboard { selection, text }` the client writes `ESC ] 52 ; <selection> ; <base64 of text> BEL` to the outer terminal (`deck-core::base64`).
@@ -36,7 +36,7 @@ The user can run `deck`: a shell opens in a rounded frame with a status bar, typ
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
- main  terminal-multiplexer                                    ^Space d detach
+ main  terminal-multiplexer                                    ⌥Space d detach
 ```
 
 - Border title: the terminal's OSC title when set, else the program's name (the shell's basename). Truncated with `…` to fit.
@@ -48,13 +48,13 @@ The user can run `deck`: a shell opens in a rounded frame with a status bar, typ
 
 - [ ] `deck` with no daemon running starts one, attaches, and the frame and status bar of the mockup appear (capture `attached`).
 - [ ] Typing `echo hello` + `Enter` shows `hello` inside the frame.
-- [ ] `Ctrl+Space d` restores the outer screen, prints `[detached from main]` and exits 0; `deck ls` then lists `main` with 1 terminal and no `(attached)`.
+- [ ] `Option+Space d` restores the outer screen, prints `[detached from main]` and exits 0; `deck ls` then lists `main` with 1 terminal and no `(attached)`.
 - [ ] `deck` again shows the earlier `hello` (capture `reattached`).
 - [ ] In an 80×24 outer terminal the first `stty size` prints `21 78`; resizing the outer PTY to 100×30 makes it print `27 98`.
-- [ ] `Ctrl+Space Ctrl+Space` sends exactly one `0x00` byte: with `stty raw -echo; od -An -tx1 -N2` running in the shell and `Ctrl+Space Ctrl+Space a` typed, `od` prints `00 61`. `Ctrl+Space x` flashes `no binding for x` and sends nothing (`od` then sees only the next key).
+- [ ] `Option+Space Option+Space` sends exactly the second key (`ESC` and a space): with `stty raw -echo; od -An -tx1 -N3` running in the shell and `Option+Space Option+Space a` typed, `od` prints `1b 20 61`. The non-breaking space (`C2 A0`), which macOS terminals send for Option+Space when Option is not Alt, also arms the prefix, and sent twice reaches the shell as itself. `Option+Space x` flashes `no binding for x` and sends nothing (`od` then sees only the next key).
 - [ ] Every byte `0x01`–`0x7f` except `0x1b`, sent one at a time through the outer PTY to a program in raw mode that echoes its input bytes, arrives unchanged (this covers crossterm's `Ctrl+4`…`Ctrl+7` reports for `0x1c`–`0x1f`).
-- [ ] With `[keys] detach = "X"` in the config, `Ctrl+Space X` (typed as Shift+x) detaches.
-- [ ] The prefix badge shows after `Ctrl+Space` and disappears after the next key or `Esc` (capture `prefix`).
+- [ ] With `[keys] detach = "X"` in the config, `Option+Space X` (typed as Shift+x) detaches.
+- [ ] The prefix badge shows after `Option+Space` and disappears after the next key or `Esc` (capture `prefix`).
 - [ ] `exit` in the shell prints `[session main ended]`.
 - [ ] `deck kill-server` while attached ends the client with `[deck daemon stopped]`.
 - [ ] `SIGTERM` to the client leaves the outer terminal cooked and on the main screen (`tty_mode()`, `raw_output()`).
@@ -76,6 +76,6 @@ The user can run `deck`: a shell opens in a rounded frame with a status bar, typ
 ## Notes
 
 - Keep the status-bar hint list generic: DECK-02 and DECK-03 add actions and hints.
-- `Ctrl+@` and `Ctrl+Space` are the same key, and `Shift+Enter` is `Enter`, without the kitty keyboard protocol ([architecture.md#client](../../architecture.md#client)).
+- `Shift+Enter` is `Enter`, without the kitty keyboard protocol ([architecture.md#client](../../architecture.md#client)).
 - `scroll = "["` is bound here but does nothing until sub-spec 06; mouse capture is on but mouse events are ignored until then.
 - The harness sends mouse and focus events with `send_bytes` and their raw sequences (sub-spec 06), and answers the OSC 10/11 queries by writing the reply to the PTY when a test asks it to.

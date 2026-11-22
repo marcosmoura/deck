@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 04 — CLI and end-to-end harness
@@ -16,7 +16,7 @@ The `deck` command line around the daemon (starting it, `deck ls`, `deck kill-se
 1. **Subcommands** (clap): `deck` (no subcommand) and `deck attach [<name>]`, which attach (the client is sub-spec 05; here they only run the start-up and the guards, then hand over to `deck-tui`, a stub until 05); `deck ls`; `deck kill-server`; the hidden `deck daemon` (sub-spec 03); and a hidden `deck _probe [--session <name>]` for tests, which starts the daemon if needed, sends an attach `Hello` (creating the session like `deck` would), prints the `Welcome` session name and the daemon's version, sends `Detach` and exits 0.
 2. **Guards**, checked before anything else when attaching: inside deck (`DECK` set) refuse with `deck: already inside deck (unset DECK to nest)`; when stdin or stdout is not a TTY refuse with `deck: attach needs a terminal (stdin and stdout must be a TTY)`. Both exit 1.
 3. **Runtime dir check**: every command that connects first checks the runtime dir as the daemon does ([03-daemon](03-daemon.md), requirement 1) and refuses an unsafe one with the same message, exit 1.
-4. **Daemon start-up** (attach and `_probe`): when the socket does not accept a connection, `deck` starts `<current exe> daemon` in a new session (`platform::detach_spawn`: `setsid` in `pre_exec`, stdin from `/dev/null`, stdout and stderr appended to `daemon.log`) and retries the connection for up to 3 s. The client never removes the socket (only the daemon does, under its lock), so two `deck` processes starting at the same moment end up on the one daemon that got the lock. On failure it prints `deck: could not start the daemon; see <log path>` and exits 1.
+4. **Daemon start-up** (attach and `_probe`): when the socket does not accept a connection, `deck` starts `<current exe> daemon` in a new session (`platform::detach_spawn`: `setsid` in `pre_exec`, stdin, stdout and stderr on `/dev/null`; `deck daemon` opens and rotates its own log, sub-spec 03) and retries the connection for up to 3 s. The client never removes the socket (only the daemon does, under its lock), so two `deck` processes starting at the same moment end up on the one daemon that got the lock. On failure it prints `deck: could not start the daemon; see <log path>` and exits 1.
 5. **`deck ls`** prints one line per session: name, terminal count, and `(attached)` when a client is attached, aligned in columns. With no daemon running it prints `no sessions` and does not start one.
 6. **`deck kill-server`**: sends `KillServer` and waits (up to 5 s) until `deck.lock` is released. When the daemon answers `VersionMismatch`, or the socket does not answer within 1 s while `deck.lock` is held, it reads the pid from `deck.lock` and sends it `SIGTERM` (`platform::terminate`), which takes the daemon's clean shutdown path, then waits the same way. With no daemon (lock free) it prints `no deck daemon running`. These cases exit 0; a lock still held after 5 s prints `deck: the daemon did not stop; see <log path>` and exits 1.
 7. **Daemon errors** (`Bye { Error }`, `VersionMismatch`) are printed in one line; `VersionMismatch` adds: `run "deck kill-server" to restart it (sessions are kept from DECK-04 on)`.
