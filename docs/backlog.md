@@ -29,7 +29,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-04 | Persistence across daemon restarts        | ready      | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)            |
 | DECK-05 | Control API                               | ready      | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)            |
 | DECK-06 | Agent status, hooks and resume            | ready      | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)          |
-| DECK-08 | Config and theming                        | ready      | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)      |
+| DECK-08 | Config and theming                        | in-progress | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)      |
 | DECK-09 | Sidebar titles with icons                 | ready      | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)      |
 
 ### Withdrawn
