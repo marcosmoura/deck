@@ -20,7 +20,7 @@ The user edits `config.toml` while deck runs, saves, and within about a second t
 
 ## Acceptance criteria
 
-- [ ] With deck attached, writing `[theme] accent = "red"` to the config makes the focused border red (within 5 s; the test sets `DECK_TEST_CONFIG_POLL_MS=200`), and `config reloaded` flashes (capture `reloaded`).
+- [ ] With deck attached, writing `[theme] accent = "red"` to the config makes the active panel row and the session name red (within 5 s; the test sets `DECK_TEST_CONFIG_POLL_MS=200`), and `config reloaded` flashes (capture `reloaded`).
 - [ ] Changing `[keys] detach = "q"` makes `⌥Space q` detach and `⌥Space d` flash `no binding for d`, without reattaching.
 - [ ] Changing `sidebar_width` from 28 to 40 moves the panel area and the shell's `stty size` shrinks by 12 columns.
 - [ ] Writing a file with `accent = "purple"` shows `config.toml:2:10: …` (the actual location) in the error colour, and the previous accent stays.
@@ -28,10 +28,10 @@ The user edits `config.toml` while deck runs, saves, and within about a second t
 - [ ] Deleting the file returns everything to the defaults.
 - [ ] Changing `shell_args` does not restart running shells; a new terminal uses the new value.
 - [ ] Two attached clients both apply a change.
-- [ ] A reload with a key bound to two actions keeps the previous config and shows the error notice.
+- [ ] A reload with one key set by the user for two actions keeps the previous config and shows the error notice; a reload where a user's key replaces another action's default applies and shows a warning notice naming both actions.
 - [ ] A same-size edit written within the same second as the previous one is picked up (inode or ctime differs).
 - [ ] An invalid file at daemon start: deck starts with the defaults and the first client shows the error notice.
-- [ ] With `sidebar_width = 40` in the config, a new session's first shell starts at the outer width minus 41 minus its borders, with no resize afterwards (the harness sees one size from the first `stty size`).
+- [ ] With `sidebar_width = 40` in the config, a new session's first shell starts at the outer width minus 41 and the outer height minus the status bar (a single terminal has no border since DECK-02), with no resize afterwards (the harness sees one size from the first `stty size`).
 - [ ] The client no longer opens `config.toml` (daemon test with a client in a different `XDG_CONFIG_HOME` still gets the daemon's config).
 
 ## Tests

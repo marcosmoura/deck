@@ -17,7 +17,7 @@ The user sets colours, the border style and the sidebar glyphs in `[theme]`, and
    | Role             | Default         | Used for                                                       |
    | ---------------- | --------------- | -------------------------------------------------------------- |
    | `accent`         | `blue`          | focused border and title, active panel row, session name       |
-   | `muted`          | `bright-black`  | hints, project names in the status bar, empty states, exited terminals |
+   | `muted`          | `bright-black`  | hints, project names and the terminal title in the status bar, empty states, exited terminals |
    | `ok`             | `green`         | success states (DECK-06 idle)                                  |
    | `warning`        | `yellow`        | `PREFIX`, `SCROLL`, `RESIZE` badges, scroll indicator, waiting |
    | `error`          | `red`           | error flashes                                                  |
@@ -49,23 +49,25 @@ sidebar_bg = 236
 ```
 
 ```text
- main                       │┌─ nvim ────────────────────────────────────┐
-                            ││                                           │
- ▾ terminal-multiplexer     ││                                           │
-▌  editor                   ││                                           │
-   claude                   │└───────────────────────────────────────────┘
- main  terminal-multiplexer › editor                    ⌥Space ? help  d detach
+ main                       │$ nvim
+                            │
+ ▾ terminal-multiplexer     │
+▌  editor                   │
+   claude                   │
+ main  terminal-multiplexer › editor · nvim              ⌥Space ? help  d detach
 ```
 
-- The sidebar's background is palette colour 236; the active row, the session name and the focused border are `#cba6f7` (or its nearest palette colour without truecolor); corners are plain.
+With the help overlay open (`⌥Space ?`), its corners are plain: `┌─ Help ─…─┐`.
+
+- The sidebar's background is palette colour 236; the active row and the session name are `#cba6f7` (or its nearest palette colour without truecolor); overlay corners are plain. A single-terminal panel has no border since DECK-02; terminal borders return with DECK-03 for panels with several terminals and use the same roles and `border_style`.
 
 ## Acceptance criteria
 
 - [ ] Every colour form parses: `"default"`, all 16 names, `0`, `255`, `"#CBA6F7"`, and a role reference; `256`, `"#ggg"`, `"purple"`, an unknown role and a cycle (`accent = "muted"`, `muted = "accent"`) each give an error naming the key.
 - [ ] `Theme::default()` matches the role table, the styles and the glyphs.
-- [ ] With the Screen config, the harness sees the focused border cells in `#cba6f7`, the sidebar cells with background 236 and plain corners (capture `themed`), checked through `cell(row, col)`.
-- [ ] With `COLORTERM` unset in the harness, the same border is drawn with a 256-palette colour, and `printf '\033[38;2;203;166;247mx'` inside deck reaches the outer terminal as a 256-palette colour too. The harness sets `COLORTERM=truecolor` explicitly in the other theme tests, so neither depends on the CI environment.
-- [ ] `border_style = "double"` draws `╔═╗` borders on terminals and on the help overlay.
+- [ ] With the Screen config, the harness sees the active panel row's cells in `#cba6f7`, the sidebar cells with background 236 and the help overlay's plain corners (capture `themed`), checked through `cell(row, col)`.
+- [ ] With `COLORTERM` unset in the harness, the same active row is drawn with a 256-palette colour, and `printf '\033[38;2;203;166;247mx'` inside deck reaches the outer terminal as a 256-palette colour too. The harness sets `COLORTERM=truecolor` explicitly in the other theme tests, so neither depends on the CI environment.
+- [ ] `border_style = "double"` draws `╔═╗` borders on the help overlay and the session picker (terminal borders follow it once DECK-03 draws them).
 - [ ] `[theme.glyphs] collapsed = ">"` changes the collapsed marker; a two-cell glyph (`"日"`), an empty string and `"ab"` are errors.
 - [ ] A unit test in `deck-tui` scans its own source files and finds no `Color::` constructor outside the theme module and the colour-conversion module, and no theme glyph (`▾`, `▸`, `▌`) outside the theme module.
 
