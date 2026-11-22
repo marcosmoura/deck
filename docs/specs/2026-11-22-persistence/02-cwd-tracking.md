@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: draft
+status: todo
 ---
 
 # 02 — Working directory tracking
@@ -21,13 +21,13 @@ deck knows where each shell is. After `cd` in a shell and a daemon restart, the 
 
 - [ ] The OSC 7 scanner yields `/tmp/a b` from `ESC]7;file://localhost/tmp/a%20b BEL`, split at every byte boundary; accepts the hostname in other case and as a short name; ignores a foreign host, a relative path, a path decoding to invalid UTF-8 or containing NUL, and an unterminated 5 KiB sequence (after which it still finds the next valid one).
 - [ ] With a shell that emits OSC 7 (`printf '\033]7;file://localhost%s\007' "$PWD"` from its prompt command), `cd /tmp` then restart restores the shell in `/tmp`.
-- [ ] With `/bin/sh` and no OSC 7, and `DECK_TEST_CWD_POLL_MS=200`, `cd /tmp` is picked up within 2 s and survives a restart. The test runs on the OS of the machine (macOS or Linux).
+- [ ] With `/bin/sh` and no OSC 7, and `DECK_TEST_CWD_POLL_MS=200`, `cd /tmp` is picked up (no sooner than one poll, within 5 s) and survives a restart. The test runs on the OS of the machine (macOS or Linux).
 - [ ] Running `(cd /var && sleep 5)` in a tracked shell sitting in `/tmp` keeps the terminal's cwd at `/tmp`.
 - [ ] A shell that reported OSC 7 once and then runs a long command in another directory keeps its OSC 7 cwd.
 - [ ] `^Space t` after `cd /tmp` in the focused terminal opens the new terminal in `/tmp` (`pwd`).
 - [ ] `process_cwd` of a child started in `/tmp` returns `/tmp` (daemon test).
 - [ ] With OSC 7, a cwd change made 2 s before `kill -9` of the daemon is restored.
-- [ ] With a fake `process_cwd` that sleeps 2 s (test hook in the daemon), an attached client still receives frames within 100 ms of output during the query.
+- [ ] With a fake `process_cwd` that blocks until the test releases it (test hook in the daemon), an attached client still receives frames for output produced during the query (daemon test; no wall-clock bound).
 - [ ] A tick with no cwd change does not trigger a save.
 
 ## Tests

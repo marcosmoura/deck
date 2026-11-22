@@ -3,6 +3,9 @@
 
   // `build` is the only primary agent and the lead of docs/workflow.md.
   // Role prompts live in .agents/roles/; .opencode/agents/*.md are thin wrappers.
+  // `steps` caps each subagent's turns (docs/workflow.md, harness table).
+  // Shell allows below add to the user's global rules, which ask for every other
+  // command; the cargo/just allows are this repo's build and check commands.
   "default_agent": "build",
 
   "agents": {
@@ -19,6 +22,7 @@
     "spec-reviewer": {
       "mode": "subagent",
       "model": "claude-agent/opus#medium",
+      "steps": 60,
       "permissions": [
         { "action": "edit", "resource": "*", "effect": "deny" },
         { "action": "subagent", "resource": "*", "effect": "deny" },
@@ -28,15 +32,26 @@
     "worker": {
       "mode": "subagent",
       "model": "claude-agent/sonnet#medium",
-      "permissions": [{ "action": "subagent", "resource": "*", "effect": "deny" }],
+      "steps": 200,
+      "permissions": [
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "cargo *", "effect": "allow" },
+        { "action": "shell", "resource": "just *", "effect": "allow" },
+        { "action": "shell", "resource": "git status*", "effect": "allow" },
+        { "action": "shell", "resource": "git diff*", "effect": "allow" },
+        { "action": "shell", "resource": "git log*", "effect": "allow" },
+      ],
     },
 
     "reviewer": {
       "mode": "subagent",
       "model": "claude-agent/opus#medium",
+      "steps": 60,
       "permissions": [
         { "action": "edit", "resource": "*", "effect": "deny" },
         { "action": "subagent", "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "cargo nextest *", "effect": "allow" },
+        { "action": "shell", "resource": "cargo clippy *", "effect": "allow" },
       ],
     },
 
@@ -50,6 +65,8 @@
         { "action": "subagent", "resource": "spec-reviewer", "effect": "allow" },
         { "action": "subagent", "resource": "worker", "effect": "allow" },
         { "action": "subagent", "resource": "reviewer", "effect": "allow" },
+        { "action": "shell", "resource": "cargo *", "effect": "allow" },
+        { "action": "shell", "resource": "just *", "effect": "allow" },
       ],
     },
     "compaction": {

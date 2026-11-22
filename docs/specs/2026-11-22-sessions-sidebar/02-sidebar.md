@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: draft
+status: todo
 ---
 
 # 02 — Sidebar, panels and projects
@@ -31,7 +31,7 @@ The user sees the attached session's projects in a sidebar with their panels nes
    | `focus_sidebar`   | `Tab`   | Move keyboard focus into the sidebar                                 |
    | `help`            | `?`     | Help overlay                                                         |
 
-5. **Input modes** follow the precedence list in the overview's decisions. The prefix key still works in sidebar focus; inside prompts it is typed as text.
+5. **Input modes** follow the precedence list in the overview's decisions. The prefix key still works in sidebar focus and scroll mode; inside prompts it is typed as text. The sidebar-focus keys below are fixed in v1 (not under `[keys]`).
 6. **Sidebar focus** keys: `Up`/`k`, `Down`/`j` move the selection; `Enter` focuses the selected panel (or, on a project row, toggles collapse); `Left`/`h` collapses and `Right`/`l` expands the selected project; `c` new panel in the selected project; `P` new project; `r` rename the selected row; `x` close the selected row (with the confirmation); `Esc`/`Tab` returns focus to the terminal. The status-bar hints show these keys while the sidebar has focus.
 7. **Mouse**: a click on a panel row focuses that panel; on a project row toggles its collapse; the wheel scrolls the sidebar. A click on the separator does nothing.
 8. **Prompts**: one-line editor in the status bar with a label, the cursor, `Left`/`Right`/`Home`/`End`/`Backspace`/`Delete`, `Ctrl+u` to clear, `Enter` to submit and `Esc` to cancel. `~` at the start of a directory, and a relative directory (against the client's start cwd), are resolved on the client. Pasted text is inserted as text (newlines dropped). An `ActionError` is shown as a flash in the error colour for 4 s and the prompt reopens with the entered text.
@@ -46,22 +46,22 @@ The user sees the attached session's projects in a sidebar with their panels nes
 
 ## Screen
 
-100×24 outer terminal, sidebar shown, `terminal-multiplexer` active with panel `editor`:
+100×24 outer terminal (rows cut), sidebar shown: 28 columns, the separator, and a 71-column panel area; `terminal-multiplexer` active with panel `editor`:
 
 ```text
- main                       │╭─ nvim ────────────────────────────────────────────────────────────╮
-                            ││                                                                   │
- ▾ terminal-multiplexer     ││                                                                   │
-▌  editor                   ││                                                                   │
-   claude                   ││                                                                   │
-   tests                    ││                                                                   │
- ▾ budget                   ││                                                                   │
-   api                      ││                                                                   │
-   no panels                ││                                                                   │
- ▸ dotfiles               2 ││                                                                   │
-                            ││                                                                   │
-                            │╰───────────────────────────────────────────────────────────────────╯
- main  terminal-multiplexer › editor                                         ^Space ? help  d detach
+ main                       │╭─ nvim ──────────────────────────────────────────────────────────────╮
+                            ││                                                                     │
+ ▾ terminal-multiplexer     ││                                                                     │
+▌  editor                   ││                                                                     │
+   claude                   ││                                                                     │
+   tests                    ││                                                                     │
+ ▾ budget                   ││                                                                     │
+   api                      ││                                                                     │
+   no panels                ││                                                                     │
+ ▸ dotfiles               2 ││                                                                     │
+                            ││                                                                     │
+                            │╰─────────────────────────────────────────────────────────────────────╯
+ main  terminal-multiplexer › editor                                        ^Space ? help  d detach 
 ```
 
 - Header row: session name, bold. A blank row separates it from the projects.
@@ -90,7 +90,7 @@ Prompt:
 - [ ] `^Space c` adds panel `2`, focuses it, and the sidebar and status bar update.
 - [ ] `^Space n`/`p` and `^Space 1` switch panels; the panel area shows the right shell (each shell has echoed a distinct marker).
 - [ ] `^Space ,` renames the active panel; an empty name shows the error flash and reopens the prompt.
-- [ ] `^Space P` with directory `~` proposes the home dir's basename as the name; accepting it, or typing `other`, adds a project whose shell's `pwd` is the home dir; a duplicate name shows the error; a relative directory resolves against the client's start cwd.
+- [ ] `^Space P` with directory `~` proposes `~` as the name; accepting it, or typing `other`, adds a project whose shell's `pwd` is the home dir; a duplicate name shows the error; a relative directory resolves against the client's start cwd.
 - [ ] `^Space X` asks, `n` keeps the panel, `y` closes it and focus moves as in sub-spec 01.
 - [ ] Closing the last panel shows the `No panels` empty state (capture `empty-project`); `^Space c` recovers.
 - [ ] `^Space Tab`, `j`, `Enter` focuses the selected panel; `h` collapses a project and its panel count appears (capture `sidebar-focus`).
@@ -99,7 +99,7 @@ Prompt:
 - [ ] With `sidebar_width = 28`, the sidebar shows at 49 outer columns (panel area 20) and hides automatically at 48; with `sidebar_width = 60` it shows from 81 columns.
 - [ ] `^Space ?` shows the help overlay with every default binding, and a `[keys]` override in the config shows its new key (capture `help`).
 - [ ] With 30 panel rows in a 24-row window, the sidebar scrolls to keep the active panel visible.
-- [ ] `^Space d` detaches while the sidebar has focus; `^Space` typed in a prompt inserts nothing special (the prompt treats it as a key, not the prefix).
+- [ ] `^Space d` detaches while the sidebar has focus and while a terminal is in scroll mode; `^Space` typed in a prompt inserts nothing special (the prompt treats it as a key, not the prefix).
 - [ ] Two clients on one session: `^Space n` in one changes the active panel in both; sidebar focus and a prompt opened in one do not appear in the other; closing a panel from client A while client B has a rename prompt open for it closes B's prompt with the flash.
 
 ## Tests

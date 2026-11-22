@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: draft
+status: todo
 ---
 
 # 03 — Agent skill and guide

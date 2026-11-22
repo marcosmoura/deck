@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: draft
+status: todo
 ---
 
 # 03 — Resizing
@@ -11,12 +11,12 @@ The user resizes the terminals of a panel with prefix keys (repeatable) or by dr
 
 ## Requirements
 
-1. **Action** `SetRatios { panel, n, ratios }`: `n` is the terminal count the client computed the ratios for. The daemon refuses the action with `layout changed, try again` when `n` differs from the panel's count (another client or an exiting process changed it), and with `invalid layout ratios` when `Ratios::is_valid_for(n)` fails or the result makes a terminal that is at or above 10×3 at the daemon's viewport go below it. Otherwise it stores them, resizes the PTYs and sends the new `SessionView` and `full` frames. A refused `SetRatios` from a key or a drag shows no flash; the client resyncs from the next `SessionView`.
-2. **Keys**: `resize_left = "H"`, `resize_right = "L"`, `resize_up = "K"`, `resize_down = "J"`: the client computes `layout::boundary_for` and `layout::resize` with the sign `boundary_for` returns and a step of 50‰ (at least one cell, as `layout::resize` guarantees) for the focused terminal, using the daemon's `layout_viewport`, and sends `SetRatios`. Nothing happens when there is no boundary or no room.
+1. **Action** `SetRatios { panel, n, ratios }` (protocol version bumps): `n` is the terminal count the client computed the ratios for. The daemon refuses the action with `layout changed, try again` when `n` differs from the panel's count (another client or an exiting process changed it), and with `invalid layout ratios` when `Ratios::is_valid_for(n)` fails. Otherwise it stores them, resizes the PTYs and sends the new `SessionView` and `full` frames. A refused `SetRatios` from a key or a drag shows no flash; the client resyncs from the next `SessionView`.
+2. **Keys**: `resize_left = "H"`, `resize_right = "L"`, `resize_up = "K"`, `resize_down = "J"`: the client computes `layout::boundary_for` and `layout::resize` with the sign `boundary_for` returns and a step of 50‰ (at least one cell, as `layout::resize` guarantees) for the focused terminal, starting from the effective ratios (`layout::fit` at the daemon's `layout_viewport`), and sends the result as `SetRatios`; it becomes the stored ratios. Nothing happens when there is no boundary or no room.
 3. **Repeat**: after a resize key, the next resize keys within 1 s act without the prefix; any other key, a paste or a focus event ends the repeat and is handled normally. While repeating, the status bar shows a `RESIZE` badge (same style as `PREFIX`).
 4. **Reset**: `reset_layout = "="` sends `SetRatios` with `Ratios::default_for(n)`.
 5. **Mouse drag**: pressing the left button on a border found by `layout::hit_boundary` starts a drag (never forwarded to a terminal, even with mouse reporting on); motion sends `SetRatios` from `layout::ratio_at`, at most every 33 ms; release ends it. While dragging, the moving border is drawn in the accent colour.
-6. **Persistence of ratios** inside the daemon: the panel keeps its ratios while terminals only swap or promote; when the count changes they are adapted by `Ratios::adapt` (sub-spec 02, requirement 4). DECK-04 saves them to disk.
+6. **Persistence of ratios** inside the daemon: the panel keeps its stored ratios across viewport changes and clients; when the count changes they are adapted by `Ratios::adapt` (sub-spec 02, requirement 4); a window too small for them gets a clamped copy, never a reset. DECK-04 saves them to disk.
 
 ## Screen
 
@@ -36,8 +36,9 @@ While repeating a resize, in the status bar:
 - [ ] A paste during the repeat ends it and the pasted text reaches the terminal.
 - [ ] `^Space =` restores the 50/50 main split.
 - [ ] Dragging the border between terminal 1 and the right half moves it with the pointer; a program with mouse reporting on in terminal 1 receives no events from the drag.
-- [ ] After `^Space L` twice on terminal 1 of a 2-terminal panel (60/40), adding a terminal gives the big terminal 60% of the width; closing it again returns to 60/40; swapping keeps the ratios.
-- [ ] When the adapted ratios would make a terminal smaller than 10×3 (a narrow window and a heavily resized split), adding a terminal falls back to the default ratios.
+- [ ] After `^Space L` twice on terminal 1 of a 2-terminal panel (60/40), adding a terminal gives the big terminal 60% of the width; closing it again returns to 60/40.
+- [ ] With 2 terminals resized to 90/10 and the window narrowed to 40 columns (sidebar auto-hidden), terminal 2 is drawn with the clamped copy (`stty size` shows at least 10 columns); widening the window back gives the exact 90/10 sizes again.
+- [ ] With 4 terminals in default ratios, adding a fifth gives terminal 1 exactly half the width, as with no resize at all.
 - [ ] `SetRatios` with a wrong length is refused by the daemon, and one whose `n` differs from the panel's count is refused with `layout changed, try again`.
 
 ## Tests

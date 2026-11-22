@@ -26,8 +26,8 @@ backlog: DECK-NN
 
 | Sub-spec           | Type       | Crate | Summary | Depends | Status |
 | ------------------ | ---------- | ----- | ------- | ------- | ------ |
-| [01](01-<name>.md) | foundation | …     | …       | —       | draft  |
-| [02](02-<name>.md) | shippable  | …     | …       | 01      | draft  |
+| [01](01-<name>.md) | foundation | …     | …       | —       | todo   |
+| [02](02-<name>.md) | shippable  | …     | …       | 01      | todo   |
 
 ## Affected docs
 ```
@@ -37,7 +37,7 @@ backlog: DECK-NN
 ```markdown
 ---
 type: shippable # shippable | foundation
-status: draft # draft | in-progress | done
+status: todo # todo | in-progress | done
 ---
 
 # NN — <Title>

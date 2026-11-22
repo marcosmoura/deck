@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: draft
+status: todo
 ---
 
 # 01 — Theme
@@ -33,8 +33,8 @@ The user sets colours, the border style and the sidebar glyphs in `[theme]`, and
    | `overlay_bg`     | `default`       | help and picker overlays                                       |
 
 3. **Styles**: `border_style = "rounded" | "plain" | "thick" | "double"` (default `rounded`) for terminal borders and overlays. `[theme.glyphs]`: `expanded = "▾"`, `collapsed = "▸"`, `active = "▌"` (DECK-06 adds its status and unseen glyphs here). A glyph must be exactly one cell wide (measured with `unicode-width`, approved for `deck-core` by this spec), because the sidebar's gutter and marker columns are one cell; anything else is an error naming the key.
-4. **`Theme`** in `deck-core` holds the resolved roles, styles and glyphs; `Theme::default()` equals the tables above. `deck-tui` draws every non-terminal element from the `Theme` it was given; no colour or theme glyph literal remains in `deck-tui` outside the defaults. Allowed literals: `…` (truncation), `›` (status-bar path), the box-drawing characters of the chosen `border_style`, and the separator `│`.
-5. **Colour depth**: when the outer terminal does not report truecolor (`COLORTERM` is neither `truecolor` nor `24bit`), `#rrggbb` roles are drawn as the nearest 256-palette colour. Terminal contents are passed through unchanged.
+4. **`Theme`** in `deck-core` holds the resolved roles, styles and glyphs; `Theme::default()` equals the tables above. `deck-tui` draws every non-terminal element from the `Theme` it was given; no colour or theme glyph literal remains in `deck-tui` outside the defaults. The module that converts `protocol::Color` to ratatui colours is allowed to construct colours. Allowed glyph literals: `…` (truncation), `›` (status-bar path), the box-drawing characters of the chosen `border_style`, and the separator `│`.
+5. **Colour depth**: when the outer terminal does not report truecolor (`COLORTERM` is neither `truecolor` nor `24bit`), `#rrggbb` roles are drawn as the nearest 256-palette colour, and so are RGB colours in terminal contents (programs inside deck always see `COLORTERM=truecolor`, so the client downsamples them the same way). Indexed and default colours in terminal contents are passed through unchanged.
 6. **Until sub-spec 03**, the client parses `[theme]` from the config it already reads at attach (DECK-01); sub-spec 03 moves reading to the daemon.
 
 ## Screen
@@ -64,10 +64,10 @@ sidebar_bg = 236
 - [ ] Every colour form parses: `"default"`, all 16 names, `0`, `255`, `"#CBA6F7"`, and a role reference; `256`, `"#ggg"`, `"purple"`, an unknown role and a cycle (`accent = "muted"`, `muted = "accent"`) each give an error naming the key.
 - [ ] `Theme::default()` matches the role table, the styles and the glyphs.
 - [ ] With the Screen config, the harness sees the focused border cells in `#cba6f7`, the sidebar cells with background 236 and plain corners (capture `themed`), checked through `cell(row, col)`.
-- [ ] With `COLORTERM` unset in the harness, the same border is drawn with a 256-palette colour. The harness sets `COLORTERM=truecolor` explicitly in the other theme tests, so neither depends on the CI environment.
+- [ ] With `COLORTERM` unset in the harness, the same border is drawn with a 256-palette colour, and `printf '\033[38;2;203;166;247mx'` inside deck reaches the outer terminal as a 256-palette colour too. The harness sets `COLORTERM=truecolor` explicitly in the other theme tests, so neither depends on the CI environment.
 - [ ] `border_style = "double"` draws `╔═╗` borders on terminals and on the help overlay.
 - [ ] `[theme.glyphs] collapsed = ">"` changes the collapsed marker; a two-cell glyph (`"日"`), an empty string and `"ab"` are errors.
-- [ ] A unit test in `deck-tui` scans its own source files and finds no `Color::` constructor and no theme glyph (`▾`, `▸`, `▌`) outside the theme module.
+- [ ] A unit test in `deck-tui` scans its own source files and finds no `Color::` constructor outside the theme module and the colour-conversion module, and no theme glyph (`▾`, `▸`, `▌`) outside the theme module.
 
 ## Tests
 

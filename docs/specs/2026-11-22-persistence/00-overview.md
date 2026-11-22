@@ -11,7 +11,7 @@ Sessions survive the daemon stopping: after `deck kill-server`, a crash, a logou
 
 ## Builds on
 
-- [DECK-01 core-daemon-terminal](../2026-11-22-core-daemon-terminal/00-overview.md): the daemon's start-up, signal handling and `kill-server` (which waits up to 5 s for the daemon to release the lock and socket), the client's environment carried in `Hello`.
+- [DECK-01 core-daemon-terminal](../2026-11-22-core-daemon-terminal/00-overview.md): the daemon's start-up, signal handling and `kill-server` (which waits up to 5 s for the daemon to release the lock and socket, and falls back to `SIGTERM` through the pid in `deck.lock` when the daemon speaks another protocol version), the client's environment carried in `Hello`.
 - [DECK-08 config-theming](../2026-11-22-config-theming/00-overview.md): `ServerMsg::Notice`.
 - [DECK-03 grid-layout](../2026-11-22-grid-layout/00-overview.md): the full model, including ratios and focus.
 - [architecture.md#persistence](../../architecture.md#persistence) and [#paths](../../architecture.md#paths).
@@ -27,7 +27,9 @@ Sessions survive the daemon stopping: after `deck kill-server`, a crash, a logou
 ## Decisions
 
 - **One file**, `state.json`, rewritten whole and atomically after changes ([architecture.md#persistence](../../architecture.md#persistence)). A daemon killed with `SIGKILL` loses at most the last 500 ms of changes. The write is safe against process crashes; against power loss it is best effort (the file and its directory are fsynced, but macOS's `F_FULLFSYNC` is not used).
-- **What restores**: every session, project, panel and terminal with its id, name, name source, order, ratios, collapsed state and focus; the ID counter. Every terminal, shell or explicit program, starts in the first directory that exists of: its saved cwd, its project root, the home dir. Terminals with an explicit `program` are relaunched with the same program, args and env. The `DECK_*` variables are regenerated, never saved. Exited terminals kept by `keep` (DECK-05) are not restored.
+- **What restores**: every session, project, panel and terminal with its id, name, name source, order, ratios, collapsed state and focus; the ID counter. Every terminal, shell or explicit program, starts in the first directory that exists of: its saved cwd, its project root, the home dir. Terminals with an explicit `program` are relaunched with the same program and args. The daemon checks each directory itself before launching, because portable-pty silently falls back to the home dir when a cwd is missing. The `DECK_*` variables are regenerated, never saved. (DECK-05 later adds `keep` to the saved terminal and skips exited kept terminals on restore.)
+- **Environment of restored sessions** (an exception to DECK-01's per-session client environment): restored terminals get the daemon's own start environment, which is the environment of the client that started the new daemon. `state.json` never stores a full environment: a terminal's saved `env` holds only the additions of its launch spec (DECK-05's `--env`), so tokens in the user's environment stay off disk.
+- **`deck ls` without a daemon**: when no daemon runs but `state.json` holds sessions, `deck ls` prints `no daemon running; <n> saved sessions will be restored by "deck"` instead of `no sessions`, and does not start one.
 - **Shutdown never loses terminals**: the daemon marks itself as shutting down before anything else, so terminals that end because of the shutdown stay in the saved state.
 - **`deck kill-server`** saves and stops; the next start restores. `deck kill-server --forget` deletes `state.json` once the daemon is gone (also when none is running), for a clean slate. The protocol does not change for it.
 - **Notices**: problems found while restoring (an unreadable file, a terminal that could not be relaunched) reach the user as a `ServerMsg::Notice` shown by the next client that attaches.
@@ -39,9 +41,8 @@ Sessions survive the daemon stopping: after `deck kill-server`, a crash, a logou
 
 | Sub-spec                 | Type      | Crate                        | Summary                                                                     | Depends | Status |
 | ------------------------ | --------- | ---------------------------- | --------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-save-restore.md) | shippable | deck-daemon, deck-core, deck | Save `state.json`, restore on start, shutdown safety, notices, `--forget`   | DECK-03 | draft  |
-| [02](02-cwd-tracking.md) | shippable | deck-daemon, deck-core       | Live cwd from OSC 7 and the OS; restore into it; new terminals inherit it    | 01      | draft  |
-
+| [01](01-save-restore.md) | shippable | deck-daemon, deck-core, deck | Save `state.json`, restore on start, shutdown safety, notices, `--forget`   | DECK-03 | todo   |
+| [02](02-cwd-tracking.md) | shippable | deck-daemon, deck-core       | Live cwd from OSC 7 and the OS; restore into it; new terminals inherit it    | 01      | todo   |
 ## Limitations
 
 - After `kill -9` of the daemon, child processes that ignore `SIGHUP` (`nohup`, their own `setsid`) keep running, and the restored daemon relaunches explicit commands next to them (two dev servers on one port, for example).

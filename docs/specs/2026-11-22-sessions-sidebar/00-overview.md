@@ -25,22 +25,23 @@ Turn the single-terminal client into the product's shape: a session holds projec
 
 - **Lifecycle** follows [architecture.md](../../architecture.md#model) from here on, replacing DECK-01's temporary rule: a session no longer ends when its last terminal exits. When a panel's terminal exits, the panel closes; an empty project stays; a session with no projects shows an empty state.
 - **New panel**: one shell in the project's root dir; default name is the lowest unused number in that project (`1`, `2`, …).
-- **New project**: the directory is asked first (prefilled with the cwd the client was started in; `~` and paths relative to that cwd are resolved on the client; it must exist), then the name, prefilled with the directory's basename. Its first panel is created with it.
+- **New project**: the directory is asked first (prefilled with the cwd the client was started in; `~` and paths relative to that cwd are resolved on the client; it must exist), then the name, prefilled with the directory's basename (`~` for the home dir, `root` for `/`, the same default names the daemon gives). Its first panel is created with it.
 - **Sidebar**: left, 28 columns by default (`sidebar_width`, 20–60), shown by default (`sidebar = true`), toggled with `prefix b`, and hidden automatically whenever the outer terminal is narrower than `sidebar_width + 1 + 20` columns, so the panel area never drops below 20 columns. Collapsing a project hides its panels in the sidebar only.
 - **Sidebar focus**: `prefix Tab` moves keyboard focus into the sidebar for navigation; `Esc` or `Tab` returns it to the terminal. Mouse clicks work without it.
 - **Prompts and confirmations** appear in the status bar, one line, `Esc` cancels. Closing a project or a panel with running processes always asks.
 - **Help**: `prefix ?` shows every binding in an overlay, generated from the binding table.
 - **Sessions**: `prefix s` opens a picker overlay; switching re-attaches the same client process to another session without leaving the outer terminal. When the attached session is killed (from the picker, `prefix s`, or `deck kill-session` in another shell), the client switches to the most recently attached other session the same way, and exits only when none is left.
 - **Several clients** on one session share the session-wide state: active project, active panel and collapsed projects. Sidebar selection, prompts, confirmations and overlays are local to each client. A prompt or confirmation whose target is removed by another client is dropped with a flash (`panel "<name>" was closed`).
-- **Input modes** are handled in one order, first match wins: (1) an overlay (help, picker) or a prompt or confirmation; (2) scroll mode (DECK-01); (3) sidebar focus; (4) resize repeat (DECK-03); (5) the prefix and its bindings; (6) the terminal. Inside prompts and the picker filter the prefix key is ordinary text; in sidebar focus the prefix still works (`^Space d` detaches). Pasted text goes into an open prompt or filter as text; focus events never reach overlays.
+- **Input modes** are handled in one order, first match wins: (1) an overlay (help, picker) or a prompt or confirmation; (2) the prefix key and its bindings, which work in every mode below (`^Space d` detaches from scroll mode or sidebar focus); (3) scroll mode (DECK-01 sub-spec 06), which belongs to the focused terminal and ends when focus moves to another terminal or panel; (4) sidebar focus; (5) resize repeat (DECK-03); (6) the terminal. Inside prompts and the picker filter the prefix key is ordinary text. Mouse-wheel scrolling never enters the keyboard scroll mode. Pasted text goes into an open prompt or filter as text; focus events never reach overlays.
+- **Modal key tables** (sidebar focus, picker, prompts, scroll mode) are fixed in v1: not configurable under `[keys]` and not in `default.toml`.
 
 ## Sub-specs
 
 | Sub-spec                        | Type       | Crate                   | Summary                                                                 | Depends     | Status |
 | ------------------------------- | ---------- | ----------------------- | ----------------------------------------------------------------------- | ----------- | ------ |
-| [01](01-model-actions.md)       | foundation | deck-core, deck-daemon, deck (tests) | Actions for projects, panels and sessions; lifecycle; frames follow the active panel | DECK-01 | draft |
-| [02](02-sidebar.md)             | shippable  | deck-tui, deck-core     | Sidebar, panel and project bindings, prompts, confirmations, help        | 01          | draft  |
-| [03](03-session-picker.md)      | shippable  | deck-tui, deck          | Session picker, session CLI (`new`, `kill-session`, `rename-session`)    | 01          | draft  |
+| [01](01-model-actions.md)       | foundation | deck-core, deck-daemon, deck (tests) | Actions for projects, panels and sessions; lifecycle; frames follow the active panel | DECK-01 | todo |
+| [02](02-sidebar.md)             | shippable  | deck-tui, deck-core     | Sidebar, panel and project bindings, prompts, confirmations, help        | 01          | todo   |
+| [03](03-session-picker.md)      | shippable  | deck-tui, deck          | Session picker, session CLI (`new`, `kill-session`, `rename-session`)    | 01          | todo   |
 
 02 and 03 both change `deck-tui`, so they run one after the other.
 
@@ -50,6 +51,6 @@ Turn the single-terminal client into the product's shape: a session holds projec
 - `docs/features/sidebar.md` (new): projects, panels, the sidebar and its keys.
 - `docs/features/keys.md`: the new bindings.
 - `docs/architecture.md#model`: confirm the lifecycle text matches (it already does, including the control API's `keep` exception from DECK-05, which this spec does not implement).
-- DECK-01 criteria superseded by the lifecycle change, updated by sub-spec 01's worker in the same change: the daemon test where `exit` in the last terminal ends the session and stops the daemon ([03-daemon](../2026-11-22-core-daemon-terminal/03-daemon.md), requirement on exit), and the attach criterion where `exit` prints `[session main ended]` ([04-attach-client](../2026-11-22-core-daemon-terminal/04-attach-client.md)). Their spec text is updated too, with a note pointing here.
+- DECK-01 criteria superseded by the lifecycle change, updated by sub-spec 01's worker in the same change: the daemon test where `exit` in the last terminal ends the session and stops the daemon ([03-daemon](../2026-11-22-core-daemon-terminal/03-daemon.md), requirement on exit), and the attach criterion where `exit` prints `[session main ended]` ([05-attach-client](../2026-11-22-core-daemon-terminal/05-attach-client.md)). Their spec text is updated too, with a note pointing here.
 
 Reviewed by spec-reviewer on 22 Nov 2026.

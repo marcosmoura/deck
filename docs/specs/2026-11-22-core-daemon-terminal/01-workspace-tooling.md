@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: draft
+status: todo
 ---
 
 # 01 — Workspace and tooling
@@ -21,7 +21,7 @@ The repository's build and check tooling, and empty skeletons of the four crates
    - `lint`: `cargo clippy --workspace --all-targets --locked -- -D warnings`.
    - `test`: `cargo nextest run --workspace --locked`.
    - `test-crate crate filter=""`: `cargo nextest run -p {{crate}} {{filter}}`.
-   - `run *args`: builds, then runs `target/debug/deck {{args}}` with `DECK_HOME` set to `${TMPDIR:-/tmp}/deck-dev-<8 hex characters of a hash of the checkout's absolute path>` (created if missing), so the socket path stays under the 100-byte limit even inside `.worktrees/<slug>` and each checkout gets its own daemon.
+   - `run *args`: builds, then runs `target/debug/deck {{args}}` with `DECK_HOME` set to `${TMPDIR:-/tmp}/deck-dev-<the first 8 hex characters of just's built-in sha256() of the checkout's absolute path>` (no external hash tool, which differs between macOS and Linux) (created if missing), so the socket path stays under the 100-byte limit even inside `.worktrees/<slug>` and each checkout gets its own daemon.
 6. **Lefthook** (`lefthook.yml`): `pre-commit` runs `cargo fmt --all --check` when staged files include `*.rs`; `commit-msg` checks the first line against the Conventional Commits rule of [AGENTS.md](../../../AGENTS.md#commits) with a shell `grep -E` (types and scopes listed, header at most 100 characters) and prints the rule on failure.
 7. **Ignore** `target/` and `.worktrees/` (already in `.gitignore`).
 

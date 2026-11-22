@@ -1,7 +1,7 @@
 ---
 name: worker
 description: 'Implements one deck sub-spec or a defined task in the given checkout, with tests, then fixes its review findings. Does not commit.'
-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Write, Edit, Grep, Glob, Bash, mcp__context7__resolve-library-id, mcp__context7__query-docs
 model: sonnet
 effort: medium
 maxTurns: 200

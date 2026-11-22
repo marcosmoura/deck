@@ -21,9 +21,10 @@ Start at [docs/index.md](docs/index.md), then read only the docs your task needs
 
 ## Commands
 
-The tooling lands with [DECK-01 sub-spec 01](docs/specs/2026-11-22-core-daemon-terminal/01-workspace-tooling.md).
-Until it is `done`, the repository has no code and these commands do not exist
-yet. Run them from the repository root.
+The tooling comes with [DECK-01 sub-spec 01](docs/specs/2026-11-22-core-daemon-terminal/01-workspace-tooling.md):
+these commands exist in the DECK-01 worktree once that sub-spec is committed
+there, and on `main` once DECK-01 is merged. Until then, use the plain Cargo
+equivalents in [docs/workflow.md](docs/workflow.md#checks). Run them from the repository root.
 
 | Command                       | What it does                                                    |
 | ----------------------------- | --------------------------------------------------------------- |
@@ -53,7 +54,7 @@ fine while iterating.
 ## Commits
 
 [Conventional Commits](https://www.conventionalcommits.org/), checked by the
-Lefthook `commit-msg` hook once DECK-01 sub-spec 01 lands.
+Lefthook `commit-msg` hook once DECK-01 is merged.
 
 ```text
 <type>(<scope>): <subject>
@@ -74,15 +75,18 @@ The session the user talks to is the **lead** and runs the repo flow itself;
 there is no orchestrator agent. Read [docs/workflow.md](docs/workflow.md) before
 you start it. In short:
 
-- A question or a fix of a line or two: just do it. For anything else, think it
-  through, size it (a **simple task** fits one focused session of under about
-  500k tokens; anything bigger needs a **spec**) and ask the user whether to run
-  it through the repo flow.
+- A question or a fix of a line or two: just do it. A request for a backlog
+  task ("the next task", `DECK-NN`) is already a yes to the repo flow. For
+  anything else, think it through, size it (a **simple task** fits one focused
+  session of under about 500k tokens; anything bigger needs a **spec**) and ask
+  the user whether to run it through the repo flow.
 - Spec: write it (split into shippable or foundation sub-specs when big), run
-  `spec-reviewer`, show the user a summary, change it until they approve, commit
-  it, then ask whether to start the work.
+  `spec-reviewer`, commit the draft, show the user a summary, change it until
+  they approve, commit it, then ask whether to start the work.
 - Work: inline when it fits one session, otherwise one `worker` per sub-spec,
-  in parallel where sub-specs do not depend on each other.
+  one sub-spec at a time, in the spec's worktree. Parallel work happens across
+  backlog tasks in separate sessions.
+- While a subagent runs, end the turn and wait to be woken; never poll.
 - After work that went through the repo flow, always run `reviewer`. The lead
   fixes inline work; delegated work goes back to the same worker, which keeps
   its context.
@@ -95,7 +99,8 @@ you start it. In short:
 - Ask approval of a spec before implementing it. Commit an approved spec on
   `main` right after the approval, before any other step.
 - Never merge a branch while a sub-spec of its spec is not `done`.
-- When merging, squash the commits.
+- When merging, squash the commits, following
+  [docs/workflow.md](docs/workflow.md#finish).
 - Update the docs that describe a behavior in the same change as the behavior
   (`docs/features/`, `docs/architecture.md`).
 - Do not add a crate, tool, lint rule or test runner the approved task did not
@@ -104,12 +109,14 @@ you start it. In short:
 - A command written in a doc, spec or prompt must exist in the `justfile`, in
   `deck` itself, or be a plain `cargo`/`git` command. Never invent one. A spec
   may define a new `deck` command or `just` recipe; it exists once that spec
-  lands.
+  is merged into `main`.
 - No `unsafe` outside the small platform modules named in
   [docs/architecture.md](docs/architecture.md); each `unsafe` block has a
   `// SAFETY:` comment.
-- The user's yes to the repo flow, or approval of a spec, authorizes the
-  commits [docs/workflow.md](docs/workflow.md) names (spec, start, one per
-  sub-spec or task), and no others.
+- The user's yes to the repo flow, the approval of a spec, or a request for a
+  backlog task authorizes the commits listed in
+  [docs/workflow.md](docs/workflow.md#commits-the-flow-may-make) for that task,
+  and no others.
+- The backlog is read and edited only on `main`, in the main checkout.
 - Never set git identity. Never push, merge or delete a branch without the
   user's go-ahead in the current session. Never bypass hooks.

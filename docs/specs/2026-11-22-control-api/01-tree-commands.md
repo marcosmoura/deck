@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: draft
+status: todo
 ---
 
 # 01 — Tree commands
@@ -25,17 +25,18 @@ From any shell, the user or an agent lists deck's tree and creates, focuses, ren
 
    A `LaunchSpec` with `program: None` is a shell; its `cwd` defaults as in requirement 3. Responses: `Created { id }`, `Tree(Vec<SessionView>)`, `Ok`, or `Error(String)`. `Request` and `Action` are separate enums that share some variant names; both call the same daemon functions.
 1a. **Changes to the DECK-02/03 action functions** (in `deck-daemon`, not to their protocol variants): the functions behind `NewProject`, `NewPanel` and `NewTerminal` gain `launch: Option<LaunchSpec>`, `focus: bool` and (for terminals) `keep: bool`. The attach client's actions call them with `launch: None` (a shell in the default cwd), `focus: true`, `keep: false`, so their behavior and the DECK-02/03 tests stay as they are. `focus: false` leaves the session's active project, panel and focused terminal unchanged.
-1b. **`SessionView` gains** (protocol version bump): per terminal `pid: Option<u32>`, `exited: Option<i32>`, `keep: bool` and `cwd: PathBuf` (the launch cwd until DECK-04 tracks the live one); per session `attached_clients: u32` (the same count as `SessionSummary`). `ls --json`'s `attached` is `attached_clients > 0`.
+1b. **`SessionView` gains** (protocol version bump): per terminal `pid: Option<u32>`, `exited: Option<i32>` and `keep: bool` (the terminal `cwd` is already there from DECK-04); per session `attached_clients: u32` (the same count as `SessionSummary`). `ls --json`'s `attached` is `attached_clients > 0`.
 2. **Target resolution** in `deck`, following the overview's decisions, with these errors: `no deck daemon running`, `no session` (outside deck, none exists), `no session named "<s>"`, `no terminal <id>`, `no panel <id>`, `<id> is not a terminal or panel` (for `focus`), `<id> is not a terminal, panel or project` (for `close`), `no project named "<name>" in session "<s>"`, and for stale environment ids `this terminal (<id>) no longer exists` / `this panel (<id>) no longer exists`.
 3. **Commands** (all accept `--json` and `--session <name>`):
    - `deck ls`: without flags, DECK-02's session list (with its project column), unchanged. `deck ls --json`: `{"sessions":[{"id","name","attached","projects":[{"id","name","root","collapsed","panels":[{"id","name","name_source","active","terminals":[{"id","index","title","program","cwd","pid","focused","exited":null|code}]}]}]}]}`, built from the `SessionView`s. `deck ls --tree` prints the same tree as indented text.
    - `deck new-project <name> [--dir <path>] [--focus]`: `--dir` defaults to the current dir.
    - `deck new-panel [--project <id|name>] [--name <n>] [--cwd <dir>] [--focus] [-- <program> <args>...]`: `--cwd` defaults to the project root.
-   - `deck new-terminal [--panel <id>] [--cwd <dir>] [--env K=V]... [--keep] [--focus] [-- <program> <args>...]`: without `--panel`, the current panel; without `--cwd`, the cwd of that panel's focused terminal (DECK-04), else the project root.
+   - `deck new-terminal [--panel <id>] [--cwd <dir>] [--env K=V]... [--keep] [--focus] [-- <program> <args>...]`: without `--panel`, the current panel; without `--cwd`, the cwd of that panel's focused terminal, else the project root.
    - These three print the new id (`12`, or `{"id": 12}` with `--json`).
    - `deck focus <id>`: focuses a terminal (and its panel and project) or a panel. `deck close <id>`: closes a terminal, a panel or a project, without confirmation. Both print nothing (`{"ok": true}` with `--json`).
    - `deck rename-panel [--panel <id>] <name>`: sets the name with `name_source = Manual`.
-4. **`--keep`**: the terminal stays after exit with `exited: Some(code)`; a death by signal `n` is reported as `128 + n`. Its title becomes `<title> · exited <code>` and its border and title are drawn muted. `Input` to it is dropped by the daemon. `^Space x` on an exited terminal closes it without the DECK-03 confirmation; on a running terminal the confirmation stays. It is not restored by DECK-04. A panel whose terminals have all exited (and are kept) stays until they are closed.
+4. **`--keep`**: the terminal stays after exit with `exited: Some(code)`; a death by signal `n` is reported as `128 + n`. The code comes from `deck-daemon::platform::wait_status(pid)`, a `waitpid` on the child pid that the daemon reaps itself (portable-pty's `ExitStatus` reports a signal death as code 1 with a platform-specific text), on macOS and Linux alike. Its title becomes `<title> · exited <code>` and its border and title are drawn muted. `Input` to it is dropped by the daemon. `^Space x` on an exited terminal closes it without the DECK-03 confirmation; on a running terminal the confirmation stays. A panel whose terminals have all exited (and are kept) stays until they are closed.
+4a. **Persistence of `keep`**: `TerminalState` (DECK-04) gains `keep: bool` with `#[serde(default)]`. On restore, a kept terminal that had exited is dropped (its panel follows the lifecycle rules, without a notice); a kept terminal that was still running is relaunched like any explicit program, with `keep` set.
 5. **Commands with a program** get the same environment as shells (the session's client environment, `TERM`, `COLORTERM`), plus `--env` values, then the `DECK_*` variables, set last so `--env` cannot override them. They run directly (no shell). `--` separates deck's options from the program's.
 6. **No daemon start**: every command in this sub-spec fails with `no deck daemon running` (exit 1) when none is running and never starts one, except `deck ls`: plain, it keeps DECK-01's `no sessions` and exit 0; with `--json` it prints `{"sessions": []}` and exits 0. Usage errors from the argument parser exit 2.
 7. **Socket**: `DECK_SOCKET`, when set, is used instead of the socket path from `DECK_HOME` or the XDG paths.
@@ -66,10 +67,11 @@ An exited kept terminal (terminal 2), next to a running one; the exited border a
 - [ ] `--session other` from inside a terminal of `main` targets `other`'s active panel, not the caller's panel.
 - [ ] Outside deck with no daemon, `deck new-terminal` prints `no deck daemon running` and exits 1 without starting one; with a daemon but no session it prints `no session`.
 - [ ] The DECK-03 room check applies to `new-terminal`, with its error text.
+- [ ] A kept terminal that exited and a kept terminal still running (`sleep 300`): after `deck kill-server` and `deck`, the exited one is gone and the running one is back with `"keep": true` in `ls --json`; `state.json` has `keep` on both before the restart.
 
 ## Tests
 
-- `deck-core`: request round trips; target parsing; signal-to-code mapping.
-- `crates/deck-daemon/tests/`: each request through the shared action functions, including `keep`, exit codes, `env` precedence and `focus: false`.
+- `deck-core`: request round trips; target parsing; `TerminalState.keep` default for old files.
+- `crates/deck-daemon/tests/`: each request through the shared action functions, including `keep`, exit codes from `wait_status` (normal exit and `SIGTERM` → 143, on the OS the test runs on), `env` precedence, `focus: false`, and `keep` on save and restore.
 - `deck-tui`: `TestBackend` drawing of an exited terminal's title and border.
 - `crates/deck/tests/control.rs`: one scenario per acceptance criterion, calling `deck` from inside a harness terminal and from outside.
