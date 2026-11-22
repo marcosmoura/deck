@@ -20,10 +20,10 @@ The sidebar shows what every coding agent (Claude Code, Codex, OpenCode) is doin
 
 ## Non-goals
 
-- Launch presets or a menu to start agents (not requested). Agents are started by typing their command or through the control API.
+- Launch presets. A menu to start agents is [DECK-10](../2026-11-22-sidebar-mouse/00-overview.md)'s (its `[agents.<kind>] command` key); here agents are started by typing their command or through the control API.
 - A git worktree per agent.
 - Reading or showing the agents' conversations, costs or token counts.
-- Panel auto-naming: that is [DECK-07](../../backlog.md#deck-07), which uses the title and first prompt this spec records.
+- Panel auto-naming: that is [DECK-09](../2026-11-22-sidebar-titles/00-overview.md) (which took over the withdrawn DECK-07), using the title and first prompt this spec records.
 
 ## Decisions
 
@@ -58,3 +58,7 @@ The sidebar shows what every coding agent (Claude Code, Codex, OpenCode) is doin
 - `README.md`: `deck hooks install`.
 
 Reviewed by spec-reviewer on 22 Nov 2026.
+
+## Notes
+
+- Updated on 22 Nov 2026 before work started: a single terminal has no border since DECK-02, so "the terminal title" means its border title in a grid and the status-bar title (`project › panel · <title>`) for a single terminal; DECK-10 owns the agent launch menu; DECK-09 replaced DECK-07.
