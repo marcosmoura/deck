@@ -25,7 +25,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-01 | Core daemon and terminal               | done        | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
 | DECK-02 | Sessions, projects, panels and sidebar | done        | DECK-01          | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
 | DECK-03 | Grid layout                            | in-progress | DECK-02, DECK-08 | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
-| DECK-04 | Persistence across daemon restarts     | ready       | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
+| DECK-04 | Persistence across daemon restarts     | in-progress | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
 | DECK-05 | Control API                            | ready       | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
 | DECK-06 | Agent status, hooks and resume         | ready       | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
 | DECK-08 | Config and theming                     | done        | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
