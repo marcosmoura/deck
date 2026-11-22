@@ -7,6 +7,10 @@ use std::fs;
 use deck_core::config::{Config, DEFAULT_CONFIG_TOML};
 use support::{Harness, Home, TIMEOUT, stderr, stdout};
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "a config write failure fails the integration test"
+)]
 fn write_config(home: &Home, text: &str) -> std::path::PathBuf {
     let path = home.path().join("config.toml");
     fs::write(&path, text).unwrap();

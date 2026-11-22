@@ -253,7 +253,7 @@ impl Session {
             None if delta < 0 => len - 1,
             None => 0,
         };
-        let panel = order[usize::try_from(target).unwrap_or(0)];
+        let panel = *order.get(usize::try_from(target).ok()?)?;
         self.focus_panel(panel);
         Some(panel)
     }
@@ -296,10 +296,14 @@ impl Session {
 impl Project {
     /// The lowest number, from 1, that no panel of the project is named.
     pub fn next_panel_name(&self) -> String {
-        (1u64..)
-            .map(|n| n.to_string())
-            .find(|n| self.panels.iter().all(|p| p.name != *n))
-            .expect("an unbounded range has a free number")
+        let mut n = 1u64;
+        loop {
+            let name = n.to_string();
+            if self.panels.iter().all(|p| p.name != name) {
+                return name;
+            }
+            n += 1;
+        }
     }
 }
 

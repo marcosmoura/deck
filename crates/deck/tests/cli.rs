@@ -157,6 +157,11 @@ fn an_unsafe_runtime_dir_is_refused() {
 
 /// Attaches to the running daemon and kills its session, then reads until the daemon says
 /// goodbye: the last session has ended and the daemon is shutting down.
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "this integration-test helper requires a successful protocol exchange"
+)]
 fn end_the_last_session(home: &Home) {
     let mut stream = UnixStream::connect(home.socket()).unwrap();
     stream.set_read_timeout(Some(TIMEOUT)).unwrap();

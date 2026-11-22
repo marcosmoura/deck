@@ -1,5 +1,10 @@
 //! Projects, panels and sessions: actions, requests, lifecycle, focus and frame streaming.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration-test helpers fail the test on error"
+)]
+
 mod support;
 
 use std::path::PathBuf;

@@ -65,16 +65,18 @@ impl ThemeColor {
         if text == "default" {
             return Ok(Self::Default);
         }
-        if let Some(i) = ANSI_NAMES.iter().position(|n| *n == text) {
-            return Ok(Self::Indexed(u8::try_from(i).expect("16 names")));
+        if let Some((index, _)) = (0u8..).zip(ANSI_NAMES).find(|&(_, name)| name == text) {
+            return Ok(Self::Indexed(index));
         }
         if let Some(hex) = text.strip_prefix('#') {
-            let digits = hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit());
-            if !digits {
-                return Err(format!("`{text}` is not a colour of the form #rrggbb"));
+            if hex.len() == 6
+                && hex.bytes().all(|b| b.is_ascii_hexdigit())
+                && let Ok(value) = u32::from_str_radix(hex, 16)
+            {
+                let [_, r, g, b] = value.to_be_bytes();
+                return Ok(Self::Rgb(r, g, b));
             }
-            let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex digits");
-            return Ok(Self::Rgb(byte(0), byte(2), byte(4)));
+            return Err(format!("`{text}` is not a colour of the form #rrggbb"));
         }
         if let Some(role) = ROLES.iter().find(|r| **r == text) {
             return Ok(Self::Role(role));
@@ -185,32 +187,32 @@ const DEFAULTS: [ThemeColor; 15] = [
     ThemeColor::Default,
 ];
 
-fn role_index(name: &str) -> usize {
-    ROLES.iter().position(|r| *r == name).expect("a known role")
-}
-
 /// Follows role references until a colour; a loop is an error naming the keys in it.
 fn resolve(raw: &[ThemeColor; 15]) -> Result<[Color; 15], ThemeError> {
     let mut out = [Color::Default; 15];
-    for (start, slot) in out.iter_mut().enumerate() {
+    let roles = ROLES.iter().copied().zip(raw.iter().copied());
+    for ((start, mut current), slot) in roles.clone().zip(&mut out) {
         let mut chain = vec![start];
-        let mut current = start;
         *slot = loop {
-            match raw[current] {
+            match current {
                 ThemeColor::Default => break Color::Default,
                 ThemeColor::Indexed(n) => break Color::Indexed(n),
                 ThemeColor::Rgb(r, g, b) => break Color::Rgb(r, g, b),
                 ThemeColor::Role(name) => {
-                    let next = role_index(name);
-                    if chain.contains(&next) {
-                        let path: Vec<&str> =
-                            chain.iter().chain([&next]).map(|i| ROLES[*i]).collect();
+                    if chain.contains(&name) {
+                        chain.push(name);
                         return Err(bad(
-                            format!("theme.{}", ROLES[next]),
-                            format!("colour roles refer to each other: {}", path.join(" -> ")),
+                            format!("theme.{name}"),
+                            format!("colour roles refer to each other: {}", chain.join(" -> ")),
                         ));
                     }
-                    chain.push(next);
+                    let Some((_, next)) = roles.clone().find(|&(role, _)| role == name) else {
+                        return Err(bad(
+                            format!("theme.{start}"),
+                            format!("unknown role `{name}`"),
+                        ));
+                    };
+                    chain.push(name);
                     current = next;
                 }
             }
@@ -266,8 +268,12 @@ impl Theme {
         let mut glyphs = Glyphs::default();
         for (key, value) in table {
             let path = format!("theme.{key}");
-            if let Some(i) = ROLES.iter().position(|r| r == key) {
-                raw[i] = ThemeColor::from_value(value).map_err(|m| bad(&path, m))?;
+            if let Some((_, slot)) = ROLES
+                .into_iter()
+                .zip(&mut raw)
+                .find(|(role, _)| role == key)
+            {
+                *slot = ThemeColor::from_value(value).map_err(|m| bad(&path, m))?;
                 continue;
             }
             match key.as_str() {
@@ -316,6 +322,10 @@ impl Theme {
 }
 
 impl Default for Theme {
+    #[expect(
+        clippy::expect_used,
+        reason = "the built-in roles are verified by the default theme tests"
+    )]
     fn default() -> Self {
         let colors = resolve(&DEFAULTS).expect("the default roles do not loop");
         Self::from_parts(colors, BorderStyle::Rounded, Glyphs::default())

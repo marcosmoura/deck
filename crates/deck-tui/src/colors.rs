@@ -182,8 +182,8 @@ pub struct Answers {
 pub fn parse_answers(bytes: &[u8]) -> Answers {
     let mut out = Answers::default();
     let mut i = 0;
-    while i < bytes.len() {
-        match reply_at(&bytes[i..]) {
+    while let Some(remaining @ [byte, ..]) = bytes.get(i..) {
+        match reply_at(remaining) {
             Some((Reply::Color(10, c), len)) => {
                 out.fg = out.fg.or(c);
                 i += len;
@@ -197,15 +197,16 @@ pub fn parse_answers(bytes: &[u8]) -> Answers {
                 i += len;
             }
             None => {
-                out.rest.push(bytes[i]);
+                out.rest.push(*byte);
                 i += 1;
             }
         }
     }
     // A reply cut short at the end (it will never finish) must not reach the shell.
-    if let Some(esc) = out.rest.iter().rposition(|b| *b == 0x1b) {
-        let tail = &out.rest[esc + 1..];
-        let reply_like = tail.is_empty() || tail[0] == b']' || tail.starts_with(b"[?");
+    if let Some(esc) = out.rest.iter().rposition(|b| *b == 0x1b)
+        && let Some(tail) = out.rest.get(esc + 1..)
+    {
+        let reply_like = tail.is_empty() || tail.starts_with(b"]") || tail.starts_with(b"[?");
         if reply_like
             && tail
                 .iter()
@@ -225,26 +226,24 @@ enum Reply {
 /// A reply at the start of `bytes` and its length.
 fn reply_at(bytes: &[u8]) -> Option<(Reply, usize)> {
     if let Some(body) = bytes.strip_prefix(b"\x1b[?") {
-        let end = body
+        let (end, byte) = body
             .iter()
-            .position(|b| !(b.is_ascii_digit() || *b == b';'))?;
-        return (body[end] == b'c').then_some((Reply::Da1, 3 + end + 1));
+            .enumerate()
+            .find(|&(_, &b)| !(b.is_ascii_digit() || b == b';'))?;
+        return (*byte == b'c').then_some((Reply::Da1, 3 + end + 1));
     }
     let body = bytes.strip_prefix(b"\x1b]")?;
-    let slot = if body.starts_with(b"10;") {
-        10
-    } else if body.starts_with(b"11;") {
-        11
+    let (slot, payload) = if let Some(payload) = body.strip_prefix(b"10;") {
+        (10, payload)
     } else {
-        return None;
+        (11, body.strip_prefix(b"11;")?)
     };
-    let payload = &body[3..];
     let (end, term_len) = payload.iter().enumerate().find_map(|(i, &b)| match b {
         0x07 => Some((i, 1)),
         0x1b if payload.get(i + 1) == Some(&b'\\') => Some((i, 2)),
         _ => None,
     })?;
-    let color = std::str::from_utf8(&payload[..end])
+    let color = std::str::from_utf8(payload.get(..end)?)
         .ok()
         .and_then(parse_color);
     Some((Reply::Color(slot, color), 2 + 3 + end + term_len))

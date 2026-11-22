@@ -306,7 +306,9 @@ pub fn encode(key: &KeyEvent, modes: Modes) -> Vec<u8> {
         KeyCode::PageUp => tilde(5),
         KeyCode::PageDown => tilde(6),
         KeyCode::F(n @ 1..=4) => letter(b'O' + n, true),
-        KeyCode::F(n @ 5..=12) => tilde([15, 17, 18, 19, 20, 21, 23, 24][usize::from(n) - 5]),
+        KeyCode::F(n @ 5..=12) => [15, 17, 18, 19, 20, 21, 23, 24]
+            .get(usize::from(n) - 5)
+            .map_or_else(Vec::new, |&code| tilde(code)),
         KeyCode::F(_) => Vec::new(),
     }
 }

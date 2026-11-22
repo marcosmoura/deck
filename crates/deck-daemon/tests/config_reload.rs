@@ -20,6 +20,7 @@ async fn watching(extra: &str) -> TestDaemon {
     TestDaemon::start_watching(Some(&text(extra)), POLL).await
 }
 
+#[expect(clippy::panic, reason = "a missing Welcome fails the integration test")]
 fn welcome_config(client: &Client) -> &Config {
     let Some(ServerMsg::Welcome { config, .. }) = client.log.first() else {
         panic!("Welcome first: {:?}", client.log.first())

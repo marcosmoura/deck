@@ -6,15 +6,17 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 pub fn encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        let [first, second, third] = std::array::from_fn(|i| chunk.get(i).copied().unwrap_or(0));
+        let n = (u32::from(first) << 16) | (u32::from(second) << 8) | u32::from(third);
         for i in 0..4 {
             if i <= chunk.len() {
-                out.push(char::from(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize]));
+                let index = ((n >> (18 - 6 * i)) & 63) as usize;
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "the mask bounds the index to 0..64"
+                )]
+                let symbol = ALPHABET[index];
+                out.push(char::from(symbol));
             } else {
                 out.push('=');
             }

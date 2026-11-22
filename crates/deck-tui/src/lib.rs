@@ -214,6 +214,7 @@ async fn run_async(mut options: Options) -> Exit {
                         }
                         shape = wanted;
                     }
+                    #[expect(clippy::panic, reason = "the attach test verifies terminal restoration after a panic")]
                     if panic_after_first_draw && !drawn_once {
                         panic!("DECK_TEST_PANIC");
                     }
@@ -319,7 +320,12 @@ impl Link {
             loop {
                 match read_half.read(&mut buf).await {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => reader.push(&buf[..n]),
+                    Ok(n) => {
+                        let Some(bytes) = buf.get(..n) else {
+                            break;
+                        };
+                        reader.push(bytes);
+                    }
                 }
                 loop {
                     match reader.next_message::<ServerMsg>() {

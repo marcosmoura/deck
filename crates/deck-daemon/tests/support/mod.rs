@@ -1,6 +1,13 @@
 //! Test support: an in-process daemon on a temp `DECK_HOME` and a small protocol client.
 
 #![allow(dead_code)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    reason = "shared integration-test helpers fail the test on unexpected I/O or protocol state"
+)]
 
 pub mod sys;
 

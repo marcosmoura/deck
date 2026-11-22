@@ -179,10 +179,14 @@ impl State {
         if !taken(base) {
             return base.to_string();
         }
-        (2..)
-            .map(|i| format!("{base}-{i}"))
-            .find(|n| !taken(n))
-            .expect("an unbounded range has a free name")
+        let mut i = 2u64;
+        loop {
+            let name = format!("{base}-{i}");
+            if !taken(&name) {
+                return name;
+            }
+            i += 1;
+        }
     }
 
     fn clients_of(&self, sid: SessionId) -> impl Iterator<Item = (&ClientId, &Client)> {

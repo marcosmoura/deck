@@ -1,5 +1,10 @@
 //! The hidden `deck daemon` command, run as a real process.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration-test helpers fail the test on error"
+)]
+
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

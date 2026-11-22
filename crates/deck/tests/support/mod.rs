@@ -2,6 +2,11 @@
 //! alacritty_terminal emulator, on a temp `DECK_HOME` that is cleaned up on drop.
 
 #![allow(dead_code)]
+#![allow(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "shared integration-test helpers require a working PTY and screen"
+)]
 
 pub mod sys;
 

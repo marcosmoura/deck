@@ -291,14 +291,11 @@ impl Emu {
             let style = style_of(cell);
             let run = match runs.last_mut() {
                 Some(run) if run.style == style => run,
-                _ => {
-                    runs.push(Run {
-                        col: u16::try_from(col).unwrap_or(u16::MAX),
-                        text: String::new(),
-                        style,
-                    });
-                    runs.last_mut().expect("just pushed")
-                }
+                _ => runs.push_mut(Run {
+                    col: u16::try_from(col).unwrap_or(u16::MAX),
+                    text: String::new(),
+                    style,
+                }),
             };
             run.text.push(if cell.c == '\0' { ' ' } else { cell.c });
             if let Some(extra) = cell.zerowidth() {
@@ -393,8 +390,10 @@ pub fn default_palette(index: usize) -> Rgb {
         (0, 255, 255),
         (255, 255, 255),
     ];
+    if let Some(&(r, g, b)) = ANSI.get(index) {
+        return Rgb { r, g, b };
+    }
     let (r, g, b) = match index {
-        0..=15 => ANSI[index],
         16..=231 => {
             let i = u8::try_from(index - 16).unwrap_or(0);
             let level = |v: u8| if v == 0 { 0 } else { 55 + 40 * v };

@@ -35,6 +35,7 @@ fn rows(h: &Harness) -> Vec<String> {
     h.screen_text().lines().map(str::to_string).collect()
 }
 
+#[expect(clippy::panic, reason = "a missing row fails the integration test")]
 fn row_of(h: &Harness, needle: &str) -> usize {
     rows(h)
         .iter()

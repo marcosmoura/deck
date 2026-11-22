@@ -153,6 +153,8 @@ Declared once in the root `[workspace.dependencies]` with these versions (the ne
 
 Tools, pinned in `.mise.toml`: Rust (stable channel at a pinned version, with rustfmt and Clippy), `just`, `cargo-nextest`, `lefthook`, `oxfmt` (the native binary from the aqua backend, no Node; formats the Markdown, TOML, JSON and YAML files rustfmt does not, with its default settings).
 
+The workspace denies Clippy's `unwrap_used`, `expect_used`, `panic` and `indexing_slicing` lints. The root `clippy.toml` allows these in tests. Integration-test helpers and closures that Clippy misses use scoped exceptions. Production exceptions document the invariant or test hook at the point of use. `just lint` checks every workspace target with warnings denied.
+
 ## Decisions
 
 | Date        | Decision                                                                                                                                                                                                                                    |

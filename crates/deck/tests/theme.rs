@@ -41,6 +41,7 @@ fn rows(h: &Harness) -> Vec<String> {
 }
 
 /// The first cell showing `ch`, as (row, col) in the sidebar-or-overlay text rows.
+#[expect(clippy::panic, reason = "a missing glyph fails the integration test")]
 fn find_char(h: &Harness, ch: char) -> (usize, usize) {
     rows(h)
         .iter()

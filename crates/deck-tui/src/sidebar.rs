@@ -159,7 +159,7 @@ impl App {
             .and_then(|s| rows.iter().position(|r| *r == s))
             .unwrap_or(0);
         let to = at.saturating_add_signed(delta).min(rows.len() - 1);
-        self.selection = Some(rows[to]);
+        self.selection = rows.get(to).copied();
     }
 
     fn set_collapsed(&mut self, project: ProjectId, collapsed: bool) -> Vec<Out> {

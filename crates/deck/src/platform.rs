@@ -97,6 +97,6 @@ pub fn read_stdin(timeout: Duration) -> Option<Vec<u8>> {
     let n = unsafe { libc::read(libc::STDIN_FILENO, buf.as_mut_ptr().cast(), buf.len()) };
     match usize::try_from(n) {
         Ok(0) | Err(_) => None,
-        Ok(n) => Some(buf[..n].to_vec()),
+        Ok(n) => buf.get(..n).map(<[u8]>::to_vec),
     }
 }

@@ -48,7 +48,10 @@ impl Reader {
             if n == 0 {
                 return Ok(None);
             }
-            self.frames.push(&self.buf[..n]);
+            let payload = self.buf.get(..n).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "read exceeds the buffer length")
+            })?;
+            self.frames.push(payload);
         }
     }
 }

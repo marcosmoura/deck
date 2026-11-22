@@ -176,6 +176,10 @@ pub struct Config {
 }
 
 impl Default for Config {
+    #[expect(
+        clippy::expect_used,
+        reason = "the built-in bindings and prefix are verified by the default config tests"
+    )]
     fn default() -> Self {
         let keys = DEFAULT_BINDINGS
             .iter()
@@ -401,12 +405,15 @@ fn resolve_conflicts(
     explicit.sort();
     explicit.dedup();
     for (i, first) in explicit.iter().enumerate() {
-        for second in &explicit[i + 1..] {
-            for spec in &config.keys[*first] {
-                if config.keys[*second]
-                    .iter()
-                    .any(|k| k.matches(&spec.to_event()))
-                {
+        let Some(first_specs) = config.keys.get(*first) else {
+            continue;
+        };
+        for second in explicit.iter().skip(i + 1) {
+            let Some(second_specs) = config.keys.get(*second) else {
+                continue;
+            };
+            for spec in first_specs {
+                if second_specs.iter().any(|k| k.matches(&spec.to_event())) {
                     errors.push(bad(
                         &format!("keys.{second}"),
                         format!("key \"{spec}\" is bound to both {first} and {second}"),
@@ -416,13 +423,13 @@ fn resolve_conflicts(
         }
     }
     for winner in &explicit {
-        let specs = config.keys[*winner].clone();
-        let names: Vec<String> = config.keys.keys().cloned().collect();
-        for other in names {
-            if other == **winner || explicit.contains(&&other) {
+        let Some(specs) = config.keys.get(*winner).cloned() else {
+            continue;
+        };
+        for (other, list) in &mut config.keys {
+            if explicit.contains(&other) {
                 continue;
             }
-            let list = config.keys.get_mut(&other).expect("listed above");
             for spec in &specs {
                 let before = list.len();
                 list.retain(|k| !k.matches(&spec.to_event()));

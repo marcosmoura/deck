@@ -213,7 +213,10 @@ impl Conn {
             }
             match self.stream.read(&mut buf) {
                 Ok(0) => return Ok(None),
-                Ok(n) => self.reader.push(&buf[..n]),
+                Ok(n) => {
+                    let bytes = buf.get(..n).context("read exceeds the buffer length")?;
+                    self.reader.push(bytes);
+                }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e)
                     if matches!(

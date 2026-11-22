@@ -8,6 +8,10 @@ use deck_core::model::TerminalId;
 use deck_core::protocol::{ClientMsg, Frame, Modes, ScrollTo};
 use support::{Attach, Client, TestDaemon};
 
+#[expect(
+    clippy::expect_used,
+    reason = "a missing frame fails the integration test"
+)]
 fn last_frame(c: &Client) -> Frame {
     c.frames().last().expect("a frame").clone()
 }

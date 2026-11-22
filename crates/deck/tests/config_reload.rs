@@ -40,6 +40,10 @@ fn config_path(h: &Harness) -> std::path::PathBuf {
 }
 
 /// Replaces the file with the harness's base keys and `extra` lines.
+#[expect(
+    clippy::unwrap_used,
+    reason = "a config write failure fails the integration test"
+)]
 fn write(h: &Harness, extra: &str) {
     fs::write(config_path(h), contents(extra)).unwrap();
 }
@@ -63,6 +67,7 @@ fn accent(h: &Harness) -> Color {
     h.cell(3, 0).fg
 }
 
+#[expect(clippy::panic, reason = "missing text fails the integration test")]
 fn find(h: &Harness, text: &str) -> (usize, usize) {
     h.screen_text()
         .lines()

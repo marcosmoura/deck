@@ -346,10 +346,10 @@ impl FrameReader {
         if len > MAX_FRAME_LEN {
             return Err(ProtocolError::FrameTooLarge { len });
         }
-        if self.buf.len() < 4 + len {
+        let Some(payload) = self.buf.get(4..4 + len) else {
             return Ok(None);
-        }
-        let payload = self.buf[4..4 + len].to_vec();
+        };
+        let payload = payload.to_vec();
         self.buf.drain(..4 + len);
         Ok(Some(payload))
     }

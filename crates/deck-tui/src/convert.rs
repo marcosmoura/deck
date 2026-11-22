@@ -62,19 +62,23 @@ pub fn nearest_256(r: u8, g: u8, b: u8) -> u8 {
     const LEVELS: [i32; 6] = [0, 95, 135, 175, 215, 255];
     let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
     let level = |v: i32| {
-        (0..LEVELS.len())
-            .min_by_key(|i| (LEVELS[*i] - v).abs())
-            .unwrap_or(0)
+        LEVELS
+            .into_iter()
+            .enumerate()
+            .min_by_key(|&(_, level)| (level - v).abs())
+            .unwrap_or((0, 0))
     };
-    let (ri, gi, bi) = (level(r), level(g), level(b));
+    let (r_index, r_level) = level(r);
+    let (g_index, g_level) = level(g);
+    let (b_index, b_level) = level(b);
     let dist = |(x, y, z): (i32, i32, i32)| (x - r).pow(2) + (y - g).pow(2) + (z - b).pow(2);
-    let cube = dist((LEVELS[ri], LEVELS[gi], LEVELS[bi]));
+    let cube = dist((r_level, g_level, b_level));
     let step = (((r + g + b) / 3 - 8 + 5) / 10).clamp(0, 23);
     let grey = 8 + 10 * step;
     if dist((grey, grey, grey)) < cube {
         u8::try_from(232 + step).unwrap_or(255)
     } else {
-        u8::try_from(16 + 36 * ri + 6 * gi + bi).unwrap_or(255)
+        u8::try_from(16 + 36 * r_index + 6 * g_index + b_index).unwrap_or(255)
     }
 }
 

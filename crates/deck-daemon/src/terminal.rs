@@ -370,8 +370,11 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        let Some(bytes) = buf.get(..n) else {
+                            break;
+                        };
                         h.last_data.store(nanos(s.clock.now()), Ordering::Release);
-                        s.output(&h, &buf[..n]);
+                        s.output(&h, bytes);
                         h.activity.notify_one();
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
