@@ -29,7 +29,7 @@ A panel holds several terminals, placed by the automatic grid: with an odd count
 - **Focus** moves by direction to the terminal whose rect overlaps the focused one's span and is nearest in that direction; ties go to the one nearest the top (left/right moves) or the left (up/down moves). No wrap-around, and no memory of the previous focus: from the big terminal of an odd layout, `Right` always goes to terminal 2.
 - **Custom sizes survive count changes** (user decision, 22 Nov 2026): adding or closing a terminal adapts the ratios instead of resetting them, by the rule in [architecture.md#layout](../../architecture.md#layout): a 60/40 split of two terminals stays 60/40 when a third is added (the big terminal keeps 60%), and untouched default sizes always adapt to the new defaults (5 terminals: the first still takes half). Stored sizes are never overwritten because a window is too small: deck draws a clamped copy for that window, and the exact sizes return when it grows (user decision, 22 Nov 2026). Only `prefix =` restores the defaults.
 - **Resize** moves one boundary in the direction of the key, in steps of 50 per-mille (at least one cell): the terminal's edge on that side when it has one (the terminal grows), else its opposite edge (the terminal shrinks). Resize keys repeat without the prefix for 1 s after a resize; `=` restores the default ratios.
-- **Borders**: every terminal has its own rounded border; the focused one uses the accent, the others are muted. Titles show the terminal's index in the panel (`1 · nvim`) when the panel has more than one terminal.
+- **Borders**: a panel with one terminal has no border: the terminal fills the panel area and its title is in the status bar (DECK-02). With two or more terminals, every terminal has its own border in the theme's `border_style` (DECK-08); the focused one uses the `border_focused` role and its title the `accent`, the others use `border` and `title`. Their titles show the terminal's index in the panel (`1 · nvim`); the status bar keeps the focused terminal's title.
 
 ## Sub-specs
 
@@ -47,3 +47,7 @@ A panel holds several terminals, placed by the automatic grid: with an odd count
 - `docs/architecture.md#layout`: anything this spec settles differently.
 
 Reviewed by spec-reviewer on 22 Nov 2026.
+
+## Notes
+
+- Updated on 22 Nov 2026 after DECK-02 and DECK-08 landed: a single terminal has no border (so `inner` depends on the count), borders use DECK-08's theme roles and `border_style`, the grid functions join the `deck-core::layout` module DECK-08 created (`panel_area`, `sidebar_cols`), and the model's existing `Panel.focused_terminal` is used instead of a new field.

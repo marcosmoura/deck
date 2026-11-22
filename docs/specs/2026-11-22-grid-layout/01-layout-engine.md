@@ -7,7 +7,7 @@ status: todo
 
 ## Scope
 
-The pure geometry of the grid in `deck-core::layout`, used by the daemon to size PTYs and by the client to draw, focus, resize and hit-test. Nothing on screen yet; sub-specs 02 and 03 use it. Owning crate: `deck-core`.
+The pure geometry of the grid in `deck-core::layout` (the module DECK-08 created with `panel_area`; these functions join it), used by the daemon to size PTYs and by the client to draw, focus, resize and hit-test. Nothing on screen yet; sub-specs 02 and 03 use it. Owning crate: `deck-core`.
 
 ## Requirements
 
@@ -21,9 +21,9 @@ The pure geometry of the grid in `deck-core::layout`, used by the daemon to size
    - Integer rules: products in `u32`, integer division; *normalized to 1000* means `x × 1000 / sum` per track with the remainder added to the last track. A share that ends at 0 is raised to 1, taken from the largest track; `main` is clamped to 1..=999. The result is always valid for `new_n`.
 3b. **`fit(area, n, &ratios, min_cols, min_rows) -> Ratios`**: the effective ratios for one viewport. The stored ratios when they fit; otherwise, per axis, each boundary moved by the fewest cells needed for every terminal on that axis to reach the minimum inner size, when the axis is long enough for all of them at the minimum; otherwise that axis's default shares. `fit` never changes the stored ratios: when the window grows back, the stored ratios apply again exactly.
 
-4. **`layout(area, n, &ratios) -> Vec<Rect>`**: one rect per terminal in order. All arithmetic is integer, in `u32` (never `f32`, never `u16` products, which overflow at 65535 × 1000). The main split gives terminal 1 the left `(width × main + 500) / 1000` columns at full height (rounding half up); the grid fills the rest left to right, then top to bottom. Grid boundaries are cumulative: boundary `k` of a track list sits at `len × (share_0 + … + share_(k−1)) / 1000` (integer division) from the start of the span, and the last track ends at `len`, so the rects tile the area exactly with no gaps or overlaps. With invalid ratios, `layout` uses the defaults. A rect may be 0 wide or high when the area is too small; callers clamp inner sizes to at least 1×1 ([architecture.md#layout](../../architecture.md#layout)).
-5. **`inner(rect) -> (cols, rows)`**: `(width − 2, height − 2)`, saturating, at least `(1, 1)`.
-6. **`fits(area, n, &ratios, min_cols, min_rows) -> bool`**: every inner size is at least the minimum.
+4. **`layout(area, n, &ratios) -> Vec<Rect>`**: one rect per terminal in order. All arithmetic is integer, in `u32` (never `f32`, never `u16` products, which overflow at 65535 × 1000). The main split gives terminal 1 the left `(width × main + 500) / 1000` columns at full height (rounding half up); the grid fills the rest left to right, then top to bottom. Grid boundaries are cumulative: boundary `k` of a track list sits at `len × (share_0 + … + share_(k−1)) / 1000` (integer division) from the start of the span, and the last track ends at `len`, so the rects tile the area exactly with no gaps or overlaps. With invalid ratios, `layout` uses the defaults. A rect may be 0 wide or high when the area is too small; `inner` clamps inner sizes to at least 1×1 ([architecture.md#layout](../../architecture.md#layout)).
+5. **`inner(rect, n) -> (cols, rows)`**: for `n = 1` the whole rect (a single terminal has no border, DECK-02): `(width, height)`; for `n ≥ 2` `(width − 2, height − 2)`, saturating. Always at least `(1, 1)`.
+6. **`fits(area, n, &ratios, min_cols, min_rows) -> bool`**: every inner size (`inner(rect, n)`) is at least the minimum.
 7. **`neighbor(rects, from, dir) -> Option<usize>`**: the rule in the overview's decisions (span overlap, nearest edge, tie to top or left, no wrap).
 8. **Boundaries**: `Boundary { Main, Col(usize), Row(usize) }`. `Col(i)` is between grid column `i` and `i + 1`, and `Row(i)` between grid row `i` and `i + 1`; in an odd layout they index the right-hand grid only, and the left edge of its first column is `Main`. `boundary_for(n, from, dir) -> Option<(Boundary, i32)>` returns the boundary a resize of terminal `from` in `dir` moves and the sign of the move, which is always the key's direction (`+1` for `Right`/`Down`, `-1` for `Left`/`Up`):
    - the terminal's edge on the `dir` side, when that edge is a boundary (the terminal grows);
@@ -48,6 +48,7 @@ The pure geometry of the grid in `deck-core::layout`, used by the daemon to size
 - [ ] `Ratios::adapt` keeps the defaults: `adapt(default_for(a), a, b) == default_for(b)` for every adjacent `a`, `b` in 1..=16.
 - [ ] `Ratios::adapt` examples, exact: 2 → 3 with cols `[600, 400]` gives `main = 600`, right cols `[1000]`, rows `[500, 500]`; 3 → 4 with `main = 600`, rows `[300, 700]` gives cols `[600, 400]`, rows `[300, 700]`; 4 → 5 with cols `[600, 400]`, rows `[500, 500]` gives `main = 571`, right cols `[442, 558]`, rows `[500, 500]` (full columns `[571, 189, 240]`), and that result adapted back 5 → 4 gives cols `[601, 399]`; 1 → 2 gives the defaults and 2 → 1 gives `[1000]`; for every adjacent pair in 1..=16 and sampled valid ratios (shares of 1 included), the result is valid for the new count.
 - [ ] `fit`: ratios that fit come back unchanged; in a 40×11 area, 4 terminals with cols `[900, 100]` give effective cols `[700, 300]` (the right column 12 cells, inner 10) and the stored ratios are untouched; an axis too short for every terminal at the minimum uses its default shares.
+- [ ] `inner` of a 100×23 rect is `(100, 23)` for `n = 1` and `(98, 21)` for `n = 2`; a 1×1 rect gives `(1, 1)` for both.
 - [ ] `Ratios::is_valid_for` rejects wrong lengths, zero shares and sums other than 1000; `layout` falls back to defaults for them.
 
 ## Tests
