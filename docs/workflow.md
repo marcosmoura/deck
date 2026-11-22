@@ -34,7 +34,7 @@ For any other request:
    - **Substantial**: anything else. It gets a spec.
 3. **Ask the user, once,** whether to run it through the repo flow. Give your sizing (simple task or spec) and put any open scope question in the same message, each with a recommended answer.
    - **No**: do the work as a normal session. No backlog row, no reviewer.
-   - **Yes, simple task**: add a `todo` row to [backlog.md](backlog.md) with a note (what, why, acceptance) and its "Depends on", and commit it on `main` at once: `docs(backlog): add DECK-NN`. If a dependency is not met, or the user only wanted it recorded, place it in the queue and stop. Otherwise go to [Work](#work).
+   - **Yes, simple task**: add a `todo` row to [backlog.md](backlog.md) with a note (what, why, acceptance) and its "Depends on", and commit it on `main` at once: `docs(spec): add DECK-NN`. If a dependency is not met, or the user only wanted it recorded, place it in the queue and stop. Otherwise go to [Work](#work).
    - **Yes, substantial**: go to [Spec](#spec).
 
 A new task's ID is the highest ID ever used, in the Tasks and Withdrawn tables, plus one.
@@ -96,7 +96,7 @@ The user's yes to the repo flow, the approval of a spec, or a request for a back
 
 | When                                        | Where             | Message                                  |
 | ------------------------------------------- | ----------------- | ---------------------------------------- |
-| A new simple task or `needs spec` row       | `main`            | `docs(backlog): add DECK-NN`             |
+| A new simple task or `needs spec` row       | `main`            | `docs(spec): add DECK-NN`             |
 | A spec drafted and reviewed                 | `main`            | `docs(spec): draft <slug>`               |
 | A spec approved                             | `main`            | `docs(spec): add <slug> spec`            |
 | A `ready` spec updated after earlier work changed what it relies on ([specs/README.md](specs/README.md)) | `main` | `docs(spec): update <slug>` |
