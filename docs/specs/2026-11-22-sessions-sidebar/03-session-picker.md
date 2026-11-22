@@ -39,12 +39,12 @@ The overlay is 60% of the width (at least 40 columns) and as tall as its rows, a
 
 ## Acceptance criteria
 
-- [ ] `deck new other -d` prints `other`; `^Space s` then lists `main` and `other` (capture `picker`).
+- [ ] `deck new other -d` prints `other`; `⌥Space s` then lists `main` and `other` (capture `picker`).
 - [ ] Typing `oth` filters to `other`; `Enter` switches and the sidebar header shows `other`, with no main-screen flash: the harness's `raw_output()` (DECK-01) contains no `ESC[?1049l` between the two sessions.
 - [ ] `^o` with the filter `third` creates and switches to `third`.
 - [ ] `^r` renames the selected session; a duplicate name shows the error.
 - [ ] `^x` on the current session, after `y`, switches to the previous one; on the last session the client exits with `[session <name> ended]`.
-- [ ] `^Space $` renames the current session and the status bar updates.
+- [ ] `⌥Space $` renames the current session and the status bar updates.
 - [ ] `deck attach nope` fails; `deck attach -c nope` creates and attaches.
 - [ ] `deck kill-session other` and `deck rename-session main primary` work from a second shell, and an attached client sees the rename at once.
 - [ ] `deck kill-session` of the session a client is attached to makes that client switch to another session, as the picker does.

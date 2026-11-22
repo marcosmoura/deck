@@ -41,17 +41,17 @@ Panel `tests` with 3 terminals, terminal 2 focused (accent), at 100×24 with the
 │                                                ││$ █                                             │
 │                                                ││                                                │
 ╰────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
- main  terminal-multiplexer › tests                                         ^Space ? help  d detach 
+ main  terminal-multiplexer › tests                                         ⌥Space ? help  d detach 
 ```
 
 ## Acceptance criteria
 
-- [ ] `^Space t` twice in a 100×24 window with the sidebar hidden gives the 3-terminal layout of the mockup, and `stty size` in each terminal matches its `inner` rect (capture `three`).
+- [ ] `⌥Space t` twice in a 100×24 window with the sidebar hidden gives the 3-terminal layout of the mockup, and `stty size` in each terminal matches its `inner` rect (capture `three`).
 - [ ] A fourth and fifth terminal give the 2×2 and the main + 2×2 layouts, with matching `stty size` (captures `four`, `five`).
-- [ ] `^Space Right`/`l`, `Left`/`h`, `Up`/`k`, `Down`/`j` move focus as `layout::neighbor` says; typed text reaches only the focused terminal.
-- [ ] `^Space x` asks, then closes the terminal; the others reflow and their `stty size` updates; focus follows requirement 4.
+- [ ] `⌥Space Right`/`l`, `Left`/`h`, `Up`/`k`, `Down`/`j` move focus as `layout::neighbor` says; typed text reaches only the focused terminal.
+- [ ] `⌥Space x` asks, then closes the terminal; the others reflow and their `stty size` updates; focus follows requirement 4.
 - [ ] `exit` in one of three terminals reflows to two side by side.
-- [ ] In a 40×12 window (sidebar auto-hidden, panel area 40×11), terminals 2 to 4 are added and the fourth `^Space t` (a 5th terminal) is refused with the room error, because even the default 5-terminal ratios give its grid columns 10 cells (8 inside).
+- [ ] In a 40×12 window (sidebar auto-hidden, panel area 40×11), terminals 2 to 4 are added and the fourth `⌥Space t` (a 5th terminal) is refused with the room error, because even the default 5-terminal ratios give its grid columns 10 cells (8 inside).
 - [ ] The wheel over an unfocused terminal scrolls it without moving focus or entering scroll mode.
 - [ ] A click in an unfocused terminal focuses it without sending the click; a second click is forwarded to a program with mouse reporting on.
 - [ ] Two clients of the same size on one session see the same focus and layout; a smaller second client draws the daemon's layout cropped, without changing PTY sizes until it sends input.

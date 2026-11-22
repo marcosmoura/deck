@@ -54,7 +54,7 @@ sidebar_bg = 236
  ▾ terminal-multiplexer     ││                                           │
 ▌  editor                   ││                                           │
    claude                   │└───────────────────────────────────────────┘
- main  terminal-multiplexer › editor                    ^Space ? help  d detach
+ main  terminal-multiplexer › editor                    ⌥Space ? help  d detach
 ```
 
 - The sidebar's background is palette colour 236; the active row, the session name and the focused border are `#cba6f7` (or its nearest palette colour without truecolor); corners are plain.

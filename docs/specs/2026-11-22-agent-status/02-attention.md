@@ -31,7 +31,7 @@ When an agent the user is not looking at needs them or finishes, its panel is ma
  ● docs                     ││                                                          │
  ▸ budget !1              2 ││                                                          │
                             │╰──────────────────────────────────────────────────────────╯
- main  terminal-multiplexer › engine                       2 waiting  ^Space a next  ? help
+ main  terminal-multiplexer › engine                       2 waiting  ⌥Space a next  ? help
 ```
 
 - `review`: waiting and unseen (bold, `•`). `budget` is collapsed with one waiting panel.
@@ -44,7 +44,7 @@ When an agent the user is not looking at needs them or finishes, its panel is ma
 - [ ] No alert is sent for a terminal in the active panel of a focused client; one is sent after that client reported `Focus(false)`.
 - [ ] With two attached clients, a transition produces exactly one `AgentAlert`, sent to the client that sent input last.
 - [ ] Process-only `active` → `quiet` never sets `unseen` and never alerts.
-- [ ] `^Space a` cycles through waiting terminals, then unseen idle ones, then flashes `no agent needs you`.
+- [ ] `⌥Space a` cycles through waiting terminals, then unseen idle ones, then flashes `no agent needs you`.
 - [ ] A collapsed project shows `!1` for one waiting panel.
 - [ ] Names containing control characters reach the notification without them.
 

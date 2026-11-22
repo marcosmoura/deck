@@ -33,7 +33,7 @@ When the user runs `claude`, `codex` or `opencode` in a terminal, the sidebar an
  ● docs                     ││                                                          │
  ○ notes                    ││                                                          │
                             │╰──────────────────────────────────────────────────────────╯
- main  terminal-multiplexer › engine                                    ^Space ? help
+ main  terminal-multiplexer › engine                                    ⌥Space ? help
 ```
 
 - `engine`: working (spinner, accent). `review`: waiting (`!`, warning, bold). `docs`: idle (`●`, ok). `notes`: an agent detected by process only, quiet (`○`, muted).

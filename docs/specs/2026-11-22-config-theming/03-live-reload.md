@@ -21,7 +21,7 @@ The user edits `config.toml` while deck runs, saves, and within about a second t
 ## Acceptance criteria
 
 - [ ] With deck attached, writing `[theme] accent = "red"` to the config makes the focused border red (within 5 s; the test sets `DECK_TEST_CONFIG_POLL_MS=200`), and `config reloaded` flashes (capture `reloaded`).
-- [ ] Changing `[keys] detach = "q"` makes `^Space q` detach and `^Space d` flash `no binding for d`, without reattaching.
+- [ ] Changing `[keys] detach = "q"` makes `⌥Space q` detach and `⌥Space d` flash `no binding for d`, without reattaching.
 - [ ] Changing `sidebar_width` from 28 to 40 moves the panel area and the shell's `stty size` shrinks by 12 columns.
 - [ ] Writing a file with `accent = "purple"` shows `config.toml:2:10: …` (the actual location) in the error colour, and the previous accent stays.
 - [ ] Saving through a temp file and rename (as editors do) is picked up.

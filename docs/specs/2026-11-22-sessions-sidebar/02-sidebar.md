@@ -38,7 +38,7 @@ The user sees the attached session's projects in a sidebar with their panels nes
 9. **Confirmations**: `y` confirms, `n` or `Esc` cancels; any other key is ignored.
 
    A prompt or confirmation whose target (panel or project) is removed meanwhile, by another client or by its process exiting, closes with the flash `panel "<name>" was closed` (or `project …`).
-10. **Empty states** in the panel area, centered and muted: `No panels in <project> — ^Space c to create one` and `No projects — ^Space P to add one`. Typing goes nowhere (no `Input` is sent) while the panel area is empty.
+10. **Empty states** in the panel area, centered and muted: `No panels in <project> — ⌥Space c to create one` and `No projects — ⌥Space P to add one`. Typing goes nowhere (no `Input` is sent) while the panel area is empty.
 11. **Help overlay**: a centered rounded box listing every action with its key (prefix first), grouped (Session, Panels, Projects, Terminal, Sidebar), generated from the binding table so overrides show; each action names its group in the table, and actions added by later specs (DECK-01's `detach` and `scroll`, DECK-03's terminal and resize actions) land in the open-ended Terminal group unless they name another; `Esc`, `q` or `?` closes it.
 12. **Status bar** gains the active panel's name after the project name.
 13. **Config**: `sidebar = true`, `sidebar_width = 28` (values outside 20–60 are an error naming the key).
@@ -61,7 +61,7 @@ The user sees the attached session's projects in a sidebar with their panels nes
  ▸ dotfiles               2 ││                                                                     │
                             ││                                                                     │
                             │╰─────────────────────────────────────────────────────────────────────╯
- main  terminal-multiplexer › editor                                        ^Space ? help  d detach 
+ main  terminal-multiplexer › editor                                        ⌥Space ? help  d detach 
 ```
 
 - Header row: session name, bold. A blank row separates it from the projects.
@@ -87,20 +87,20 @@ Prompt:
 ## Acceptance criteria
 
 - [ ] On attach, the sidebar of the mockup shows the session, its project and panel `1` (capture `sidebar`).
-- [ ] `^Space c` adds panel `2`, focuses it, and the sidebar and status bar update.
-- [ ] `^Space n`/`p` and `^Space 1` switch panels; the panel area shows the right shell (each shell has echoed a distinct marker).
-- [ ] `^Space ,` renames the active panel; an empty name shows the error flash and reopens the prompt.
-- [ ] `^Space P` with directory `~` proposes `~` as the name; accepting it, or typing `other`, adds a project whose shell's `pwd` is the home dir; a duplicate name shows the error; a relative directory resolves against the client's start cwd.
-- [ ] `^Space X` asks, `n` keeps the panel, `y` closes it and focus moves as in sub-spec 01.
-- [ ] Closing the last panel shows the `No panels` empty state (capture `empty-project`); `^Space c` recovers.
-- [ ] `^Space Tab`, `j`, `Enter` focuses the selected panel; `h` collapses a project and its panel count appears (capture `sidebar-focus`).
+- [ ] `⌥Space c` adds panel `2`, focuses it, and the sidebar and status bar update.
+- [ ] `⌥Space n`/`p` and `⌥Space 1` switch panels; the panel area shows the right shell (each shell has echoed a distinct marker).
+- [ ] `⌥Space ,` renames the active panel; an empty name shows the error flash and reopens the prompt.
+- [ ] `⌥Space P` with directory `~` proposes `~` as the name; accepting it, or typing `other`, adds a project whose shell's `pwd` is the home dir; a duplicate name shows the error; a relative directory resolves against the client's start cwd.
+- [ ] `⌥Space X` asks, `n` keeps the panel, `y` closes it and focus moves as in sub-spec 01.
+- [ ] Closing the last panel shows the `No panels` empty state (capture `empty-project`); `⌥Space c` recovers.
+- [ ] `⌥Space Tab`, `j`, `Enter` focuses the selected panel; `h` collapses a project and its panel count appears (capture `sidebar-focus`).
 - [ ] A mouse click on a panel row focuses it; on a project row toggles it.
-- [ ] `^Space b` hides the sidebar and the shell's `stty size` grows by `sidebar_width + 1` columns.
+- [ ] `⌥Space b` hides the sidebar and the shell's `stty size` grows by `sidebar_width + 1` columns.
 - [ ] With `sidebar_width = 28`, the sidebar shows at 49 outer columns (panel area 20) and hides automatically at 48; with `sidebar_width = 60` it shows from 81 columns.
-- [ ] `^Space ?` shows the help overlay with every default binding, and a `[keys]` override in the config shows its new key (capture `help`).
+- [ ] `⌥Space ?` shows the help overlay with every default binding, and a `[keys]` override in the config shows its new key (capture `help`).
 - [ ] With 30 panel rows in a 24-row window, the sidebar scrolls to keep the active panel visible.
-- [ ] `^Space d` detaches while the sidebar has focus and while a terminal is in scroll mode; `^Space` typed in a prompt inserts nothing special (the prompt treats it as a key, not the prefix).
-- [ ] Two clients on one session: `^Space n` in one changes the active panel in both; sidebar focus and a prompt opened in one do not appear in the other; closing a panel from client A while client B has a rename prompt open for it closes B's prompt with the flash.
+- [ ] `⌥Space d` detaches while the sidebar has focus and while a terminal is in scroll mode; `⌥Space` typed in a prompt inserts nothing special (the prompt treats it as a key, not the prefix).
+- [ ] Two clients on one session: `⌥Space n` in one changes the active panel in both; sidebar focus and a prompt opened in one do not appear in the other; closing a panel from client A while client B has a rename prompt open for it closes B's prompt with the flash.
 
 ## Tests
 

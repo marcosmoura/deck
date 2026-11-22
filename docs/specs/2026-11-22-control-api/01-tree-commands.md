@@ -7,7 +7,7 @@ status: todo
 
 ## Scope
 
-From any shell, the user or an agent lists deck's tree and creates, focuses, renames and closes projects, panels and terminals, including terminals that run a given command and stay after it exits. Owning crates: `deck` (CLI), `deck-core` (requests, target types), `deck-daemon` (handlers), `deck-tui` (the exited-terminal title and `^Space x` on it).
+From any shell, the user or an agent lists deck's tree and creates, focuses, renames and closes projects, panels and terminals, including terminals that run a given command and stay after it exits. Owning crates: `deck` (CLI), `deck-core` (requests, target types), `deck-daemon` (handlers), `deck-tui` (the exited-terminal title and `⌥Space x` on it).
 
 ## Requirements
 
@@ -35,7 +35,7 @@ From any shell, the user or an agent lists deck's tree and creates, focuses, ren
    - These three print the new id (`12`, or `{"id": 12}` with `--json`).
    - `deck focus <id>`: focuses a terminal (and its panel and project) or a panel. `deck close <id>`: closes a terminal, a panel or a project, without confirmation. Both print nothing (`{"ok": true}` with `--json`).
    - `deck rename-panel [--panel <id>] <name>`: sets the name with `name_source = Manual`.
-4. **`--keep`**: the terminal stays after exit with `exited: Some(code)`; a death by signal `n` is reported as `128 + n`. The code comes from `deck-daemon::platform::wait_status(pid)`, a `waitpid` on the child pid that the daemon reaps itself (portable-pty's `ExitStatus` reports a signal death as code 1 with a platform-specific text), on macOS and Linux alike. Its title becomes `<title> · exited <code>` and its border and title are drawn muted. `Input` to it is dropped by the daemon. `^Space x` on an exited terminal closes it without the DECK-03 confirmation; on a running terminal the confirmation stays. A panel whose terminals have all exited (and are kept) stays until they are closed.
+4. **`--keep`**: the terminal stays after exit with `exited: Some(code)`; a death by signal `n` is reported as `128 + n`. The code comes from `deck-daemon::platform::wait_status(pid)`, a `waitpid` on the child pid that the daemon reaps itself (portable-pty's `ExitStatus` reports a signal death as code 1 with a platform-specific text), on macOS and Linux alike. Its title becomes `<title> · exited <code>` and its border and title are drawn muted. `Input` to it is dropped by the daemon. `⌥Space x` on an exited terminal closes it without the DECK-03 confirmation; on a running terminal the confirmation stays. A panel whose terminals have all exited (and are kept) stays until they are closed.
 4a. **Persistence of `keep`**: `TerminalState` (DECK-04) gains `keep: bool` with `#[serde(default)]`. On restore, a kept terminal that had exited is dropped (its panel follows the lifecycle rules, without a notice); a kept terminal that was still running is relaunched like any explicit program, with `keep` set.
 5. **Commands with a program** get the same environment as shells (the session's client environment, `TERM`, `COLORTERM`), plus `--env` values, then the `DECK_*` variables, set last so `--env` cannot override them. They run directly (no shell). `--` separates deck's options from the program's.
 6. **No daemon start**: every command in this sub-spec fails with `no deck daemon running` (exit 1) when none is running and never starts one, except `deck ls`: plain, it keeps DECK-01's `no sessions` and exit 0; with `--json` it prints `{"sessions": []}` and exits 0. Usage errors from the argument parser exit 2.
@@ -56,7 +56,7 @@ An exited kept terminal (terminal 2), next to a running one; the exited border a
 
 - [ ] Inside deck, `deck new-terminal -- sh -c 'echo ready; sleep 30'` prints an id, the panel gains a terminal showing `ready`, and focus stays on the calling terminal.
 - [ ] `deck ls --json` parses as JSON and lists that terminal with its program, pid and cwd; `deck ls --tree` shows the same tree as text (capture `ls-tree`); plain `deck ls` prints DECK-02's list.
-- [ ] `deck new-terminal --keep -- sh -c 'exit 3'` leaves a terminal titled `… · exited 3`, drawn muted (capture `exited`), listed with `"exited": 3`; `^Space x` closes it at once without a confirmation, while `^Space x` on a running terminal still asks.
+- [ ] `deck new-terminal --keep -- sh -c 'exit 3'` leaves a terminal titled `… · exited 3`, drawn muted (capture `exited`), listed with `"exited": 3`; `⌥Space x` closes it at once without a confirmation, while `⌥Space x` on a running terminal still asks.
 - [ ] `deck new-terminal --keep -- sh -c 'kill -TERM $$'` is listed with `"exited": 143` on macOS and Linux (unit test of the mapping plus this end-to-end check).
 - [ ] `deck new-terminal --env DECK_TERMINAL_ID=1 -- env` shows the terminal's real id, not `1`.
 - [ ] `deck new-panel --name tests --focus` creates and focuses a panel named `tests`; `deck new-project api --dir /tmp` creates a project and prints its id.

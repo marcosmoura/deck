@@ -28,15 +28,15 @@ While repeating a resize, in the status bar:
 
 ## Acceptance criteria
 
-- [ ] In the 3-terminal layout, `^Space L` grows terminal 1 by 5% of the panel width and `L` again within 1 s (no prefix) grows it by another 5%; `stty size` updates (capture `resized`).
+- [ ] In the 3-terminal layout, `⌥Space L` grows terminal 1 by 5% of the panel width and `L` again within 1 s (no prefix) grows it by another 5%; `stty size` updates (capture `resized`).
 - [ ] A key other than a resize key ends the repeat and goes to the terminal.
-- [ ] `^Space J` on terminal 2 moves the boundary between 2 and 3.
+- [ ] `⌥Space J` on terminal 2 moves the boundary between 2 and 3.
 - [ ] Resizing stops at the 10×3 minimum and never errors.
-- [ ] `^Space L` on terminal 2 of the 3-terminal layout moves the main boundary right (terminal 2 shrinks); `^Space J` on terminal 3 moves the row boundary down (terminal 3 shrinks).
+- [ ] `⌥Space L` on terminal 2 of the 3-terminal layout moves the main boundary right (terminal 2 shrinks); `⌥Space J` on terminal 3 moves the row boundary down (terminal 3 shrinks).
 - [ ] A paste during the repeat ends it and the pasted text reaches the terminal.
-- [ ] `^Space =` restores the 50/50 main split.
+- [ ] `⌥Space =` restores the 50/50 main split.
 - [ ] Dragging the border between terminal 1 and the right half moves it with the pointer; a program with mouse reporting on in terminal 1 receives no events from the drag.
-- [ ] After `^Space L` twice on terminal 1 of a 2-terminal panel (60/40), adding a terminal gives the big terminal 60% of the width; closing it again returns to 60/40.
+- [ ] After `⌥Space L` twice on terminal 1 of a 2-terminal panel (60/40), adding a terminal gives the big terminal 60% of the width; closing it again returns to 60/40.
 - [ ] With 2 terminals resized to 90/10 and the window narrowed to 40 columns (sidebar auto-hidden), terminal 2 is drawn with the clamped copy (`stty size` shows at least 10 columns); widening the window back gives the exact 90/10 sizes again.
 - [ ] With 4 terminals in default ratios, adding a fifth gives terminal 1 exactly half the width, as with no resize at all.
 - [ ] `SetRatios` with a wrong length is refused by the daemon, and one whose `n` differs from the panel's count is refused with `layout changed, try again`.

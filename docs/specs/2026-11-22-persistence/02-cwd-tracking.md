@@ -24,7 +24,7 @@ deck knows where each shell is. After `cd` in a shell and a daemon restart, the 
 - [ ] With `/bin/sh` and no OSC 7, and `DECK_TEST_CWD_POLL_MS=200`, `cd /tmp` is picked up (no sooner than one poll, within 5 s) and survives a restart. The test runs on the OS of the machine (macOS or Linux).
 - [ ] Running `(cd /var && sleep 5)` in a tracked shell sitting in `/tmp` keeps the terminal's cwd at `/tmp`.
 - [ ] A shell that reported OSC 7 once and then runs a long command in another directory keeps its OSC 7 cwd.
-- [ ] `^Space t` after `cd /tmp` in the focused terminal opens the new terminal in `/tmp` (`pwd`).
+- [ ] `⌥Space t` after `cd /tmp` in the focused terminal opens the new terminal in `/tmp` (`pwd`).
 - [ ] `process_cwd` of a child started in `/tmp` returns `/tmp` (daemon test).
 - [ ] With OSC 7, a cwd change made 2 s before `kill -9` of the daemon is restored.
 - [ ] With a fake `process_cwd` that blocks until the test releases it (test hook in the daemon), an attached client still receives frames for output produced during the query (daemon test; no wall-clock bound).
