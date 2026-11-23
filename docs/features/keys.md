@@ -104,6 +104,14 @@ The wheel works over any terminal, focused or not, and never enters scroll mode:
 
 A click in an unfocused terminal focuses it and is not sent to the program ([layout](layout.md#focus)); the wheel scrolls the terminal under the pointer. Clicks, releases, drags and motion inside the focused terminal go to programs that asked for them, with coordinates relative to the terminal's screen (inside its border, if it has one; SGR encoding when the program asked for it, X10 otherwise). Events on the sidebar, its separator or the status bar are never sent. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
 
+## Selecting and copying
+
+Drag with the left button in the focused terminal to select text; releasing copies it to your clipboard (through OSC 52, as a program's copy does). A double-click selects a word and copies it, a triple-click the whole line; dragging after either extends the selection by words or by lines. The selection stays inside its terminal, even when the pointer moves into another one or out of the panel, and covers only the rows on screen (scroll back with the wheel first to copy older lines). Each row's trailing blanks are dropped and rows are joined with newlines.
+
+- When the program asked for mouse reporting (nvim, OpenCode, Claude Code), the mouse is the program's; hold `Option` (Alt) while pressing to select in deck instead. Your terminal's own selection (usually `Shift`-drag) still works as before.
+- In scroll mode a press always selects.
+- The selection is drawn in the theme's selection colours and clears at the next press, or when the program redraws a selected row, the terminal is resized or it scrolls.
+
 ## Configuration
 
 In `config.toml` (`~/.config/deck/config.toml`, or `$DECK_HOME/config.toml`), every key optional:

@@ -2,7 +2,7 @@
 //! Every colour and glyph of deck's own UI comes from the [`Theme`].
 
 use deck_core::config::HelpGroup;
-use deck_core::model::{NameSource, TerminalView};
+use deck_core::model::{NameSource, TerminalId, TerminalView};
 use deck_core::naming::source_terminal_view;
 use deck_core::protocol::{CursorShape, NoticeLevel};
 use deck_core::theme::{BorderStyle, Theme};
@@ -271,6 +271,9 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
         None => {
             let area = tmp.area;
             draw_terminal(&mut tmp, area, term);
+            if let Some(id) = app.mirror.focused_id() {
+                draw_selection(&mut tmp, area, app, id);
+            }
             term.map(|t| t.cursor)
                 .filter(|c| c.visible)
                 .map(|c| Position::new(c.col, c.row))
@@ -373,6 +376,7 @@ fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
         let inner = Rect::new(inner.x, inner.y, inner.width, inner.height);
         let term = app.mirror.terminal(view.id);
         draw_terminal(buf, inner, term);
+        draw_selection(buf, inner, app, view.id);
         if let Some(c) = term.map(|t| t.cursor).filter(|c| focused && c.visible)
             && c.col < inner.width
             && c.row < inner.height
@@ -407,6 +411,32 @@ fn draw_terminal(buf: &mut Buffer, area: Rect, term: Option<&TermMirror>) {
                 usize::from(area.width - run.col),
                 style(run.style),
             );
+        }
+    }
+}
+
+/// The text selected in terminal `id`, in the selection colours over its lines in `area`.
+fn draw_selection(buf: &mut Buffer, area: Rect, app: &App, id: TerminalId) {
+    if area.is_empty() {
+        return;
+    }
+    let Some(sel) = app.text_sel.as_ref().filter(|s| s.terminal == id) else {
+        return;
+    };
+    let Some(term) = app.mirror.terminal(id) else {
+        return;
+    };
+    let Some((from, to)) = sel.range(&term.lines, term.size.0) else {
+        return;
+    };
+    let style = selection(&app.theme, Style::new());
+    for row in from.1..=to.1.min(area.height - 1) {
+        let start = if row == from.1 { from.0 } else { 0 };
+        let end = if row == to.1 { to.0 } else { u16::MAX };
+        for col in start..=end.min(area.width - 1) {
+            if let Some(cell) = buf.cell_mut((area.x + col, area.y + row)) {
+                cell.set_style(style);
+            }
         }
     }
 }

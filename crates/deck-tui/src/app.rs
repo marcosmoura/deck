@@ -28,6 +28,7 @@ use crate::modal::{Modal, PromptKind, Retry};
 use crate::picker::{Picker, Req};
 use crate::resize::{Drag, SidebarDrag};
 use crate::restore::Restore;
+use crate::select::{self, MULTI_CLICK_MS, TextSel, Unit};
 use crate::sidebar::{Hover, Sel};
 
 /// Below this many columns or rows the client shows only a message.
@@ -159,6 +160,11 @@ pub struct App {
     pub help_scroll: usize,
     /// A focus event came: the focus is re-reported on every attach.
     focus_seen: bool,
+    /// Text selected with the mouse in a terminal; client-local.
+    pub(crate) text_sel: Option<TextSel>,
+    /// The last press that started a selection and how many presses in a row it ends, for
+    /// double and triple clicks.
+    last_click: Option<(Instant, TerminalId, (u16, u16), u8)>,
 }
 
 /// A mouse cell on a terminal of the grid.
@@ -225,6 +231,8 @@ impl App {
             focused: true,
             help_scroll: 0,
             focus_seen: false,
+            text_sel: None,
+            last_click: None,
         }
     }
 
@@ -511,6 +519,13 @@ impl App {
             self.swallow_release = false;
         }
         self.pointer = Some((event.column, event.row));
+        if let Some(outs) = self.select_mouse(event) {
+            return outs;
+        }
+        // Any other press ends the selection.
+        if matches!(event.kind, ct::MouseEventKind::Down(_)) && self.text_sel.take().is_some() {
+            self.dirty = true;
+        }
         // The press on the chip survives the pointer drifting (a drag with the left button);
         // anything else but its release ends it.
         let chip_down = match event.kind {
@@ -618,6 +633,16 @@ impl App {
         };
         let modes = term.modes;
         let history = term.history;
+        // A left press selects text unless the program asked for the mouse; Option/Alt
+        // takes it back from the program, and scroll mode never gives it one.
+        if event.kind == ct::MouseEventKind::Down(ct::MouseButton::Left)
+            && (self.scroll_mode.is_some()
+                || !mouse::reporting(modes)
+                || event.modifiers.contains(ct::KeyModifiers::ALT))
+        {
+            self.start_selection(terminal, (col, row), now);
+            return Vec::new();
+        }
         let button = |b: ct::MouseButton| match b {
             ct::MouseButton::Left => MouseButton::Left,
             ct::MouseButton::Right => MouseButton::Right,
@@ -648,6 +673,91 @@ impl App {
             .map(|bytes| Out::Send(ClientMsg::Input { terminal, bytes }))
             .into_iter()
             .collect()
+    }
+
+    /// A press that starts a selection: a third press in a row on the same cell selects the
+    /// line, a second the word.
+    fn start_selection(&mut self, terminal: TerminalId, cell: (u16, u16), now: Instant) {
+        let count = match self.last_click {
+            Some((at, t, c, n))
+                if t == terminal
+                    && c == cell
+                    && now.duration_since(at).as_millis() <= MULTI_CLICK_MS =>
+            {
+                n % 3 + 1
+            }
+            _ => 1,
+        };
+        self.last_click = Some((now, terminal, cell, count));
+        let unit = match count {
+            1 => Unit::Cell,
+            2 => Unit::Word,
+            _ => Unit::Line,
+        };
+        self.text_sel = Some(TextSel {
+            terminal,
+            anchor: cell,
+            head: cell,
+            unit,
+            dragging: true,
+        });
+        self.dirty = true;
+    }
+
+    /// The drag and release of a selection, ours wherever the pointer goes; the release
+    /// copies the text. `None` when no selection is being dragged.
+    fn select_mouse(&mut self, event: ct::MouseEvent) -> Option<Vec<Out>> {
+        let sel = self.text_sel.as_ref().filter(|s| s.dragging)?;
+        let terminal = sel.terminal;
+        match event.kind {
+            ct::MouseEventKind::Drag(ct::MouseButton::Left) => {
+                let head = self.clamped_cell(terminal, event.column, event.row);
+                if let (Some(head), Some(sel)) = (head, self.text_sel.as_mut())
+                    && sel.head != head
+                {
+                    sel.head = head;
+                    self.dirty = true;
+                }
+                Some(Vec::new())
+            }
+            ct::MouseEventKind::Up(_) => {
+                // The release is ours even when nothing ends up selected.
+                let mut sel = self.text_sel.take()?;
+                sel.dragging = false;
+                self.dirty = true;
+                let text = self.mirror.terminal(terminal).and_then(|term| {
+                    let (from, to) = sel.range(&term.lines, term.size.0)?;
+                    Some(select::text(&term.lines, term.size.0, from, to))
+                });
+                let Some(text) = text else {
+                    return Some(Vec::new());
+                };
+                self.text_sel = Some(sel);
+                Some(if text.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![osc52("c", &text)]
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The cell of `terminal`'s screen nearest to a cell of the window.
+    fn clamped_cell(&self, terminal: TerminalId, column: u16, row: u16) -> Option<(u16, u16)> {
+        let grid = Grid::of(self)?;
+        let i = grid.ids.iter().position(|t| *t == terminal)?;
+        let inner = grid.inner(i);
+        let size = self.mirror.terminal(terminal)?.size;
+        let (w, h) = (inner.width.min(size.0), inner.height.min(size.1));
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let x = column.saturating_sub(self.sidebar_cols());
+        Some((
+            x.saturating_sub(inner.x).min(w - 1),
+            row.saturating_sub(inner.y).min(h - 1),
+        ))
     }
 
     /// The wheel: the program's if it asked for the mouse, else the cursor keys on the
@@ -1207,16 +1317,22 @@ impl App {
                 outs
             }
             ServerMsg::Frame(frame) => {
+                if let Some(sel) = &self.text_sel
+                    && let Some(term) = self.mirror.terminal(sel.terminal)
+                    && sel.stale(&frame, term.size, term.display_offset, &term.lines)
+                {
+                    // The rest of a drag cut short is nobody's, not the program's.
+                    if sel.dragging {
+                        self.swallow_release = true;
+                    }
+                    self.text_sel = None;
+                    self.dirty = true;
+                }
                 self.follow_scroll(&frame);
                 self.mirror.apply_frame(frame);
                 self.flush()
             }
-            ServerMsg::Clipboard { selection, text } => {
-                let b64 = deck_core::base64::encode(text.as_bytes());
-                vec![Out::Clipboard(
-                    format!("\x1b]52;{selection};{b64}\x07").into_bytes(),
-                )]
-            }
+            ServerMsg::Clipboard { selection, text } => vec![osc52(&selection, &text)],
             ServerMsg::Bye { reason } => vec![Out::Exit(match reason {
                 ByeReason::SessionEnded => Exit::SessionEnded(self.session_name()),
                 ByeReason::ServerShutdown => Exit::DaemonStopped,
@@ -1225,6 +1341,12 @@ impl App {
             })],
         }
     }
+}
+
+/// The OSC 52 sequence that puts `text` on the outer terminal's clipboard `selection`.
+fn osc52(selection: &str, text: &str) -> Out {
+    let b64 = deck_core::base64::encode(text.as_bytes());
+    Out::Clipboard(format!("\x1b]52;{selection};{b64}\x07").into_bytes())
 }
 
 fn key_mods(mods: ct::KeyModifiers) -> Modifiers {

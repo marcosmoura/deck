@@ -30,6 +30,9 @@ mod resize_tests;
 mod restore;
 #[cfg(test)]
 mod restore_tests;
+mod select;
+#[cfg(test)]
+mod select_tests;
 mod sidebar;
 #[cfg(test)]
 mod sidebar_bar_tests;

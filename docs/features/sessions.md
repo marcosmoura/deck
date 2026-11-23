@@ -64,4 +64,4 @@ deck also restores the terminal on errors, panics, `SIGTERM` and `SIGHUP`.
 
 ## Colours and clipboard
 
-At attach, deck asks your terminal for its foreground and background colours, so programs that ask the same question (Codex, OpenCode, nvim) pick a matching theme. A program's OSC 52 copy reaches your terminal's clipboard; OSC 52 reads are denied.
+At attach, deck asks your terminal for its foreground and background colours, so programs that ask the same question (Codex, OpenCode, nvim) pick a matching theme. A program's OSC 52 copy reaches your terminal's clipboard; OSC 52 reads are denied. Text you select with the mouse is copied the same way ([keys](keys.md#selecting-and-copying)).
