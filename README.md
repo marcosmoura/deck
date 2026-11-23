@@ -2,7 +2,7 @@
 
 A terminal multiplexer written in Rust, built for coding agents. A background daemon keeps your sessions running; `deck` opens a rounded frame around a shell, and you can detach and come back to it later.
 
-Status: early. Today `deck` attaches to a session with one shell. Projects, panels, the sidebar and agent support come with later work (see [docs/backlog.md](docs/backlog.md)).
+Status: early. Today `deck` attaches to a session with one shell. Spaces, panels, the sidebar and agent support come with later work (see [docs/backlog.md](docs/backlog.md)).
 
 ## Install
 

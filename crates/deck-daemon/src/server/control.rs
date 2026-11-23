@@ -143,7 +143,7 @@ impl Shared {
                 }
                 (None, Target::Name(n)) => {
                     return Err(format!(
-                        "no project named \"{n}\" in session \"{}\"",
+                        "no space named \"{n}\" in session \"{}\"",
                         sess.model.name
                     ));
                 }
@@ -239,7 +239,7 @@ impl Shared {
             .iter()
             .find_map(|s| locate(&s.model, id).map(|k| (s.model.id, k)));
         let Some((sid, kind)) = found else {
-            return Err(format!("{id} is not a terminal, panel or project"));
+            return Err(format!("{id} is not a terminal, panel or space"));
         };
         let action = match kind {
             Kind::Terminal => Action::CloseTerminal {

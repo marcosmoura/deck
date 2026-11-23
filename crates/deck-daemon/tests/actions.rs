@@ -81,7 +81,7 @@ async fn invalid_names_duplicates_and_missing_directories_are_refused() {
     );
     c.action(new(" api ", real(&root))).await.unwrap();
     let err = c.action(new("api", real(&root))).await.unwrap_err();
-    assert_eq!(err.to_string(), "a project named \"api\" already exists");
+    assert_eq!(err.to_string(), "a space named \"api\" already exists");
     let api = c.project_id("api");
     assert_eq!(
         c.action(Action::RenameProject {

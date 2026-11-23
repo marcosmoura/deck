@@ -6,10 +6,10 @@ Commands that read and edit a running deck from outside: from another terminal, 
 
 - **No daemon start.** A command fails with `no deck daemon running` and exit 1 when the daemon is not running. The exception is `deck ls`, which prints `no sessions` (`{"sessions": []}` with `--json`) and exits 0.
 - **`--json`** prints one JSON document on stdout. An error then prints `{"error": "<message>"}` on stdout; without `--json` it goes to stderr. Exit code 1 for every failure, 2 for a usage error.
-- **`--session <name>`** picks the session. Without it: the session of the calling terminal (`DECK_SESSION_ID`), else the most recently attached one, else the only one. With `--session`, the `DECK_*` defaults below are off: the command acts on that session's active project and panel.
-- **Targets from the environment.** Every terminal deck starts has `DECK`, `DECK_SOCKET`, `DECK_SESSION_ID`, `DECK_PANEL_ID` and `DECK_TERMINAL_ID`. A command without `--panel` or `--project` acts on the calling terminal's panel and project. An id from the environment that no longer exists is an error (`this terminal (<id>) no longer exists`, `this panel (<id>) no longer exists`), never replaced by another.
+- **`--session <name>`** picks the session. Without it: the session of the calling terminal (`DECK_SESSION_ID`), else the most recently attached one, else the only one. With `--session`, the `DECK_*` defaults below are off: the command acts on that session's active space and panel.
+- **Targets from the environment.** Every terminal deck starts has `DECK`, `DECK_SOCKET`, `DECK_SESSION_ID`, `DECK_PANEL_ID` and `DECK_TERMINAL_ID`. A command without `--panel` or `--space` acts on the calling terminal's panel and space. An id from the environment that no longer exists is an error (`this terminal (<id>) no longer exists`, `this panel (<id>) no longer exists`), never replaced by another.
 - **`DECK_SOCKET`**, when set, is the socket the commands (and `deck ls`) use instead of the default path.
-- Ids are unique across sessions, projects, panels and terminals, so a bare id names one thing.
+- Ids are unique across sessions, spaces, panels and terminals, so a bare id names one thing.
 
 ## Commands
 
@@ -17,16 +17,16 @@ Commands that read and edit a running deck from outside: from another terminal, 
 | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `deck ls`                                                                                                   | The session list, as before.                                                                                                                                                         |
 | `deck ls --json` / `--tree`                                                                                 | The whole tree as JSON, or as indented text (`[id]` after each name, `*` on the active panel and the focused terminal).                                                              |
-| `deck new-project <name> [--dir <path>] [--focus]`                                                          | Adds a project; `--dir` defaults to the current directory. Prints the new id.                                                                                                        |
-| `deck new-panel [--project <id\|name>] [--name <n>] [--cwd <dir>] [--focus] [-- <program> <args>...]`       | Adds a panel with one terminal; `--cwd` defaults to the project root. Prints the id.                                                                                                 |
+| `deck new-space <name> [--dir <path>] [--focus]`                                                            | Adds a space; `--dir` defaults to the current directory. Prints the new id.                                                                                                          |
+| `deck new-panel [--space <id\|name>] [--name <n>] [--cwd <dir>] [--focus] [-- <program> <args>...]`         | Adds a panel with one terminal; `--cwd` defaults to the space root. Prints the id.                                                                                                   |
 | `deck new-terminal [--panel <id>] [--cwd <dir>] [--env K=V]... [--keep] [--focus] [-- <program> <args>...]` | Adds a terminal; `--cwd` defaults to where the panel's focused terminal is. Prints the id. Fails when the grid has no room.                                                          |
-| `deck focus <id>`                                                                                           | Focuses a terminal (with its panel and project) or a panel.                                                                                                                          |
-| `deck close <id>`                                                                                           | Closes a terminal, a panel or a project, without confirmation.                                                                                                                       |
+| `deck focus <id>`                                                                                           | Focuses a terminal (with its panel and space) or a panel.                                                                                                                            |
+| `deck close <id>`                                                                                           | Closes a terminal, a panel or a space, without confirmation.                                                                                                                         |
 | `deck rename-panel [--panel <id>] <name>\|--auto`                                                           | Names a panel by hand (`name_source` becomes `manual`, and the name stays); `--auto` gives it back to what runs in it (`name_source` `auto`). A name with `--auto` is a usage error. |
 
 `new-*` print the id (`12`, or `{"id": 12}` with `--json`); `focus`, `close` and `rename-panel` print nothing (`{"ok": true}` with `--json`).
 
-Without `--focus` a new project, panel or terminal leaves focus and the active project and panel where they were. A program after `--` runs directly (no shell) with the session's environment, `TERM`, `COLORTERM`, the `--env` values, then the `DECK_*` variables, which `--env` cannot override.
+Without `--focus` a new space, panel or terminal leaves focus and the active space and panel where they were. A program after `--` runs directly (no shell) with the session's environment, `TERM`, `COLORTERM`, the `--env` values, then the `DECK_*` variables, which `--env` cannot override.
 
 ## Typing, reading and waiting
 
@@ -71,7 +71,7 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
       "id": 1,
       "name": "main",
       "attached": true,
-      "projects": [
+      "spaces": [
         {
           "id": 2,
           "name": "deck",

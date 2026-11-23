@@ -393,7 +393,7 @@ async fn close_and_rename_work_on_ids_and_report_errors() {
     c.wait(|c| view(c).projects.len() == 1).await;
     assert_eq!(
         error(&mut c, Request::Close { id: 9999 }).await,
-        "9999 is not a terminal, panel or project"
+        "9999 is not a terminal, panel or space"
     );
 
     // Names and targets are checked.
@@ -409,7 +409,7 @@ async fn close_and_rename_work_on_ids_and_report_errors() {
             }
         )
         .await,
-        "no project named \"nope\" in session \"main\""
+        "no space named \"nope\" in session \"main\""
     );
     assert_eq!(
         error(
@@ -423,7 +423,7 @@ async fn close_and_rename_work_on_ids_and_report_errors() {
             }
         )
         .await,
-        "no project 9999"
+        "no space 9999"
     );
     assert_eq!(
         error(

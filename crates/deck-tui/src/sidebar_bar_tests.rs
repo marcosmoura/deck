@@ -1,4 +1,4 @@
-//! The sidebar's header and bottom bar: the `New project` chip at the top, the `New` and
+//! The sidebar's header and bottom bar: the `New space` chip at the top, the `New` and
 //! `Restore` chips at the bottom, the hover state and the redraw rule.
 
 use std::path::PathBuf;
@@ -76,19 +76,19 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
 
 /// The bar row of a 24-row window: the sidebar area is 23 rows tall.
 const BAR: u16 = 22;
-/// A column inside the header's `New project` chip of a 28-column sidebar (it takes 14..27).
-const CHIP: u16 = 15;
+/// A column inside the header's `New space` chip of a 28-column sidebar (it takes 16..27).
+const CHIP: u16 = 17;
 
 #[test]
-fn the_header_reads_workspaces_and_holds_the_new_project_chip_at_the_right() {
+fn the_header_reads_spaces_and_holds_the_new_space_chip_at_the_right() {
     // (sidebar width, the left part as shown, the chip's glyph text)
     for (width, left, chip) in [
-        (40, " Workspaces", "+ New project"),
-        (30, " Workspaces", "+ New project"),
-        (28, " Workspaces", "+ New project"),
-        (26, " Workspaces", "+ New project"),
-        (25, " Workspaces", "+"),
-        (20, " Workspaces", "+"),
+        (40, " Spaces", "+ New space"),
+        (30, " Spaces", "+ New space"),
+        (28, " Spaces", "+ New space"),
+        (26, " Spaces", "+ New space"),
+        (25, " Spaces", "+"),
+        (20, " Spaces", "+"),
     ] {
         let a = app_at((100, 24), width, mockup());
         let buf = draw_app(&a);
@@ -265,7 +265,7 @@ fn a_move_that_keeps_the_hover_target_does_not_mark_the_screen_dirty() {
     // Onto the chip: one redraw; further moves over it: none.
     moved(&mut a, CHIP, 0);
     assert!(a.take_dirty());
-    for x in 14..27 {
+    for x in 16..27 {
         moved(&mut a, x, 0);
         assert!(!a.take_dirty(), "column {x}");
     }
@@ -395,7 +395,7 @@ fn a_prompt_reopened_by_an_answer_ends_the_hover() {
 #[test]
 fn a_config_reload_that_narrows_the_sidebar_recomputes_the_hover() {
     let mut a = app();
-    moved(&mut a, 14, 0);
+    moved(&mut a, 16, 0);
     assert_eq!(a.hover, Some(Hover::NewProject));
     let config = Config {
         sidebar_width: 20,
@@ -426,7 +426,7 @@ fn motion_over_the_sidebar_never_reaches_a_program_but_motion_over_it_does() {
 #[test]
 fn the_chips_are_hit_where_they_are_drawn_at_any_width() {
     // (sidebar width, a column on the header chip, the column before it)
-    for (width, on, before) in [(20, 18, 17), (28, 14, 13), (40, 26, 25)] {
+    for (width, on, before) in [(20, 18, 17), (28, 16, 15), (40, 28, 27)] {
         let mut a = app_at((100, 24), width, mockup());
         moved(&mut a, on, 0);
         assert_eq!(a.hover, Some(Hover::NewProject), "width {width}");

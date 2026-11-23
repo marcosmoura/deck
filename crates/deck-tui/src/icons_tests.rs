@@ -92,7 +92,7 @@ fn the_sidebar_of_the_spec_at_28_columns() {
     let a = app_with("", titled());
     let (buf, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[0], pad(" Workspaces   + New project "));
+    assert_eq!(side[0], pad(" Spaces         + New space "));
     assert_eq!(side[1], pad(""));
     assert_eq!(side[2], pad(" ▾ terminal-multiplexer"));
     assert_eq!(side[3], pad("▌⠋ ✻  Fix login bug"));

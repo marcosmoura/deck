@@ -430,7 +430,7 @@ fn session_lines(sessions: &[SessionSummary]) -> String {
         .map(|s| {
             (
                 s.name.as_str(),
-                count(s.projects, "project", "projects"),
+                count(s.projects, "space", "spaces"),
                 count(s.terminals, "terminal", "terminals"),
                 s.attached_clients > 0,
             )
@@ -563,7 +563,7 @@ mod tests {
         let text = session_lines(&[summary("main", 1, 1, 1), summary("work-long", 0, 2, 3)]);
         assert_eq!(
             text,
-            "main       1 project   1 terminal  (attached)\nwork-long  2 projects  3 terminals\n"
+            "main       1 space   1 terminal  (attached)\nwork-long  2 spaces  3 terminals\n"
         );
     }
 

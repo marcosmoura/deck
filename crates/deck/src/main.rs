@@ -40,7 +40,7 @@ enum Command {
     New {
         /// The session's name (`main`, `main-2`, ... when omitted).
         name: Option<String>,
-        /// The directory of the session's first project (default: the current one).
+        /// The directory of the session's first space (default: the current one).
         #[arg(short = 'c', long = "dir", value_name = "DIR")]
         dir: Option<PathBuf>,
         /// Create the session without attaching; prints its name.
@@ -59,18 +59,19 @@ enum Command {
         /// Its new name.
         new: String,
     },
-    /// Lists the sessions; `--json` and `--tree` show their projects, panels and terminals.
+    /// Lists the sessions; `--json` and `--tree` show their spaces, panels and terminals.
     Ls(tree::LsArgs),
-    /// Adds a project with one panel to a session; prints its id.
+    /// Adds a space with one panel to a session; prints its id.
+    #[command(name = "new-space")]
     NewProject(tree::NewProjectArgs),
-    /// Adds a panel with one terminal to a project; prints the panel's id.
+    /// Adds a panel with one terminal to a space; prints the panel's id.
     NewPanel(tree::NewPanelArgs),
     /// Adds a terminal to a panel; prints its id. A program after `--` runs instead of a
     /// shell.
     NewTerminal(tree::NewTerminalArgs),
-    /// Focuses a terminal (with its panel and project) or a panel.
+    /// Focuses a terminal (with its panel and space) or a panel.
     Focus(tree::IdArgs),
-    /// Closes a terminal, a panel or a project, without asking.
+    /// Closes a terminal, a panel or a space, without asking.
     Close(tree::IdArgs),
     /// Renames a panel.
     RenamePanel(tree::RenamePanelArgs),

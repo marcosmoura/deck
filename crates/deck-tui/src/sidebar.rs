@@ -42,7 +42,7 @@ pub enum Sel {
 /// What the pointer is over in the sidebar. Client-local: never sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
-    /// The `+ New project` chip of the header.
+    /// The `+ New space` chip of the header.
     NewProject,
     /// The `+ New` chip of the bottom bar.
     New,
@@ -50,7 +50,7 @@ pub enum Hover {
 }
 
 /// The sidebar's title, on the header row.
-const HEADER_TITLE: &str = "Workspaces";
+const HEADER_TITLE: &str = "Spaces";
 /// Cells an icon takes: a text icon and a blank, or a logo.
 pub const ICON_CELLS: u16 = 2;
 /// The column the icon of a panel row starts in, and the one its name starts in with icons.
@@ -66,14 +66,10 @@ fn bar_rows(height: u16) -> u16 {
     }
 }
 
-/// The `New project` chip of the header: `"+ New project"`, or `"+"` in a narrow sidebar.
+/// The `New space` chip of the header: `"+ New space"`, or `"+"` in a narrow sidebar.
 /// No side padding, so the title keeps its room in narrow sidebars.
 fn new_project_chip(width: u16) -> &'static str {
-    if width < BAR_WIDE {
-        "+"
-    } else {
-        "+ New project"
-    }
+    if width < BAR_WIDE { "+" } else { "+ New space" }
 }
 
 /// The `New` chip: `" + New "`, or `" + "` in a narrow sidebar.
@@ -81,7 +77,7 @@ fn new_chip(width: u16) -> &'static str {
     if width < BAR_WIDE { " + " } else { " + New " }
 }
 
-/// The columns the `New project` chip takes in a sidebar `w` columns wide: right-aligned on
+/// The columns the `New space` chip takes in a sidebar `w` columns wide: right-aligned on
 /// the header row, with a margin of one column.
 fn new_project_span(w: u16) -> std::ops::Range<u16> {
     let cells = width(new_project_chip(w));
@@ -172,7 +168,7 @@ impl App {
         usize::from(height.saturating_sub(HEADER_ROWS + bar_rows(height)))
     }
 
-    /// What the cell is over: the `New project` chip of the header, or the chips of the bottom
+    /// What the cell is over: the `New space` chip of the header, or the chips of the bottom
     /// bar when it is drawn.
     pub(crate) fn hover_at(&self, column: u16, row: u16) -> Option<Hover> {
         let height = self.size.1.saturating_sub(1);
@@ -554,7 +550,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             muted
         }
     };
-    // The title, cut before the `New project` chip, which it gives way to.
+    // The title, cut before the `New space` chip, which it gives way to.
     let span = new_project_span(w);
     let header = truncate(HEADER_TITLE, span.start.saturating_sub(2));
     put(buf, area.y, 1, &header, accent.add_modifier(Modifier::BOLD));

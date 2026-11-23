@@ -60,7 +60,7 @@ fn session<'a>(tree: &'a Value, name: &str) -> &'a Value {
 /// Every terminal of session `main`, flattened.
 fn terminals(home: &Home) -> Vec<Value> {
     let t = tree(home);
-    session(&t, "main")["projects"]
+    session(&t, "main")["spaces"]
         .as_array()
         .unwrap()
         .iter()
@@ -75,7 +75,7 @@ fn terminal(home: &Home, id: u64) -> Option<Value> {
 
 fn first_panel(home: &Home) -> u64 {
     let t = tree(home);
-    session(&t, "main")["projects"][0]["panels"][0]["id"]
+    session(&t, "main")["spaces"][0]["panels"][0]["id"]
         .as_u64()
         .unwrap()
 }
@@ -144,11 +144,11 @@ fn ls_shows_the_tree_as_json_text_and_the_old_summary() {
     let t = tree(home);
     let main = session(&t, "main");
     assert_eq!(main["attached"], true);
-    assert_eq!(main["projects"][0]["panels"][0]["name_source"], "auto");
+    assert_eq!(main["spaces"][0]["panels"][0]["name_source"], "auto");
 
     let text = ok(home, &["ls", "--tree"]);
     assert!(text.starts_with("session main ["), "{text}");
-    assert!(text.contains("(attached)") && text.contains("  project "));
+    assert!(text.contains("(attached)") && text.contains("  space "));
     assert!(
         text.contains("    panel ") && text.contains("sleep"),
         "{text}"
@@ -248,7 +248,7 @@ fn panels_and_projects_are_created_focused_renamed_and_closed() {
         h.screen_text().contains("tests")
     });
     let t = tree(home);
-    let panels = session(&t, "main")["projects"][0]["panels"].clone();
+    let panels = session(&t, "main")["spaces"][0]["panels"].clone();
     let made = panels
         .as_array()
         .unwrap()
@@ -264,22 +264,22 @@ fn panels_and_projects_are_created_focused_renamed_and_closed() {
         &["rename-panel", "--panel", &old_panel.to_string(), "build"],
     );
     let t = tree(home);
-    let renamed = &session(&t, "main")["projects"][0]["panels"][0];
+    let renamed = &session(&t, "main")["spaces"][0]["panels"][0];
     assert_eq!(renamed["name"], "build");
     assert_eq!(renamed["name_source"], "manual");
 
-    let project = id_of(home, &["new-project", "api", "--dir", "/tmp"]);
+    let project = id_of(home, &["new-space", "api", "--dir", "/tmp"]);
     let t = tree(home);
-    let projects = session(&t, "main")["projects"].as_array().unwrap().clone();
+    let projects = session(&t, "main")["spaces"].as_array().unwrap().clone();
     assert_eq!(projects.len(), 2);
     assert_eq!(projects[1]["name"], "api");
     assert_eq!(projects[1]["id"], project);
-    h.capture("new-project");
+    h.capture("new-space");
 
     ok(home, &["close", &panel.to_string()]);
     let t = tree(home);
     assert_eq!(
-        session(&t, "main")["projects"][0]["panels"]
+        session(&t, "main")["spaces"][0]["panels"]
             .as_array()
             .unwrap()
             .len(),
@@ -287,7 +287,7 @@ fn panels_and_projects_are_created_focused_renamed_and_closed() {
     );
     ok(home, &["close", &project.to_string()]);
     let t = tree(home);
-    assert_eq!(session(&t, "main")["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(session(&t, "main")["spaces"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn errors_are_plain_text_or_json_and_exit_one() {
     let home = h.home();
     assert_eq!(
         error_of(home, &["close", "99999"]),
-        "99999 is not a terminal, panel or project"
+        "99999 is not a terminal, panel or space"
     );
     assert_eq!(
         error_of(home, &["focus", "99999"]),
@@ -329,14 +329,14 @@ fn errors_are_plain_text_or_json_and_exit_one() {
         "no session named \"nope\""
     );
     assert_eq!(
-        error_of(home, &["new-panel", "--project", "ghost"]),
-        "no project named \"ghost\" in session \"main\""
+        error_of(home, &["new-panel", "--space", "ghost"]),
+        "no space named \"ghost\" in session \"main\""
     );
 
     let out = home.run_deck(&["close", "--json", "99999"]);
     assert_eq!(out.status.code(), Some(1));
     let v: Value = serde_json::from_str(&stdout(&out)).unwrap();
-    assert_eq!(v["error"], "99999 is not a terminal, panel or project");
+    assert_eq!(v["error"], "99999 is not a terminal, panel or space");
 
     // A stale id from the environment is an error, never replaced.
     let mut cmd = home.deck_command(&["new-terminal"]);
@@ -356,7 +356,7 @@ fn the_session_flag_targets_that_sessions_active_panel() {
         &["new-terminal", "--session", "other", "--", "sleep", "30"],
     );
     let t = tree(home);
-    let in_other = session(&t, "other")["projects"][0]["panels"][0]["terminals"]
+    let in_other = session(&t, "other")["spaces"][0]["panels"][0]["terminals"]
         .as_array()
         .unwrap()
         .iter()
@@ -448,8 +448,8 @@ fn kept_terminals_are_saved_and_the_exited_one_is_gone_after_a_restart() {
 fn deck_inside(home: &Home, args: &[&str]) -> (bool, String, String) {
     let t = tree(home);
     let main = session(&t, "main");
-    let panel = main["projects"][0]["panels"][0]["id"].as_u64().unwrap();
-    let term = main["projects"][0]["panels"][0]["terminals"][0]["id"]
+    let panel = main["spaces"][0]["panels"][0]["id"].as_u64().unwrap();
+    let term = main["spaces"][0]["panels"][0]["terminals"][0]["id"]
         .as_u64()
         .unwrap();
     let mut cmd = home.deck_command(args);
@@ -472,7 +472,7 @@ fn a_caller_inside_deck_acts_on_its_own_panel_unless_a_session_is_named() {
     let id: u64 = out.trim().parse().unwrap();
     assert_eq!(terminals(home).iter().filter(|t| t["id"] == id).count(), 1);
     let t = tree(home);
-    let panel = &session(&t, "main")["projects"][0]["panels"][0];
+    let panel = &session(&t, "main")["spaces"][0]["panels"][0];
     assert_eq!(panel["id"], own_panel);
     assert!(
         panel["terminals"]
@@ -485,7 +485,7 @@ fn a_caller_inside_deck_acts_on_its_own_panel_unless_a_session_is_named() {
     let (good, _, err) = deck_inside(home, &["rename-panel", "build"]);
     assert!(good, "{err}");
     let t = tree(home);
-    let panel = &session(&t, "main")["projects"][0]["panels"][0];
+    let panel = &session(&t, "main")["spaces"][0]["panels"][0];
     assert_eq!(
         (panel["name"].as_str(), panel["name_source"].as_str()),
         (Some("build"), Some("manual"))
@@ -501,7 +501,7 @@ fn a_caller_inside_deck_acts_on_its_own_panel_unless_a_session_is_named() {
     let id: u64 = out.trim().parse().unwrap();
     let t = tree(home);
     assert!(
-        session(&t, "other")["projects"][0]["panels"][0]["terminals"]
+        session(&t, "other")["spaces"][0]["panels"][0]["terminals"]
             .as_array()
             .unwrap()
             .iter()

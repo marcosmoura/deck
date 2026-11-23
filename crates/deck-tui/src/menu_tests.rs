@@ -209,7 +209,7 @@ fn without_a_project_the_new_chip_flashes_no_project() {
     let mut a = app_with(&config(), (100, 24), empty);
     assert!(click(&mut a, NEW_CHIP, BAR).is_empty());
     assert!(a.menu.is_none());
-    assert_eq!(a.flash.as_ref().unwrap().0, "no project");
+    assert_eq!(a.flash.as_ref().unwrap().0, "no space");
 }
 
 #[test]
@@ -593,7 +593,7 @@ fn a_project_removed_meanwhile_closes_the_menu_with_a_flash() {
     view.projects.retain(|p| p.id != ProjectId(2));
     a.on_server(ServerMsg::SessionView(view));
     assert!(a.menu.is_none());
-    assert_eq!(a.flash.as_ref().unwrap().0, "project \"budget\" was closed");
+    assert_eq!(a.flash.as_ref().unwrap().0, "space \"budget\" was closed");
     assert!(!a.flash_error);
 }
 

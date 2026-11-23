@@ -447,7 +447,7 @@ fn a_session_opens_in_the_project_that_holds_its_directory_else_in_the_active_on
     sb.agent("claude");
     sb.agent("codex");
     let mut h = start(&sb);
-    let out = h.run_deck(&["new-project", "zeta-site", "--dir", &site.to_string_lossy()]);
+    let out = h.run_deck(&["new-space", "zeta-site", "--dir", &site.to_string_lossy()]);
     assert!(out.status.success(), "{}", support::stderr(&out));
     wait_until("both projects", TIMEOUT, || projects(&h).len() == 2);
     // Make the first project active: click its panel.
@@ -632,11 +632,11 @@ fn without_a_project_the_binding_and_the_button_flash_and_open_nothing() {
     h.send_keys("y");
     wait_until("no project", TIMEOUT, || projects(&h).is_empty());
     prefixed(&mut h, "R");
-    h.wait_for_text("no project to restore into", TIMEOUT);
+    h.wait_for_text("no space to restore into", TIMEOUT);
     assert!(!h.screen_text().contains("Restore agent session"));
-    wait_gone(&h, "no project to restore into");
+    wait_gone(&h, "no space to restore into");
     click_at(&mut h, CHIP, BAR_ROW);
-    h.wait_for_text("no project to restore into", TIMEOUT);
+    h.wait_for_text("no space to restore into", TIMEOUT);
     assert!(!h.screen_text().contains("Restore agent session"));
 }
 

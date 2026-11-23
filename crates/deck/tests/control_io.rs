@@ -71,7 +71,7 @@ fn script(home: &Home, extra: &[&str], script: &str) -> String {
 
 fn first_terminal(home: &Home) -> String {
     let tree: Value = serde_json::from_str(&ok(home, &["ls", "--json"])).unwrap();
-    tree["sessions"][0]["projects"][0]["panels"][0]["terminals"][0]["id"]
+    tree["sessions"][0]["spaces"][0]["panels"][0]["terminals"][0]["id"]
         .as_u64()
         .unwrap()
         .to_string()
@@ -125,7 +125,7 @@ fn a_terminal_never_types_into_itself_by_accident() {
     let own = first_terminal(home);
     let tree: Value = serde_json::from_str(&ok(home, &["ls", "--json"])).unwrap();
     let session = tree["sessions"][0]["id"].as_u64().unwrap().to_string();
-    let panel = tree["sessions"][0]["projects"][0]["panels"][0]["id"]
+    let panel = tree["sessions"][0]["spaces"][0]["panels"][0]["id"]
         .as_u64()
         .unwrap()
         .to_string();

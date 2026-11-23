@@ -39,7 +39,7 @@ const WHEEL_SESSIONS: usize = 2;
 const HINTS: &str = "⏎ resume  ←→ column  ↑↓ row  type to filter  esc close";
 const HINTS_NARROW: &str = "⏎ resume  tab column  esc close";
 /// The flash when there is no project to open the session in.
-const NO_PROJECT: &str = "no project to restore into";
+const NO_PROJECT: &str = "no space to restore into";
 
 /// What a column shows.
 #[derive(Debug, Clone, PartialEq, Eq)]

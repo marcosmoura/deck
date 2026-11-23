@@ -114,7 +114,7 @@ fn the_sidebar_shows_the_session_project_and_first_panel() {
     let path = h.capture("sidebar");
     assert!(path.is_file());
     let rows = rows(&h);
-    assert!(rows[0].starts_with(" Workspaces "), "{}", rows[0]);
+    assert!(rows[0].starts_with(" Spaces "), "{}", rows[0]);
     assert!(rows[2].starts_with(" ▾ dk"), "{}", rows[2]);
     assert!(rows[3].starts_with("▌  ❯  sh"), "{}", rows[3]);
     assert_eq!(rows[0].chars().nth(28), Some('│'));
@@ -188,7 +188,7 @@ fn a_new_project_takes_a_directory_and_a_name() {
     h.send_keys("~");
     h.send_keys(ENTER);
     // The home directory proposes `~`.
-    h.wait_for_text("Project name: ~", TIMEOUT);
+    h.wait_for_text("Space name: ~", TIMEOUT);
     h.send_keys(ENTER);
     wait_for_row(&h, " ▾ ~");
     h.wait_for_text("› ❯  sh", TIMEOUT);
@@ -204,10 +204,10 @@ fn a_new_project_takes_a_directory_and_a_name() {
     h.send_keys(CTRL_U);
     h.send_keys("~");
     h.send_keys(ENTER);
-    h.wait_for_text("Project name: ~", TIMEOUT);
+    h.wait_for_text("Space name: ~", TIMEOUT);
     h.send_keys(ENTER);
-    h.wait_for_text("a project named \"~\" already exists", TIMEOUT);
-    h.wait_for_text("Project name: ~", TIMEOUT);
+    h.wait_for_text("a space named \"~\" already exists", TIMEOUT);
+    h.wait_for_text("Space name: ~", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("other");
     h.send_keys(ENTER);
@@ -229,7 +229,7 @@ fn a_relative_directory_resolves_against_the_start_directory() {
     // The harness starts deck in /tmp/dk…; `..` is /tmp.
     h.send_keys("..");
     h.send_keys(ENTER);
-    h.wait_for_text("Project name: tmp", TIMEOUT);
+    h.wait_for_text("Space name: tmp", TIMEOUT);
     h.send_keys(ENTER);
     wait_for_row(&h, " ▾ tmp");
     wait_until("the new shell", TIMEOUT, || {
@@ -382,13 +382,13 @@ fn the_help_overlay_lists_the_bindings_and_shows_overrides() {
     for text in [
         "Session",
         "Panels",
-        "Projects",
+        "Spaces",
         "Terminal",
         "Sidebar",
         "New panel",
         "Next panel",
         "Previous panel",
-        "Close the project",
+        "Close the space",
         "Show or hide the sidebar",
         &format!("{p} c"),
         &format!("{p} 1-9"),

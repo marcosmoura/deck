@@ -304,7 +304,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, picker: &Picker, theme: &Th
     // The rows, scrolled so the selection is in sight.
     let pw = visible
         .iter()
-        .map(|s| width(&count(s.projects, "project", "projects")))
+        .map(|s| width(&count(s.projects, "space", "spaces")))
         .max()
         .unwrap_or(0);
     let tw = visible
@@ -348,7 +348,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, picker: &Picker, theme: &Th
         let row = format!(
             " {mark} {}  {}  {}  {attached}",
             pad(s.name.clone(), nw),
-            pad(count(s.projects, "project", "projects"), pw),
+            pad(count(s.projects, "space", "spaces"), pw),
             pad(count(s.terminals, "terminal", "terminals"), tw),
         );
         let y = line(top + u16::try_from(i).unwrap_or(0));
@@ -660,7 +660,7 @@ mod tests {
         assert!(joined.contains(HINTS), "{joined}");
         assert!(
             text.iter()
-                .any(|r| r.contains("  work      1 project  2 terminals")),
+                .any(|r| r.contains("  work      1 space  2 terminals")),
             "{joined}"
         );
         assert!(

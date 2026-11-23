@@ -84,7 +84,7 @@ fn the_picker_lists_every_session_with_the_current_one_marked() {
         .find(|r| r.contains("● main"))
         .expect("the current session is marked");
     assert!(
-        main.contains("1 project") && main.contains("1 terminal"),
+        main.contains("1 space") && main.contains("1 terminal"),
         "{main}"
     );
     assert!(screen.contains("   other"), "{screen}");

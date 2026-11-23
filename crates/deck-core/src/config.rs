@@ -40,7 +40,7 @@ impl HelpGroup {
         match self {
             Self::Session => "Session",
             Self::Panels => "Panels",
-            Self::Projects => "Projects",
+            Self::Projects => "Spaces",
             Self::Terminal => "Terminal",
             Self::Sidebar => "Sidebar",
         }
@@ -188,7 +188,7 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
         "Rename the panel",
     ),
     def("close_panel", &["X"], HelpGroup::Panels, "Close the panel"),
-    def("new_project", &["P"], HelpGroup::Projects, "New project"),
+    def("new_space", &["P"], HelpGroup::Projects, "New space"),
     def(
         "new_menu",
         &["N"],
@@ -196,16 +196,16 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
         "New panel menu: shell or agent",
     ),
     def(
-        "rename_project",
+        "rename_space",
         &["."],
         HelpGroup::Projects,
-        "Rename the project",
+        "Rename the space",
     ),
     def(
-        "close_project",
+        "close_space",
         &["Q"],
         HelpGroup::Projects,
-        "Close the project",
+        "Close the space",
     ),
     def(
         "toggle_sidebar",
@@ -1014,11 +1014,11 @@ mod tests {
             ("panel_9", "9"),
             ("rename_panel", ","),
             ("close_panel", "X"),
-            ("new_project", "P"),
+            ("new_space", "P"),
             ("new_menu", "N"),
             ("restore", "R"),
-            ("rename_project", "."),
-            ("close_project", "Q"),
+            ("rename_space", "."),
+            ("close_space", "Q"),
             ("toggle_sidebar", "b"),
             ("focus_sidebar", "Tab"),
             ("next_attention", "a"),

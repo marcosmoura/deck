@@ -124,7 +124,7 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let side: Vec<String> = rows.iter().map(|r| r.chars().take(29).collect()).collect();
     assert_eq!(
         side[0],
-        format!("{}│", pad(" Workspaces   + New project ", 28))
+        format!("{}│", pad(" Spaces         + New space ", 28))
     );
     assert_eq!(side[1], format!("{}│", pad("", 28)));
     assert_eq!(side[2], format!("{}│", pad(" ▾ terminal-multiplexer", 28)));
@@ -303,7 +303,7 @@ fn sidebar_rename_and_close_act_on_the_selected_row() {
     };
     assert_eq!(
         (p.label(), p.editor.text()),
-        ("Rename project:", "terminal-multiplexer".to_string())
+        ("Rename space:", "terminal-multiplexer".to_string())
     );
 }
 
@@ -421,7 +421,7 @@ fn a_new_project_asks_the_directory_then_the_name() {
     };
     assert_eq!(
         (p.label(), p.editor.text()),
-        ("Project name:", "~".to_string())
+        ("Space name:", "~".to_string())
     );
     let outs = run(&mut a, &[key(ct::KeyCode::Enter)]);
     assert_eq!(
@@ -457,7 +457,7 @@ fn a_new_project_asks_the_directory_then_the_name() {
     };
     assert_eq!(
         (p.label(), p.editor.text()),
-        ("Project name:", "other2".to_string())
+        ("Space name:", "other2".to_string())
     );
     run(&mut a, &[key(ct::KeyCode::Enter)]);
     a.on_server(ServerMsg::ActionResult(Err(ActionError::NotADirectory(
@@ -521,7 +521,7 @@ fn closing_asks_first_and_only_y_confirms() {
     };
     assert_eq!(
         c.question,
-        "Close project \"terminal-multiplexer\" and its 3 terminals? (y/n)"
+        "Close space \"terminal-multiplexer\" and its 3 terminals? (y/n)"
     );
     assert_eq!(
         run(&mut a, &[ch('y')]),
@@ -553,7 +553,7 @@ fn a_dialog_whose_target_goes_away_closes_with_a_flash() {
     assert!(a.modal.is_none());
     assert_eq!(
         a.flash.as_ref().unwrap().0,
-        "project \"terminal-multiplexer\" was closed"
+        "space \"terminal-multiplexer\" was closed"
     );
 
     // A dialog about something that is still there stays open.
@@ -587,7 +587,7 @@ fn empty_states_and_typing_that_goes_nowhere() {
     view.active_panel = None;
     let a = app_at(&Config::default(), (100, 24), view);
     let (_, rows) = screen(&a);
-    let text = format!("No projects — {} P to add one", prefix_label());
+    let text = format!("No spaces — {} P to add one", prefix_label());
     assert!(rows[11].contains(&text), "{rows:#?}");
 }
 
@@ -758,7 +758,7 @@ fn the_help_overlay_lists_every_binding_and_closes() {
     for line in [
         "Session",
         "Panels",
-        "Projects",
+        "Spaces",
         "Terminal",
         "Sidebar",
         "Help",
@@ -781,11 +781,12 @@ fn the_help_overlay_lists_every_binding_and_closes() {
     ] {
         assert!(all.contains(line), "{line:?} missing:\n{all}");
     }
-    // A rounded box in the middle; the groups are in the documented order.
+    // A rounded box in the middle; the groups are in the documented order (the last match:
+    // the sidebar header reads `Spaces` too).
     assert!(all.contains('╭') && all.contains('╰'));
-    let order = ["Session", "Panels", "Projects", "Terminal", "Sidebar"].map(|g| {
+    let order = ["Session", "Panels", "Spaces", "Terminal", "Sidebar"].map(|g| {
         rows.iter()
-            .position(|r| r.contains(&format!(" {g}")))
+            .rposition(|r| r.contains(&format!(" {g}")))
             .unwrap()
     });
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");

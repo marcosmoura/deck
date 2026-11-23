@@ -72,7 +72,7 @@ fn tree(h: &Harness) -> Value {
 }
 
 fn panel(h: &Harness) -> Value {
-    tree(h)["sessions"][0]["projects"][0]["panels"][0].clone()
+    tree(h)["sessions"][0]["spaces"][0]["panels"][0].clone()
 }
 
 fn panel_name(h: &Harness) -> String {

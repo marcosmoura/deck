@@ -143,7 +143,7 @@ fn dragging_the_separator_resizes_the_shell_and_back() {
     sleep(Duration::from_millis(50));
     motion(&mut h, 40);
     h.wait_for_text("SIDEBAR 40", TIMEOUT);
-    let accent = h.cell(0, 9).fg;
+    let accent = h.cell(0, 3).fg;
     wait_until("the accent separator", TIMEOUT, || {
         h.cell(5, 40).ch == '┃' && h.cell(5, 40).fg == accent
     });
@@ -343,13 +343,13 @@ fn the_bottom_bar_shows_the_new_chip_and_the_restore_chip_at_the_right() {
 }
 
 #[test]
-fn the_header_reads_workspaces_and_holds_the_new_project_chip() {
+fn the_header_reads_spaces_and_holds_the_new_space_chip() {
     let h = attached();
     wait_bar(&h);
     let header = rows(&h)[0].clone();
     let sidebar: String = header.chars().take(28).collect();
-    assert!(sidebar.starts_with(" Workspaces "), "{header:?}");
-    assert!(sidebar.trim_end().ends_with("+ New project"), "{header:?}");
+    assert!(sidebar.starts_with(" Spaces "), "{header:?}");
+    assert!(sidebar.trim_end().ends_with("+ New space"), "{header:?}");
     h.capture("header");
 }
 
@@ -357,12 +357,12 @@ fn the_header_reads_workspaces_and_holds_the_new_project_chip() {
 fn clicking_the_header_chip_adds_a_project_like_the_prefix_flow() {
     let mut h = attached();
     wait_bar(&h);
-    h.send_keys("\x1b[<0;16;1M");
-    h.send_keys("\x1b[<0;16;1m");
+    h.send_keys("\x1b[<0;18;1M");
+    h.send_keys("\x1b[<0;18;1m");
     h.wait_for_text("Directory:", TIMEOUT);
     h.send_keys("\x15/tmp");
     h.send_keys(ENTER);
-    h.wait_for_text("Project name:", TIMEOUT);
+    h.wait_for_text("Space name:", TIMEOUT);
     h.send_keys("\x15barchip");
     h.send_keys(ENTER);
     h.wait_for_text("barchip", TIMEOUT);
@@ -375,12 +375,12 @@ fn clicking_the_header_chip_with_a_prompt_open_does_nothing() {
     wait_bar(&h);
     prefixed(&mut h, "P");
     h.wait_for_text("Directory:", TIMEOUT);
-    h.send_keys("\x1b[<0;16;1M");
-    h.send_keys("\x1b[<0;16;1m");
+    h.send_keys("\x1b[<0;18;1M");
+    h.send_keys("\x1b[<0;18;1m");
     sleep(Duration::from_millis(300));
     let screen = h.screen_text();
     assert_eq!(screen.matches("Directory:").count(), 1, "{screen}");
-    assert!(!screen.contains("Project name:"), "{screen}");
+    assert!(!screen.contains("Space name:"), "{screen}");
 }
 
 #[test]
@@ -530,7 +530,7 @@ fn panels_in_sidebar(h: &Harness) -> usize {
 }
 
 fn new_project(h: &Harness, name: &str) -> String {
-    let out = h.run_deck(&["new-project", name, "--dir", "/tmp"]);
+    let out = h.run_deck(&["new-space", name, "--dir", "/tmp"]);
     assert!(out.status.success(), "{}", support::stderr(&out));
     stdout(&out).trim().to_string()
 }
@@ -717,7 +717,7 @@ fn a_project_closed_by_another_client_closes_the_menu_with_a_flash() {
     h.wait_for_text("New in api", TIMEOUT);
     let out = h.run_deck(&["close", &id]);
     assert!(out.status.success(), "{}", support::stderr(&out));
-    h.wait_for_text("project \"api\" was closed", TIMEOUT);
+    h.wait_for_text("space \"api\" was closed", TIMEOUT);
     wait_gone(&h, "New in");
 }
 

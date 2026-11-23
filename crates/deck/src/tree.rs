@@ -1,5 +1,5 @@
 //! The commands that list and edit deck's tree from a shell: `ls --json`/`--tree`,
-//! `new-project`, `new-panel`, `new-terminal`, `focus`, `close` and `rename-panel`.
+//! `new-space`, `new-panel`, `new-terminal`, `focus`, `close` and `rename-panel`.
 //!
 //! They never start a daemon. Without a target option they act "here": the session, panel
 //! and terminal named by the `DECK_*` variables of the terminal they run in.
@@ -44,12 +44,12 @@ pub struct LsArgs {
 pub struct NewProjectArgs {
     #[command(flatten)]
     pub common: Common,
-    /// The project's name.
+    /// The space's name.
     pub name: String,
-    /// The project's root (default: the current directory).
+    /// The space's root (default: the current directory).
     #[arg(long, value_name = "PATH")]
     pub dir: Option<PathBuf>,
-    /// Make the new project the active one.
+    /// Make the new space the active one.
     #[arg(long)]
     pub focus: bool,
 }
@@ -58,13 +58,13 @@ pub struct NewProjectArgs {
 pub struct NewPanelArgs {
     #[command(flatten)]
     pub common: Common,
-    /// The project, by id or name (default: this terminal's).
-    #[arg(long, value_name = "ID|NAME")]
+    /// The space, by id or name (default: this terminal's).
+    #[arg(long = "space", value_name = "ID|NAME")]
     pub project: Option<String>,
     /// The panel's name.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
-    /// The first terminal's directory (default: the project's root).
+    /// The first terminal's directory (default: the space's root).
     #[arg(long, value_name = "DIR")]
     pub cwd: Option<PathBuf>,
     /// Make the new panel the active one.
@@ -103,7 +103,7 @@ pub struct NewTerminalArgs {
 pub struct IdArgs {
     #[command(flatten)]
     pub common: Common,
-    /// The id of a terminal, panel or project (as `ls --json` shows).
+    /// The id of a terminal, panel or space (as `ls --json` shows).
     pub id: u64,
 }
 
@@ -236,7 +236,7 @@ pub fn pick_panel(
         .ok_or_else(|| anyhow!("no panel in session \"{}\"", session.name))
 }
 
-/// The project `new-panel` adds to: `--project`, else this terminal's panel's, else the
+/// The space `new-panel` adds to: `--space`, else this terminal's panel's, else the
 /// session's active one.
 pub fn pick_project(
     tree: &[SessionView],
@@ -262,7 +262,7 @@ pub fn pick_project(
     session
         .active_project
         .map(|p| Target::Id(p.0))
-        .ok_or_else(|| anyhow!("no project in session \"{}\"", session.name))
+        .ok_or_else(|| anyhow!("no space in session \"{}\"", session.name))
 }
 
 /// The launch spec of `--cwd`, `--env` and a program after `--`; `None` for a plain shell in
@@ -372,7 +372,7 @@ pub fn tree_json(tree: &[SessionView]) -> Value {
                 "id": s.id.0,
                 "name": s.name,
                 "attached": s.attached_clients > 0,
-                "projects": s.projects.iter().map(|p| project_json(s, p)).collect::<Vec<_>>(),
+                "spaces": s.projects.iter().map(|p| project_json(s, p)).collect::<Vec<_>>(),
             }))
             .collect::<Vec<_>>(),
     })
@@ -392,7 +392,7 @@ pub fn tree_text(tree: &[SessionView]) -> String {
         for p in &s.projects {
             let collapsed = if p.collapsed { " (collapsed)" } else { "" };
             out.push_str(&format!(
-                "  project {} [{}] {}{collapsed}\n",
+                "  space {} [{}] {}{collapsed}\n",
                 p.name,
                 p.id,
                 p.root.display()
@@ -905,7 +905,7 @@ mod tests {
         let doc = tree_json(&[s]);
         let sess = &doc["sessions"][0];
         assert_eq!(sess["attached"], true);
-        let panel = &sess["projects"][0]["panels"][0];
+        let panel = &sess["spaces"][0]["panels"][0];
         assert_eq!(panel["name_source"], "manual");
         assert_eq!(panel["active"], true);
         let term = &panel["terminals"][0];
@@ -940,7 +940,7 @@ mod tests {
         });
         let doc = tree_json(&[s]);
         assert_eq!(
-            doc["sessions"][0]["projects"][0]["panels"][0]["terminals"][0]["agent"],
+            doc["sessions"][0]["spaces"][0]["panels"][0]["terminals"][0]["agent"],
             json!({
                 "kind": "opencode",
                 "status": "waiting",
@@ -956,7 +956,7 @@ mod tests {
         s.attached_clients = 1;
         assert_eq!(
             tree_text(&[s]),
-            "session main [10] (attached)\n  project proj [11] /work\n    panel 1 [12] *\n      \
+            "session main [10] (attached)\n  space proj [11] /work\n    panel 1 [12] *\n      \
              1 [13] sh  /work  pid 113 *\n"
         );
     }

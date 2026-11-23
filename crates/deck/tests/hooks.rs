@@ -393,7 +393,7 @@ fn fake_claude() -> tempfile::TempDir {
 
 fn first_terminal(h: &Harness) -> Value {
     let doc: Value = serde_json::from_str(&stdout(&h.run_deck(&["ls", "--json"]))).unwrap();
-    doc["sessions"][0]["projects"][0]["panels"][0]["terminals"][0].clone()
+    doc["sessions"][0]["spaces"][0]["panels"][0]["terminals"][0].clone()
 }
 
 fn agent_event(h: &Harness, terminal: Option<u64>, payload: &str) -> (Output, Duration) {

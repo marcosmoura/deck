@@ -324,15 +324,12 @@ impl StateFile {
             for mut project in std::mem::take(&mut session.projects) {
                 max_id = max_id.max(project.id.0);
                 if !projects.insert(project.id.0) {
-                    notes.push(format!("duplicate project id {}: dropped", project.id));
+                    notes.push(format!("duplicate space id {}: dropped", project.id));
                     continue;
                 }
                 let name = unique_name(&project.name, &project_names);
                 if name != project.name {
-                    notes.push(format!(
-                        "duplicate project name {}: now {name}",
-                        project.name
-                    ));
+                    notes.push(format!("duplicate space name {}: now {name}", project.name));
                     project.name = name;
                 }
                 project_names.insert(project.name.clone());

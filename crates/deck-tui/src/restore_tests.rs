@@ -794,12 +794,12 @@ fn without_a_project_the_button_and_the_binding_flash_and_open_nothing() {
     prefix(&mut a);
     assert!(ch(&mut a, 'R').is_empty());
     assert!(a.restore.is_none());
-    assert_eq!(a.flash.as_ref().unwrap().0, "no project to restore into");
+    assert_eq!(a.flash.as_ref().unwrap().0, "no space to restore into");
     a.flash = None;
     let y = chip_row(&a);
     assert!(click(&mut a, 20, y).is_empty());
     assert!(a.restore.is_none());
-    assert_eq!(a.flash.as_ref().unwrap().0, "no project to restore into");
+    assert_eq!(a.flash.as_ref().unwrap().0, "no space to restore into");
 }
 
 #[test]

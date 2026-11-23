@@ -6,9 +6,9 @@ One page per feature, written by the work that ships it and kept current by ever
 
 - [Sessions](sessions.md): attach, detach, the default session, `deck new`, `deck ls`, `deck kill-session`, `deck rename-session`, `deck kill-server`, the session picker, the exit messages.
 - [Persistence](persistence.md): what survives a daemon restart, `deck kill-server --forget`, the state file.
-- [Sidebar](sidebar.md): the sidebar, panels and projects, prompts, confirmations and help.
+- [Sidebar](sidebar.md): the sidebar, panels and spaces, prompts, confirmations and help.
 - [Layout](layout.md): several terminals in a panel, the grid, adding, closing and focusing terminals.
 - [Keys](keys.md): the prefix, the bindings and how to change them.
 - [Config](config.md): where `config.toml` lives, `deck config default`, `check` and `path`.
-- [Control API](control-api.md): `deck ls --json`, `new-project`, `new-panel`, `new-terminal`, `focus`, `close`, `rename-panel`, `--keep` and the `DECK_*` targets.
+- [Control API](control-api.md): `deck ls --json`, `new-space`, `new-panel`, `new-terminal`, `focus`, `close`, `rename-panel`, `--keep` and the `DECK_*` targets.
 - [Agents](agents.md): the agent states and glyphs, detection by process, `[agents.<kind>] process`, hook events.

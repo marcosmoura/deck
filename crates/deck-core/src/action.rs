@@ -111,7 +111,7 @@ pub enum ActionError {
     NameHasControl,
     #[error("name must not contain /")]
     NameHasSlash,
-    #[error("a project named \"{0}\" already exists")]
+    #[error("a space named \"{0}\" already exists")]
     ProjectExists(String),
     #[error("a session named \"{0}\" already exists")]
     SessionExists(String),
@@ -119,7 +119,7 @@ pub enum ActionError {
     NotAbsolute(String),
     #[error("\"{0}\" is not a directory")]
     NotADirectory(String),
-    #[error("no project {0}")]
+    #[error("no space {0}")]
     NoSuchProject(ProjectId),
     #[error("no panel {0}")]
     NoSuchPanel(PanelId),
@@ -232,7 +232,7 @@ mod tests {
     fn error_messages_are_readable() {
         assert_eq!(
             ActionError::ProjectExists("api".into()).to_string(),
-            "a project named \"api\" already exists"
+            "a space named \"api\" already exists"
         );
         assert_eq!(
             ActionError::NotADirectory("/nope".into()).to_string(),

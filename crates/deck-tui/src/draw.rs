@@ -135,7 +135,7 @@ fn draw_empty(buf: &mut Buffer, panel: Rect, app: &App, theme: &Theme) {
             p.name,
             label(Action::NewPanel)
         ),
-        None => format!("No projects — {} to add one", label(Action::NewProject)),
+        None => format!("No spaces — {} to add one", label(Action::NewProject)),
     };
     let text = truncate(&text, panel.width);
     let x = panel.x + panel.width.saturating_sub(width(&text)) / 2;

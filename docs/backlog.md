@@ -8,8 +8,6 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-1. DECK-16
-
 ### Not ordered yet
 
 Open tasks the user has not placed in the queue: none.
@@ -32,7 +30,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-13 | OpenCode v2 hooks                      | done   | DECK-06          | —                                                                            |
 | DECK-14 | Release workflow and local install     | done   | —                | —                                                                            |
 | DECK-15 | Mouse text selection, copy on select   | done   | —                | —                                                                            |
-| DECK-16 | Call projects spaces                   | todo   | —                | —                                                                            |
+| DECK-16 | Call projects spaces                   | done   | —                | —                                                                            |
 
 ### Withdrawn
 

@@ -24,7 +24,7 @@ The focused terminal's border is in the theme's `border_focused` colour and its 
 
 ## Adding and closing
 
-- `new_terminal` (`t` after the prefix) starts a shell in the project's root at the end of the panel and focuses it. It is refused with `not enough room for another terminal` when the default sizes for one more terminal would leave any terminal under 10×3 cells inside its border in the current window.
+- `new_terminal` (`t` after the prefix) starts a shell in the space's root at the end of the panel and focuses it. It is refused with `not enough room for another terminal` when the default sizes for one more terminal would leave any terminal under 10×3 cells inside its border in the current window.
 - `close_terminal` (`x`) asks `Close terminal <number>? (y/n)`, then closes the focused terminal. A terminal whose shell exits goes the same way.
 - The others reflow to the new count. When the focused terminal goes, focus moves to the terminal that took its place, else the previous one.
 - When the last terminal goes, the panel closes.

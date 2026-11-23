@@ -54,9 +54,9 @@ impl Prompt {
     pub fn label(&self) -> &'static str {
         match self.kind {
             PromptKind::ProjectDir => "Directory:",
-            PromptKind::ProjectName { .. } => "Project name:",
+            PromptKind::ProjectName { .. } => "Space name:",
             PromptKind::RenamePanel(_) => "Rename panel:",
-            PromptKind::RenameProject(_) => "Rename project:",
+            PromptKind::RenameProject(_) => "Rename space:",
             PromptKind::NewSession => "New session:",
             PromptKind::RenameSession { .. } => "Rename session:",
         }
@@ -260,7 +260,7 @@ impl App {
         };
         let terminals: usize = p.panels.iter().map(|x| x.terminals.len()).sum();
         let question = format!(
-            "Close project \"{}\" and its {}? (y/n)",
+            "Close space \"{}\" and its {}? (y/n)",
             p.name,
             plural(terminals, "terminal", "terminals")
         );
@@ -487,7 +487,7 @@ impl App {
                 format!("panel \"{name}\" was closed")
             }
             Some(Target::Project(id, name)) if self.mirror.find_project(id).is_none() => {
-                format!("project \"{name}\" was closed")
+                format!("space \"{name}\" was closed")
             }
             Some(Target::Terminal(id, index)) if !self.has_terminal(id) => {
                 format!("terminal {index} was closed")

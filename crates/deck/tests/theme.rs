@@ -63,7 +63,7 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     assert_eq!(h.cell(3, 0).fg, ACCENT);
     assert_eq!(h.cell(3, 3).fg, ACCENT);
     assert_eq!(h.cell(23, 1).fg, ACCENT, "the session name");
-    assert_eq!(h.cell(0, 9).fg, ACCENT, "the sidebar header");
+    assert_eq!(h.cell(0, 3).fg, ACCENT, "the sidebar header");
     // The sidebar's background, on empty cells of its rows.
     for row in [1, 8, 15] {
         assert_eq!(h.cell(row, 20).bg, Color::Indexed(236), "row {row}");

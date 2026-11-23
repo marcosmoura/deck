@@ -234,7 +234,7 @@ impl App {
         if self.mirror.find_project(menu.project).is_some() {
             return;
         }
-        let text = format!("project \"{}\" was closed", menu.name);
+        let text = format!("space \"{}\" was closed", menu.name);
         self.menu = None;
         self.set_flash(text, now, false);
     }

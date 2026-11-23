@@ -1,18 +1,18 @@
 # Persistence
 
-Sessions survive the daemon stopping: after `deck kill-server`, a crash, a logout or a reboot, the next `deck` brings back every session with its projects, panels, terminal grid, names, ratios and focus.
+Sessions survive the daemon stopping: after `deck kill-server`, a crash, a logout or a reboot, the next `deck` brings back every session with its spaces, panels, terminal grid, names, ratios and focus.
 
 ## What comes back
 
-- Sessions, projects, panels and terminals with their ids, names, order, grid ratios, the focused terminal of each panel, the active project and panel of each session, collapsed projects, and which session was attached last (the session picker's order).
-- Every terminal starts again with a fresh process: a shell, or the explicit program and arguments it was started with. Shells start in the directory they were last in (see [Where a shell is](#where-a-shell-is)). If that directory is gone, in the project's directory; if that is gone too, in your home directory.
+- Sessions, spaces, panels and terminals with their ids, names, order, grid ratios, the focused terminal of each panel, the active space and panel of each session, collapsed spaces, and which session was attached last (the session picker's order).
+- Every terminal starts again with a fresh process: a shell, or the explicit program and arguments it was started with. Shells start in the directory they were last in (see [Where a shell is](#where-a-shell-is)). If that directory is gone, in the space's directory; if that is gone too, in your home directory.
 - A terminal that cannot start (its program no longer exists) is dropped and the next client shows a notice naming it; its panel goes if it was the only terminal. A restored terminal that fails at once is removed the same way, and its session stays.
 
-A directory that is not valid UTF-8 cannot be saved exactly: that terminal starts in its project directory instead.
+A directory that is not valid UTF-8 cannot be saved exactly: that terminal starts in its space directory instead.
 
 ## Where a shell is
 
-deck follows each terminal's working directory, so a restored shell comes back where you left it, and a new terminal opens where the focused terminal of its panel is (a new panel still opens in the project's directory; if the focused terminal's directory is gone, a new terminal falls back to the focused terminal's starting directory, then the project's directory).
+deck follows each terminal's working directory, so a restored shell comes back where you left it, and a new terminal opens where the focused terminal of its panel is (a new panel still opens in the space's directory; if the focused terminal's directory is gone, a new terminal falls back to the focused terminal's starting directory, then the space's directory).
 
 - A shell that reports its directory with OSC 7 (`ESC ] 7 ; file://<host>/<path> BEL`) is followed at once. The host may be empty, `localhost` or the machine's host name; the path is percent-decoded. A terminal that has reported once is never looked up again.
 - For the others, deck asks the operating system every 5 s for the directory of the terminal's own process (the shell, or the program started explicitly). A job running in the foreground is ignored: its directory is not where the shell is. A `cd` is therefore saved up to 5 s plus the 500 ms save window later.

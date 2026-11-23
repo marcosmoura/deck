@@ -77,7 +77,7 @@ fn terminal_id(h: &Harness) -> TerminalId {
     let out = h.run_deck(&["ls", "--json"]);
     let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
     TerminalId(
-        doc["sessions"][0]["projects"][0]["panels"][0]["terminals"][0]["id"]
+        doc["sessions"][0]["spaces"][0]["panels"][0]["terminals"][0]["id"]
             .as_u64()
             .unwrap(),
     )
@@ -86,7 +86,7 @@ fn terminal_id(h: &Harness) -> TerminalId {
 fn agent_json(h: &Harness) -> Value {
     let out = h.run_deck(&["ls", "--json"]);
     let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
-    doc["sessions"][0]["projects"][0]["panels"][0]["terminals"][0]["agent"].clone()
+    doc["sessions"][0]["spaces"][0]["panels"][0]["terminals"][0]["agent"].clone()
 }
 
 /// Sends an `AgentEvent` to the daemon of `h`, like the hooks of a later sub-spec will.
@@ -216,7 +216,7 @@ fn inactive_first_panel(h: &mut Harness) -> (String, String, TerminalId) {
     });
     let out = h.run_deck(&["ls", "--json"]);
     let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
-    let project = &doc["sessions"][0]["projects"][0];
+    let project = &doc["sessions"][0]["spaces"][0];
     (
         project["name"].as_str().unwrap().to_string(),
         project["panels"][0]["name"].as_str().unwrap().to_string(),
@@ -228,7 +228,7 @@ fn inactive_first_panel(h: &mut Harness) -> (String, String, TerminalId) {
 fn panel_name(h: &Harness) -> String {
     let out = h.run_deck(&["ls", "--json"]);
     let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
-    doc["sessions"][0]["projects"][0]["panels"][0]["name"]
+    doc["sessions"][0]["spaces"][0]["panels"][0]["name"]
         .as_str()
         .unwrap()
         .to_string()
@@ -375,7 +375,7 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
         });
         let out = h.run_deck(&["ls", "--json"]);
         let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
-        let panels = doc["sessions"][0]["projects"][0]["panels"]
+        let panels = doc["sessions"][0]["spaces"][0]["panels"]
             .as_array()
             .unwrap();
         let last = panels.last().unwrap();

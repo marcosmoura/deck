@@ -54,7 +54,7 @@ pub fn notice_span(level: NoticeLevel) -> Duration {
 /// Lines the wheel scrolls per notch.
 const WHEEL_LINES: i32 = 3;
 /// The flash when the bottom `+ New` button has no project to open the menu for.
-const NO_PROJECT_FOR_NEW: &str = "no project";
+const NO_PROJECT_FOR_NEW: &str = "no space";
 
 /// What the event loop must do after the state changed.
 #[derive(Debug, PartialEq, Eq)]
@@ -1036,7 +1036,7 @@ impl App {
                     None,
                 )],
                 None => {
-                    self.set_flash("no project to add a panel to".into(), now, false);
+                    self.set_flash("no space to add a panel to".into(), now, false);
                     Vec::new()
                 }
             },
