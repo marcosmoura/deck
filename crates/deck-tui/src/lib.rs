@@ -7,6 +7,9 @@ mod app;
 mod colors;
 mod convert;
 mod draw;
+mod graphics;
+#[cfg(test)]
+mod graphics_tests;
 mod grid;
 #[cfg(test)]
 mod grid_tests;
@@ -153,6 +156,14 @@ async fn run_async(mut options: Options) -> Exit {
         .map(PathBuf::from);
     let mut app = App::new(&Config::default(), size, &probe.leftover).with_dirs(cwd.clone(), home);
     app.truecolor = convert::truecolor(std::env::var("COLORTERM").ok().as_deref());
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    if graphics::detect(&env, deck_core::theme::IconImages::Auto, app.truecolor) {
+        app.images = Some(graphics::Images::new(
+            probe.fg,
+            probe.colors.map(|c| c.bg),
+            probe.palette,
+        ));
+    }
     app.hold_until_configured();
 
     let ctx = Ctx {
@@ -226,6 +237,10 @@ async fn run_async(mut options: Options) -> Exit {
                 app.tick(now);
                 if app.take_dirty() {
                     last_draw = now;
+                    // The images this frame draws go out first.
+                    if let Err(e) = app.send_images(terminal.backend_mut()) {
+                        break Exit::Error(format!("cannot draw: {e}"));
+                    }
                     if let Err(e) = terminal.draw(|f| draw::draw(f, &app)) {
                         break Exit::Error(format!("cannot draw: {e}"));
                     }
@@ -288,6 +303,8 @@ async fn run_async(mut options: Options) -> Exit {
     stop.store(true, Ordering::Release);
     let _ = reader.join();
     link.close().await;
+    // The images go before the alternate screen does.
+    let _ = app.delete_images(terminal.backend_mut());
     drop(terminal);
     drop(guard);
     exit

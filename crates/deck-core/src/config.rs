@@ -782,6 +782,7 @@ mod tests {
         }
         assert!(theme.contains_key("border_style"));
         assert!(theme.contains_key("icons"));
+        assert!(theme.contains_key("icon_images"));
         assert!(theme.contains_key("icon_glyphs"));
         let glyphs = theme["glyphs"].as_table().unwrap();
         for name in [

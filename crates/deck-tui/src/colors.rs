@@ -1,4 +1,5 @@
-//! Asking the outer terminal for its foreground and background (OSC 10 and OSC 11).
+//! Asking the outer terminal for its foreground and background (OSC 10 and OSC 11) and for
+//! its 16 base colours (OSC 4).
 
 use std::time::{Duration, Instant};
 
@@ -10,19 +11,35 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_millis(200);
 /// After a timeout, how long colour answers that come late are still taken out of the input.
 pub const LATE_WINDOW: Duration = Duration::from_secs(3);
 
-/// Both colour queries, BEL-terminated, then a device-attributes request (DA1). Terminals
-/// answer in order, so the DA1 reply tells that no colour answer is still on its way.
-pub const QUERY: &[u8] = b"\x1b]10;?\x07\x1b]11;?\x07\x1b[c";
+/// The colour queries (foreground, background, then palette entries 0 to 15), BEL-terminated,
+/// then a device-attributes request (DA1). Terminals answer in order, so the DA1 reply tells
+/// that no colour answer is still on its way.
+pub const QUERY: &[u8] = b"\x1b]10;?\x07\x1b]11;?\x07\
+\x1b]4;0;?\x07\x1b]4;1;?\x07\x1b]4;2;?\x07\x1b]4;3;?\x07\
+\x1b]4;4;?\x07\x1b]4;5;?\x07\x1b]4;6;?\x07\x1b]4;7;?\x07\
+\x1b]4;8;?\x07\x1b]4;9;?\x07\x1b]4;10;?\x07\x1b]4;11;?\x07\
+\x1b]4;12;?\x07\x1b]4;13;?\x07\x1b]4;14;?\x07\x1b]4;15;?\x07\
+\x1b[c";
+
+/// An RGB colour as the terminal reported it.
+pub type Rgb = (u8, u8, u8);
+
+/// The outer terminal's own 16 base colours; `None` for an entry it did not answer.
+pub type Palette = [Option<Rgb>; 16];
 
 /// What came back from the outer terminal.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Probe {
     /// Both colours, `None` unless the terminal gave both.
     pub colors: Option<OuterColors>,
+    /// The foreground alone, for the logos' colour.
+    pub fg: Option<Rgb>,
+    /// The base colours it answered.
+    pub palette: Palette,
     /// Bytes that were not part of an answer, to pass on as input.
     pub leftover: Vec<u8>,
     /// Colour answers that may still arrive: 0 once the DA1 reply was seen, else the
-    /// number of colours missing.
+    /// number of colours and palette entries missing.
     pub late: u8,
 }
 
@@ -52,10 +69,15 @@ pub fn probe(read: ReadInput<'_>, timeout: Duration) -> Probe {
     let late = if parsed.da1 {
         0
     } else {
-        u8::from(parsed.fg.is_none()) + u8::from(parsed.bg.is_none())
+        let missing = parsed.palette.iter().filter(|c| c.is_none()).count();
+        u8::from(parsed.fg.is_none())
+            + u8::from(parsed.bg.is_none())
+            + u8::try_from(missing).unwrap_or(16)
     };
     Probe {
         late,
+        fg: parsed.fg,
+        palette: parsed.palette,
         colors: parsed
             .fg
             .zip(parsed.bg)
@@ -151,34 +173,35 @@ fn answer_step(held: usize, key: &KeyEvent) -> Step {
     let plain = char_with(KeyModifiers::NONE).or_else(|| char_with(KeyModifiers::SHIFT));
     let ok = match held {
         0 => char_with(KeyModifiers::ALT) == Some(']'),
-        1 => plain == Some('1'),
-        2 => matches!(plain, Some('0' | '1')),
-        3 => plain == Some(';'),
+        // `]10;`, `]11;` or `]4;n;`.
+        1 => matches!(plain, Some('1' | '4')),
+        2 => matches!(plain, Some('0' | '1' | ';')),
+        3 => matches!(plain, Some(';' | '0'..='9')),
         _ => {
             if char_with(KeyModifiers::CONTROL) == Some('g')
                 || char_with(KeyModifiers::ALT) == Some('\\')
             {
                 return Step::Done;
             }
-            plain.is_some_and(|c| c.is_ascii_hexdigit() || "rgb:/".contains(c))
+            plain.is_some_and(|c| c.is_ascii_hexdigit() || "rgb:/;".contains(c))
         }
     };
     if ok { Step::Continue } else { Step::No }
 }
 
-type Rgb = (u8, u8, u8);
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Answers {
     pub fg: Option<Rgb>,
     pub bg: Option<Rgb>,
+    /// The OSC 4 replies for the base colours.
+    pub palette: Palette,
     /// The DA1 reply was seen.
     pub da1: bool,
     /// Everything else, without a trailing unfinished reply.
     pub rest: Vec<u8>,
 }
 
-/// Finds the OSC 10, OSC 11 and DA1 replies in `bytes`.
+/// Finds the OSC 10, OSC 11, OSC 4 and DA1 replies in `bytes`.
 pub fn parse_answers(bytes: &[u8]) -> Answers {
     let mut out = Answers::default();
     let mut i = 0;
@@ -190,6 +213,12 @@ pub fn parse_answers(bytes: &[u8]) -> Answers {
             }
             Some((Reply::Color(_, c), len)) => {
                 out.bg = out.bg.or(c);
+                i += len;
+            }
+            Some((Reply::Palette(n, c), len)) => {
+                if let Some(slot) = out.palette.get_mut(n) {
+                    *slot = slot.or(c);
+                }
                 i += len;
             }
             Some((Reply::Da1, len)) => {
@@ -220,6 +249,8 @@ pub fn parse_answers(bytes: &[u8]) -> Answers {
 
 enum Reply {
     Color(u8, Option<Rgb>),
+    /// A base colour: its index and colour.
+    Palette(usize, Option<Rgb>),
     Da1,
 }
 
@@ -233,10 +264,23 @@ fn reply_at(bytes: &[u8]) -> Option<(Reply, usize)> {
         return (*byte == b'c').then_some((Reply::Da1, 3 + end + 1));
     }
     let body = bytes.strip_prefix(b"\x1b]")?;
-    let (slot, payload) = if let Some(payload) = body.strip_prefix(b"10;") {
-        (10, payload)
+    // `4;n;` for a palette entry, `10;` or `11;` for the foreground and background.
+    let (slot, index, payload, prefix_len) = if let Some(rest) = body.strip_prefix(b"4;") {
+        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        let n: usize = std::str::from_utf8(rest.get(..digits)?)
+            .ok()?
+            .parse()
+            .ok()?;
+        (
+            4,
+            Some(n),
+            rest.get(digits..)?.strip_prefix(b";")?,
+            2 + digits + 1,
+        )
+    } else if let Some(payload) = body.strip_prefix(b"10;") {
+        (10, None, payload, 3)
     } else {
-        (11, body.strip_prefix(b"11;")?)
+        (11, None, body.strip_prefix(b"11;")?, 3)
     };
     let (end, term_len) = payload.iter().enumerate().find_map(|(i, &b)| match b {
         0x07 => Some((i, 1)),
@@ -246,7 +290,11 @@ fn reply_at(bytes: &[u8]) -> Option<(Reply, usize)> {
     let color = std::str::from_utf8(payload.get(..end)?)
         .ok()
         .and_then(parse_color);
-    Some((Reply::Color(slot, color), 2 + 3 + end + term_len))
+    let len = 2 + prefix_len + end + term_len;
+    match index {
+        Some(n) => Some((Reply::Palette(n, color), len)),
+        None => Some((Reply::Color(slot, color), len)),
+    }
 }
 
 /// `rgb:R/G/B` with one to four hex digits per channel, scaled to 8 bits.
@@ -373,7 +421,43 @@ mod tests {
         let p = probe(&mut read, Duration::from_millis(30));
         assert_eq!(p.colors, None);
         assert_eq!(p.leftover, b"hi");
-        assert_eq!(p.late, 2);
+        // Both colours and the 16 base colours are missing.
+        assert_eq!(p.late, 18);
+    }
+
+    #[test]
+    fn osc_4_replies_fill_the_palette_in_both_forms_and_stay_out_of_the_input() {
+        let a = parse_answers(
+            b"\x1b]10;rgb:ff/ff/ff\x07\x1b]4;0;rgb:00/00/00\x07\x1b]4;4;rgb:1111/2222/3333\x1b\\\
+              \x1b]4;15;rgb:f/f/f\x07\x1b]4;16;rgb:1/1/1\x07x\x1b[?6c",
+        );
+        assert_eq!(a.palette[0], Some((0, 0, 0)));
+        assert_eq!(a.palette[4], Some((0x11, 0x22, 0x33)));
+        assert_eq!(a.palette[15], Some((255, 255, 255)));
+        assert_eq!(a.palette[1], None);
+        assert_eq!(a.fg, Some((255, 255, 255)));
+        // An index out of the base 16 is dropped, not passed on.
+        assert_eq!(a.rest, b"x");
+        assert!(a.da1);
+    }
+
+    #[test]
+    fn an_unfinished_osc_4_reply_is_dropped_and_the_query_ends_on_da1() {
+        let a = parse_answers(b"hi\x1b]4;12;rgb:ff");
+        assert_eq!(a.rest, b"hi");
+        assert!(QUERY.ends_with(b"\x1b[c"));
+        assert!(QUERY.starts_with(b"\x1b]10;?\x07\x1b]11;?\x07\x1b]4;0;?\x07"));
+        assert_eq!(QUERY.windows(3).filter(|w| w == b"]4;").count(), 16);
+    }
+
+    #[test]
+    fn late_osc_4_answers_are_dropped_too() {
+        let now = Instant::now();
+        let mut late = LateAnswers::new(2, now);
+        let mut input = b"a".to_vec();
+        input.extend_from_slice(b"\x1b]4;12;rgb:1111/2222/3333\x07b");
+        input.extend_from_slice(b"\x1b]4;3;rgb:0/0/0\x1b\\c");
+        assert_eq!(feed_all(&mut late, keys(&input), now), keys(b"abc"));
     }
 
     #[test]

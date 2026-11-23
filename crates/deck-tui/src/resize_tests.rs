@@ -158,7 +158,7 @@ fn the_badge_shows_while_repeating_and_goes_with_the_deadline() {
     let (_, buf, rows) = render(&a);
     let theme = Theme::default();
     assert!(
-        rows[23].starts_with(" RESIZE  terminal-multiplexer › ❯ tests"),
+        rows[23].starts_with(" RESIZE  terminal-multiplexer › ❯  tests"),
         "{}",
         rows[23]
     );

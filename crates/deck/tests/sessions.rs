@@ -42,8 +42,9 @@ fn rows(h: &Harness) -> Vec<String> {
 /// Waits until the sidebar header (the first row) names the session.
 fn wait_for_session(h: &Harness, name: &str) {
     wait_until(&format!("the session {name}"), TIMEOUT, || {
+        // The status bar starts with the session's name; the sidebar header cuts it short.
         rows(h)
-            .first()
+            .last()
             .is_some_and(|r| r.trim_start().split(' ').next() == Some(name))
     });
 }

@@ -40,16 +40,24 @@ fn fake(name: &str, body: &str) -> tempfile::TempDir {
 
 /// `deck` with the sidebar on, a fast detection tick and `bin` first on the shell's `PATH`.
 fn attached(bin: &tempfile::TempDir) -> Harness {
+    attached_in(bin, &[])
+}
+
+/// [`attached`] with more variables in the client's environment.
+fn attached_in(bin: &tempfile::TempDir, env: &[(&str, &str)]) -> Harness {
     let path = format!(
         "{}:{}",
         bin.path().display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let h = Harness::builder(SIZE)
+    let mut builder = Harness::builder(SIZE)
         .config_unset("sidebar")
         .env("PATH", &path)
-        .env("DECK_TEST_AGENT_POLL_MS", "100")
-        .deck();
+        .env("DECK_TEST_AGENT_POLL_MS", "100");
+    for (key, value) in env {
+        builder = builder.env(key, value);
+    }
+    let h = builder.deck();
     h.wait_for_text("│$", TIMEOUT);
     h
 }
@@ -174,7 +182,7 @@ fn a_program_without_a_title_names_the_panel_until_it_exits() {
     h.wait_for_text("nvim-ready", TIMEOUT);
     wait_name(&h, "nvim");
     assert_eq!(panel(&h)["terminals"][0]["program"], "nvim");
-    h.wait_for_row_start("▌  \u{270e} nvim", TIMEOUT);
+    h.wait_for_row_start("▌  \u{270e}  nvim", TIMEOUT);
     h.capture("program-name");
 
     // It exits: the panel is named after the shell again.
@@ -244,7 +252,7 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
     h.send_keys("claude\r");
     h.wait_for_text("agent-ready", TIMEOUT);
     wait_row(&h, 3, "the agent icon", |r| {
-        r.contains("\u{273b} Fix login bug")
+        r.contains("\u{273b}  Fix login bug")
     });
     // A second panel with a shell: its row starts with the terminal icon.
     h.send_bytes(PREFIX);
@@ -253,6 +261,9 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
         r.starts_with("\u{258c}  \u{276f} ")
     });
     let first = rows(&h)[3].clone();
+    // Names start at the same column whatever the icon.
+    assert_eq!(first.chars().nth(6), Some('F'), "{first}");
+    assert_eq!(rows(&h)[4].chars().nth(6), Some('s'), "{}", rows(&h)[4]);
     assert!(
         first.starts_with("   \u{273b} ") || first.contains(" \u{273b} "),
         "{first}"
@@ -273,10 +284,48 @@ fn a_program_switches_the_icon_and_the_shell_brings_it_back() {
     h.send_keys("nvim\r");
     h.wait_for_text("nvim-ready", TIMEOUT);
     wait_row(&h, 3, "the editor icon", |r| {
-        r.starts_with("\u{258c}  \u{270e} nvim")
+        r.starts_with("\u{258c}  \u{270e}  nvim")
     });
     h.send_keys("\r");
     wait_row(&h, 3, "the shell icon again", |r| {
         r.starts_with("\u{258c}  \u{276f} ")
     });
+}
+
+/// Runs the fake `claude` in an attached client with `env` and returns the harness once its
+/// sidebar row has the agent's title.
+fn claude_panel(env: &[(&str, &str)]) -> Harness {
+    let bin = fake(
+        "claude",
+        "printf '\\033]2;\u{2733} Fix login bug\\007'\necho agent-ready\nread line",
+    );
+    let mut h = attached_in(&bin, env);
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    // The shell's icon gives way to the agent's.
+    wait_row(&h, 3, "the agent's icon", |r| {
+        r.contains("Fix login bug") && !r.contains('\u{276f}')
+    });
+    h
+}
+
+#[test]
+fn ghostty_shows_the_agent_logo_and_tmux_keeps_the_text_icon() {
+    let image = "\u{10EEEE}";
+    let h = claude_panel(&[("TERM_PROGRAM", "ghostty")]);
+    let row = rows(&h)[3].clone();
+    assert!(row.starts_with("\u{258c}"), "{row}");
+    // The logo is two cells wide.
+    assert_eq!(row.matches(image).count(), 2, "{row}");
+    assert!(!row.contains('\u{273b}'), "{row}");
+    // The status bar has the image as well.
+    assert!(rows(&h)[23].contains(image), "{}", rows(&h)[23]);
+    // The name starts at column 6, as it does after a text icon.
+    assert_eq!(h.cell(3, 6).ch, 'F');
+    h.capture("logos");
+
+    // Inside tmux the same terminal gets the text icon.
+    let h = claude_panel(&[("TERM_PROGRAM", "ghostty"), ("TMUX", "/tmp/x,1,0")]);
+    let row = rows(&h)[3].clone();
+    assert!(row.contains('\u{273b}') && !row.contains(image), "{row}");
 }

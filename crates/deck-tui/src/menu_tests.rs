@@ -108,61 +108,27 @@ fn text(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
     (from..to).map(|x| buf[(x, y)].symbol()).collect()
 }
 
-/// `budget` (project 2) is on window row 6 of the mockup; the button is at columns 18..27.
-const BUDGET: u16 = 6;
-const BUTTON: u16 = 20;
+/// The bottom bar of the 24-row window is on row 22; its `+ New` chip is on columns 1..8.
+const BAR: u16 = 22;
+const NEW_CHIP: u16 = 3;
 
+/// The menu of `budget` (project 2), opened by selecting it in sidebar focus and clicking
+/// `+ New`.
 fn open_by_click() -> App {
     let mut a = app();
-    moved(&mut a, 10, BUDGET);
-    assert!(down(&mut a, BUTTON, BUDGET).is_empty());
+    prefix(&mut a);
+    press(&mut a, ct::KeyCode::Tab);
+    for _ in 0..3 {
+        press(&mut a, ct::KeyCode::Down);
+    }
+    assert_eq!(a.selection, Some(Sel::Project(ProjectId(2))));
+    assert!(click(&mut a, NEW_CHIP, BAR).is_empty());
+    assert_eq!(a.menu.as_ref().map(|m| m.project), Some(ProjectId(2)));
     a
 }
 
 #[test]
-fn the_button_shows_on_the_hovered_project_row_and_follows_the_pointer() {
-    let mut a = app();
-    assert_eq!(
-        text(&buffer(&a), BUDGET, 0, 29),
-        " ▾ budget                   │"
-    );
-    moved(&mut a, 10, BUDGET);
-    assert_eq!(a.hover, Some(Hover::ProjectNew(ProjectId(2))));
-    assert_eq!(
-        text(&buffer(&a), BUDGET, 0, 29),
-        " ▾ budget         [ New ▾ ] │"
-    );
-    // Moving to another project row moves the button.
-    moved(&mut a, 3, 2);
-    let buf = buffer(&a);
-    assert_eq!(text(&buf, BUDGET, 0, 29), " ▾ budget                   │");
-    assert!(text(&buf, 2, 0, 29).contains("[ New ▾ ]"));
-    // A panel row has none; neither has the panel area.
-    moved(&mut a, 3, 3);
-    assert!(!text(&buffer(&a), 3, 0, 29).contains("[ New"));
-    moved(&mut a, 3, 2);
-    moved(&mut a, 50, 5);
-    assert_eq!(a.hover, None);
-    assert!(!text(&buffer(&a), 2, 0, 29).contains("[ New"));
-}
-
-#[test]
-fn the_button_is_accent_coloured_and_selection_coloured_under_the_pointer() {
-    let mut a = app();
-    moved(&mut a, 10, BUDGET);
-    let buf = buffer(&a);
-    assert_eq!(buf[(BUTTON, BUDGET)].fg, color(a.theme.accent));
-    assert_eq!(buf[(BUTTON, BUDGET)].bg, color(a.theme.sidebar_bg));
-    moved(&mut a, BUTTON, BUDGET);
-    let buf = buffer(&a);
-    let cell = &buf[(BUTTON, BUDGET)];
-    let reversed = cell.modifier.contains(Modifier::REVERSED);
-    let themed = cell.bg == color(a.theme.selection_bg) && cell.fg == color(a.theme.selection_fg);
-    assert!(reversed || themed, "{cell:?}");
-}
-
-#[test]
-fn the_button_wins_the_right_edge_and_takes_its_room_off_the_name() {
+fn project_rows_have_no_button_and_keep_their_counts_under_the_pointer() {
     let view = SessionView {
         projects: vec![
             project(1, "terminal-multiplexer", true, vec![panel(3, "a", 1)]),
@@ -173,84 +139,95 @@ fn the_button_wins_the_right_edge_and_takes_its_room_off_the_name() {
         ..mockup()
     };
     let mut a = app_with(&config(), (100, 24), view);
-    // The collapsed project shows its count while idle.
     assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-multiplexer   1 │");
     moved(&mut a, 10, 2);
-    assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-mu…   [ New ▾ ] │");
-    // The count reappears when the hover ends.
-    moved(&mut a, 60, 2);
+    assert_eq!(a.hover, None);
     assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-multiplexer   1 │");
-}
-
-#[test]
-fn the_button_shows_on_the_selected_project_in_sidebar_focus() {
-    let mut a = app();
+    // Selecting it in sidebar focus does not add a button either.
     prefix(&mut a);
     press(&mut a, ct::KeyCode::Tab);
-    assert_eq!(a.selection, Some(Sel::Panel(ProjectId(1), PanelId(3))));
-    assert!(!text(&buffer(&a), 2, 0, 29).contains("[ New"));
     press(&mut a, ct::KeyCode::Up);
     press(&mut a, ct::KeyCode::Up);
     assert_eq!(a.selection, Some(Sel::Project(ProjectId(1))));
-    assert!(text(&buffer(&a), 2, 0, 29).contains("[ New ▾ ]"));
+    assert!(!text(&buffer(&a), 2, 0, 29).contains("[ New"));
 }
 
 #[test]
-fn hovering_causes_a_redraw_only_when_the_hovered_row_changes() {
+fn the_new_chip_is_selection_coloured_under_the_pointer_and_muted_otherwise() {
     let mut a = app();
-    moved(&mut a, 10, BUDGET);
+    let buf = buffer(&a);
+    assert_eq!(text(&buf, BAR, 0, 29), "  + New            Restore  │");
+    assert_eq!(buf[(NEW_CHIP, BAR)].fg, color(a.theme.muted));
+    moved(&mut a, NEW_CHIP, BAR);
+    assert_eq!(a.hover, Some(Hover::New));
+    let buf = buffer(&a);
+    let cell = &buf[(NEW_CHIP, BAR)];
+    let reversed = cell.modifier.contains(Modifier::REVERSED);
+    let themed = cell.bg == color(a.theme.selection_bg) && cell.fg == color(a.theme.selection_fg);
+    assert!(reversed || themed, "{cell:?}");
+    // Moving along the chip does not redraw; leaving it does.
     assert!(a.take_dirty());
-    moved(&mut a, 11, BUDGET);
+    moved(&mut a, NEW_CHIP + 1, BAR);
     assert!(!a.take_dirty());
-    // Getting on the button changes its colours; moving along it does not.
-    moved(&mut a, BUTTON, BUDGET);
-    assert!(a.take_dirty());
-    moved(&mut a, BUTTON + 1, BUDGET);
-    assert!(!a.take_dirty());
-    moved(&mut a, 11, 2);
+    moved(&mut a, 20, 5);
     assert!(a.take_dirty());
 }
 
 #[test]
-fn a_click_on_the_button_opens_the_menu_and_a_click_on_the_name_folds() {
-    let mut a = open_by_click();
+fn the_new_chip_opens_the_menu_for_the_selected_project_else_the_active_one() {
+    // No sidebar focus: the active project (1).
+    let mut a = app();
+    assert!(click(&mut a, NEW_CHIP, BAR).is_empty());
     let menu = a.menu.as_ref().unwrap();
-    assert_eq!((menu.project, menu.selected), (ProjectId(2), 0));
+    assert_eq!((menu.project, menu.selected), (ProjectId(1), 0));
     assert!(a.overlay_open());
-    // The click on the name of another project still folds it.
-    a.menu = None;
-    moved(&mut a, 10, 2);
-    assert_eq!(
-        click(&mut a, 6, 2),
-        [act(Act::SetProjectCollapsed {
-            project: ProjectId(1),
-            collapsed: true
-        })]
-    );
-    assert!(a.menu.is_none());
-    // Without the button on show, its place is the row's.
+    // Sidebar focus on a panel of another project: that panel's project.
     let mut a = app();
-    assert_eq!(click(&mut a, BUTTON, BUDGET).len(), 1);
+    prefix(&mut a);
+    press(&mut a, ct::KeyCode::Tab);
+    for _ in 0..4 {
+        press(&mut a, ct::KeyCode::Down);
+    }
+    assert_eq!(a.selection, Some(Sel::Panel(ProjectId(2), PanelId(6))));
+    click(&mut a, NEW_CHIP, BAR);
+    assert_eq!(a.menu.as_ref().unwrap().project, ProjectId(2));
+    // A click that starts on the chip and ends elsewhere does nothing.
+    let mut a = app();
+    down(&mut a, NEW_CHIP, BAR);
+    mouse(&mut a, ct::MouseEventKind::Up(LEFT), 20, 5);
     assert!(a.menu.is_none());
 }
 
 #[test]
-fn the_menu_is_drawn_below_the_row_with_its_right_edge_on_the_sidebars_last_column() {
+fn without_a_project_the_new_chip_flashes_no_project() {
+    let empty = SessionView {
+        projects: vec![],
+        active_project: None,
+        active_panel: None,
+        ..mockup()
+    };
+    let mut a = app_with(&config(), (100, 24), empty);
+    assert!(click(&mut a, NEW_CHIP, BAR).is_empty());
+    assert!(a.menu.is_none());
+    assert_eq!(a.flash.as_ref().unwrap().0, "no project");
+}
+
+#[test]
+fn the_menu_sits_above_the_bottom_bar_with_its_icons_and_no_gutter() {
     let a = open_by_click();
     let buf = buffer(&a);
-    let rows: Vec<String> = (BUDGET..BUDGET + 9).map(|y| text(&buf, y, 0, 29)).collect();
+    let rows: Vec<String> = (15..23).map(|y| text(&buf, y, 0, 22)).collect();
     assert_eq!(
         rows,
         [
-            " ▾ budget         [ New ▾ ] │",
-            "   ❯ a╭─ New in budget ────╮│",
-            " ▾ emp│ ▌ Terminal       1 ││",
-            "   no │   Claude         2 ││",
-            " ▸ dot│   OpenCode       3 ││",
-            "      │   Codex          4 ││",
-            "      │ ⏎ choose  esc close││",
-            "      ╰────────────────────╯│",
-            "                            │",
+            "╭─ New in budget ────╮",
+            "│ ❯  Terminal      1 │",
+            "│ ✻  Claude        2 │",
+            "│ ◇  OpenCode      3 │",
+            "│ ◎  Codex         4 │",
+            "│ ⏎ choose  esc close│",
+            "╰────────────────────╯",
+            "  + New            Res",
         ]
     );
 }
@@ -259,13 +236,15 @@ fn the_menu_is_drawn_below_the_row_with_its_right_edge_on_the_sidebars_last_colu
 fn the_highlighted_row_uses_the_selection_colours_and_the_hint_is_muted() {
     let a = open_by_click();
     let buf = buffer(&a);
-    let on = &buf[(10, 8)];
+    let on = &buf[(10, 16)];
     let reversed = on.modifier.contains(Modifier::REVERSED);
     let themed = on.bg == color(a.theme.selection_bg) && on.fg == color(a.theme.selection_fg);
     assert!(reversed || themed);
-    assert_eq!(buf[(10, 12)].fg, color(a.theme.muted));
-    assert_eq!(buf[(7, 7)].fg, color(a.theme.border));
-    assert_eq!(buf[(10, 7)].fg, color(a.theme.border));
+    // The highlight covers the icon.
+    assert_eq!(buf[(2, 16)].modifier, on.modifier);
+    assert_eq!(buf[(10, 20)].fg, color(a.theme.muted));
+    assert_eq!(buf[(10, 15)].fg, color(a.theme.border));
+    assert_eq!(buf[(0, 17)].fg, color(a.theme.border));
 }
 
 #[test]
@@ -298,17 +277,15 @@ fn the_menu_is_wide_enough_for_a_long_project_name_and_never_wider_than_the_wind
 }
 
 #[test]
-fn the_menu_flips_above_the_row_near_the_bottom_of_the_window() {
+fn the_menu_sits_right_above_the_bottom_bar_whatever_the_window_height() {
     let mut a = app_with(&config(), (100, 16), mockup());
-    // `dotfiles` is on row 10; below it there are 4 rows left, the menu needs 7.
-    moved(&mut a, 10, 10);
-    down(&mut a, BUTTON, 10);
+    a.open_new_menu(ProjectId(1));
     let rect = a.menu_rect().unwrap();
-    // The bottom border is on the row above the project row.
-    assert_eq!((rect.y, rect.y + rect.height - 1), (3, 9));
+    // 15 rows above the status bar: the bar is row 14, the menu's last row is 13.
+    assert_eq!((rect.x, rect.y, rect.y + rect.height - 1), (0, 7, 13));
     let buf = buffer(&a);
-    assert!(text(&buf, 9, rect.x, rect.x + rect.width).starts_with('╰'));
-    assert!(text(&buf, 3, rect.x, rect.x + rect.width).starts_with('╭'));
+    assert!(text(&buf, 13, 0, 5).starts_with('╰'));
+    assert!(text(&buf, 7, 0, 5).starts_with('╭'));
 }
 
 #[test]
@@ -336,7 +313,7 @@ fn the_menu_stays_inside_a_small_window_and_over_a_narrow_sidebar() {
     let mut a = app_with(&config, (100, 24), mockup());
     a.open_new_menu(ProjectId(2));
     let rect = a.menu_rect().unwrap();
-    assert_eq!((rect.x, rect.y, rect.width), (0, 7, 22));
+    assert_eq!((rect.x, rect.y, rect.width), (0, 15, 22));
 }
 
 #[test]
@@ -523,17 +500,17 @@ fn choosing_on_a_folded_project_also_unfolds_it() {
 #[test]
 fn hover_moves_the_highlight_and_a_click_on_an_item_chooses_it() {
     let mut a = open_by_click();
-    moved(&mut a, 12, 11);
+    moved(&mut a, 12, 19);
     assert_eq!(a.menu.as_ref().unwrap().selected, 3);
     assert!(a.take_dirty());
-    moved(&mut a, 13, 11);
+    moved(&mut a, 13, 19);
     assert!(!a.take_dirty());
     // The border and the hint row are not items.
-    moved(&mut a, 12, 7);
-    moved(&mut a, 12, 12);
+    moved(&mut a, 12, 15);
+    moved(&mut a, 12, 20);
     assert_eq!(a.menu.as_ref().unwrap().selected, 3);
     assert_eq!(
-        down(&mut a, 12, 10),
+        down(&mut a, 12, 18),
         [act(Act::NewPanelWith {
             project: ProjectId(2),
             launch: PanelLaunch::Agent(AgentKind::OpenCode)
@@ -567,14 +544,14 @@ fn a_click_outside_closes_the_menu_and_is_not_passed_on() {
     // On the row `empty`, which a click would fold, and on the panel area.
     assert!(click(&mut a, 3, 8).is_empty());
     assert!(a.menu.is_none());
-    assert_eq!(a.selection, None);
+    assert_eq!(a.selection, Some(Sel::Project(ProjectId(2))));
     let mut a = open_by_click();
     assert!(click(&mut a, 60, 12).is_empty());
     assert!(a.menu.is_none());
     // A click on its border or hint row keeps it.
     let mut a = open_by_click();
-    assert!(click(&mut a, 12, 12).is_empty());
-    assert!(click(&mut a, 6, 7).is_empty());
+    assert!(click(&mut a, 12, 21).is_empty());
+    assert!(click(&mut a, 6, 20).is_empty());
     assert!(a.menu.is_some());
 }
 
@@ -645,4 +622,101 @@ fn the_menu_is_part_of_the_projects_help_group() {
         .find(|r| r.keys.ends_with(" N"))
         .unwrap();
     assert_eq!(row.group, deck_core::config::HelpGroup::Projects);
+}
+
+/// An app in Ghostty: images on, 24-bit colour, with the New menu of `budget` open.
+fn menu_with_images() -> App {
+    let mut a = open_by_click();
+    a.truecolor = true;
+    a.images = Some(crate::graphics::Images::new(
+        Some((10, 20, 30)),
+        Some((1, 1, 1)),
+        [None; 16],
+    ));
+    a
+}
+
+/// The id of the image drawn in the two cells at `x`, `y`, when it is a whole logo.
+fn logo_at(buf: &Buffer, x: u16, y: u16) -> Option<u32> {
+    let (first, second) = (&buf[(x, y)], &buf[(x + 1, y)]);
+    if first.symbol() != "\u{10EEEE}\u{0305}\u{0305}"
+        || second.symbol() != "\u{10EEEE}\u{0305}\u{030D}"
+        || !first.modifier.is_empty()
+    {
+        return None;
+    }
+    match first.fg {
+        ratatui::style::Color::Rgb(r, g, b) => Some(u32::from_be_bytes([0, r, g, b])),
+        _ => None,
+    }
+}
+
+#[test]
+fn with_images_the_menu_items_draw_logos_sent_before_the_frame() {
+    let mut a = menu_with_images();
+    // Not sent yet: text icons.
+    assert_eq!(text(&buffer(&a), 17, 2, 4), "✻ ");
+    let mut sink = Vec::new();
+    a.send_images(&mut sink).unwrap();
+    let buf = buffer(&a);
+    // Terminal keeps its glyph; the three agents have logos at columns 2 and 3.
+    assert_eq!(text(&buf, 16, 2, 4), "❯ ");
+    let ids: Vec<u32> = (17..20)
+        .map(|y| logo_at(&buf, 2, y).unwrap_or_else(|| panic!("no logo on row {y}")))
+        .collect();
+    assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
+    let images = a.images.as_ref().unwrap();
+    for id in &ids {
+        assert!(images.order.iter().any(|(i, _)| i == id), "{id:x}");
+    }
+    // Labels and digits sit where they did.
+    assert_eq!(text(&buf, 17, 5, 11), "Claude");
+    assert_eq!(text(&buf, 17, 19, 20), "2");
+}
+
+#[test]
+fn the_highlighted_logo_is_sent_in_the_selection_colour() {
+    let mut a = menu_with_images();
+    press(&mut a, ct::KeyCode::Down);
+    let mut sink = Vec::new();
+    a.send_images(&mut sink).unwrap();
+    let buf = buffer(&a);
+    let id = logo_at(&buf, 2, 17).expect("logo on the highlighted row");
+    let (_, pair) = *a
+        .images
+        .as_ref()
+        .unwrap()
+        .order
+        .iter()
+        .find(|(i, _)| *i == id)
+        .unwrap();
+    // The selection is reversed over default colours here: the logo shows the outer background.
+    let shown = a
+        .images
+        .as_ref()
+        .unwrap()
+        .cell_for(crate::menu::item_style(&a.theme, true))
+        .0;
+    assert_eq!(pair.rgb, shown);
+    // An unselected logo is sent in another colour.
+    let other = logo_at(&buf, 2, 18).unwrap();
+    let (_, other_pair) = *a
+        .images
+        .as_ref()
+        .unwrap()
+        .order
+        .iter()
+        .find(|(i, _)| *i == other)
+        .unwrap();
+    assert_ne!(other_pair.rgb, pair.rgb);
+}
+
+#[test]
+fn icons_none_menu_has_no_icon_column() {
+    let config = Config::parse("[theme]\nicons = \"none\"").unwrap().config;
+    let mut a = app_with(&config, (100, 24), mockup());
+    a.open_new_menu(ProjectId(2));
+    let buf = buffer(&a);
+    assert_eq!(text(&buf, 16, 0, 22), "│ Terminal         1 │");
+    assert_eq!(text(&buf, 17, 0, 22), "│ Claude           2 │");
 }

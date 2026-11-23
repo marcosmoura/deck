@@ -303,7 +303,7 @@ fn the_button_sits_at_the_right_of_the_bar_and_highlights_on_hover() {
     let mut h = start(&sb);
     let bar = rows(&h)[usize::from(BAR_ROW)].clone();
     let side: String = bar.chars().take(28).collect();
-    assert_eq!(side.trim_end(), "  + New project    Restore", "{bar:?}");
+    assert_eq!(side.trim_end(), "  + New            Restore", "{bar:?}");
     hover_at(&mut h, CHIP, BAR_ROW);
     // The hovered chip is drawn in the selection colours: its cells change colour.
     let idle = h.cell(usize::from(BAR_ROW), usize::from(CHIP));
@@ -647,11 +647,11 @@ fn a_narrow_window_shows_one_column_and_tab_switches() {
     let mut h = sb.builder((50, 24)).deck();
     h.wait_for_text("│", TIMEOUT);
     prefixed(&mut h, "R");
-    h.wait_for_text("‹ Claude Code (2) ›", TIMEOUT);
+    h.wait_for_text("‹ ✻  Claude Code (2) ›", TIMEOUT);
     h.wait_for_text("Fix the login redirect", TIMEOUT);
     assert!(!h.screen_text().contains("Write the parser"));
     h.send_keys("\t");
-    h.wait_for_text("‹ OpenCode (1) ›", TIMEOUT);
+    h.wait_for_text("‹ ◇  OpenCode (1) ›", TIMEOUT);
     h.wait_for_text("Rework login form", TIMEOUT);
     assert!(!h.screen_text().contains("Fix the login redirect"));
     h.capture("restore-narrow");

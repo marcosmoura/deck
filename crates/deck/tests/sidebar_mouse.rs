@@ -143,7 +143,7 @@ fn dragging_the_separator_resizes_the_shell_and_back() {
     sleep(Duration::from_millis(50));
     motion(&mut h, 40);
     h.wait_for_text("SIDEBAR 40", TIMEOUT);
-    let accent = h.cell(0, 1).fg;
+    let accent = h.cell(0, 9).fg;
     wait_until("the accent separator", TIMEOUT, || {
         h.cell(5, 40).ch == '┃' && h.cell(5, 40).fg == accent
     });
@@ -250,11 +250,11 @@ fn a_press_on_the_separator_with_the_sidebar_hidden_does_nothing() {
 #[test]
 fn a_press_on_a_sidebar_row_still_focuses_it() {
     let mut h = attached();
-    h.wait_for_text("▌  ❯ sh", TIMEOUT);
+    h.wait_for_text("▌  ❯  sh", TIMEOUT);
     // The project row (row 3, 1-based 3): folding it hides its panel.
     h.send_keys("\x1b[<0;5;3M");
     h.send_keys("\x1b[<0;5;3m");
-    wait_gone(&h, "▌  ❯ sh");
+    wait_gone(&h, "▌  ❯  sh");
 }
 
 #[test]
@@ -321,28 +321,39 @@ fn wait_bar(h: &Harness) {
     wait_until("the bottom bar", TIMEOUT, || {
         rows(h)
             .get(BAR_ROW)
-            .is_some_and(|r| r.starts_with("  + New project"))
+            .is_some_and(|r| r.starts_with("  + New "))
     });
 }
 
 #[test]
-fn the_bottom_bar_shows_the_new_project_chip_and_the_restore_chip_at_the_right() {
+fn the_bottom_bar_shows_the_new_chip_and_the_restore_chip_at_the_right() {
     let h = attached();
     wait_bar(&h);
     let screen = rows(&h);
     let bar = &screen[BAR_ROW];
     let sidebar: String = bar.chars().take(28).collect();
-    assert_eq!(sidebar.trim_end(), "  + New project    Restore", "{bar:?}");
+    assert_eq!(sidebar.trim_end(), "  + New            Restore", "{bar:?}");
     assert!(screen[BAR_ROW - 1].chars().take(28).all(|c| c == ' '));
     h.capture("bottom-bar");
 }
 
 #[test]
-fn clicking_the_chip_adds_a_project_like_the_prefix_flow() {
+fn the_header_names_the_session_and_holds_the_new_project_chip() {
+    let h = attached();
+    wait_bar(&h);
+    let header = rows(&h)[0].clone();
+    let sidebar: String = header.chars().take(28).collect();
+    assert!(sidebar.starts_with(" Session "), "{header:?}");
+    assert!(sidebar.trim_end().ends_with("+ New project"), "{header:?}");
+    h.capture("header");
+}
+
+#[test]
+fn clicking_the_header_chip_adds_a_project_like_the_prefix_flow() {
     let mut h = attached();
     wait_bar(&h);
-    h.send_keys("\x1b[<0;5;23M");
-    h.send_keys("\x1b[<0;5;23m");
+    h.send_keys("\x1b[<0;16;1M");
+    h.send_keys("\x1b[<0;16;1m");
     h.wait_for_text("Directory:", TIMEOUT);
     h.send_keys("\x15/tmp");
     h.send_keys(ENTER);
@@ -354,13 +365,13 @@ fn clicking_the_chip_adds_a_project_like_the_prefix_flow() {
 }
 
 #[test]
-fn clicking_the_chip_with_a_prompt_open_does_nothing() {
+fn clicking_the_header_chip_with_a_prompt_open_does_nothing() {
     let mut h = attached();
     wait_bar(&h);
     prefixed(&mut h, "P");
     h.wait_for_text("Directory:", TIMEOUT);
-    h.send_keys("\x1b[<0;5;23M");
-    h.send_keys("\x1b[<0;5;23m");
+    h.send_keys("\x1b[<0;16;1M");
+    h.send_keys("\x1b[<0;16;1m");
     sleep(Duration::from_millis(300));
     let screen = h.screen_text();
     assert_eq!(screen.matches("Directory:").count(), 1, "{screen}");
@@ -398,7 +409,7 @@ fn motion_that_keeps_the_hover_target_draws_nothing() {
     sleep(Duration::from_millis(300));
     let settled = h.raw_output().len();
     for i in 1..100u16 {
-        hover_at(&mut h, 1 + i % 14, 22);
+        hover_at(&mut h, 1 + i % 7, 22);
     }
     sleep(Duration::from_millis(500));
     assert_eq!(h.raw_output().len(), settled, "the screen was redrawn");
@@ -426,11 +437,7 @@ fn motion_over_the_sidebar_never_reaches_a_program() {
 fn a_seven_row_window_has_no_bar() {
     let h = attached_with((100, 8), &[]);
     sleep(Duration::from_millis(300));
-    assert!(
-        !h.screen_text().contains("New project"),
-        "{}",
-        h.screen_text()
-    );
+    assert!(!h.screen_text().contains("Restore"), "{}", h.screen_text());
 }
 
 // The New button and menu.
@@ -495,21 +502,16 @@ fn click_at(h: &mut Harness, column: u16, row: u16) {
     h.send_keys(&format!("\x1b[<0;{};{}m", column + 1, row + 1));
 }
 
-/// Moves the pointer onto the project row and clicks its button.
-fn open_menu_at(h: &mut Harness, row: u16) {
-    hover_at(h, 10, row);
-    wait_until("the button", TIMEOUT, || {
-        rows(h)
-            .get(usize::from(row))
-            .is_some_and(|r| r.chars().skip(18).take(9).collect::<String>() == "[ New ▾ ]")
-    });
-    click_at(h, 20, row);
+/// Clicks the `+ New` chip of the bottom bar: the menu opens for the active project.
+fn open_menu(h: &mut Harness) {
+    click_at(h, 3, 22);
     h.wait_for_text("New in", TIMEOUT);
 }
 
-/// Clicks the menu item `index` of a menu opened under the project row `row`.
-fn pick(h: &mut Harness, row: u16, index: u16) {
-    click_at(h, 12, row + 2 + index);
+/// Clicks the menu item `index` of a menu opened above the bar of a 24-row window: the menu's
+/// top border is on row 15, the items follow.
+fn pick(h: &mut Harness, index: u16) {
+    click_at(h, 12, 16 + index);
 }
 
 fn panels_in_sidebar(h: &Harness) -> usize {
@@ -518,7 +520,7 @@ fn panels_in_sidebar(h: &Harness) -> usize {
     side.iter()
         .rev()
         .skip(1)
-        .filter(|r| r.contains("❯ sh"))
+        .filter(|r| r.contains("❯  sh"))
         .count()
 }
 
@@ -529,50 +531,42 @@ fn new_project(h: &Harness, name: &str) -> String {
 }
 
 #[test]
-fn hovering_a_project_row_shows_the_new_button_and_moves_with_the_pointer() {
+fn project_rows_show_no_new_button_under_the_pointer() {
     let mut h = attached();
     new_project(&h, "api");
     h.wait_for_text("api", TIMEOUT);
-    let button = |h: &Harness, row: usize| {
-        rows(h)
-            .get(row)
-            .is_some_and(|r| r.chars().skip(18).take(9).collect::<String>() == "[ New ▾ ]")
-    };
     hover_at(&mut h, 10, 2);
-    wait_until("the button on row 2", TIMEOUT, || button(&h, 2));
-    h.capture("new-button");
     hover_at(&mut h, 10, 4);
-    wait_until("the button on row 4", TIMEOUT, || {
-        button(&h, 4) && !button(&h, 2)
-    });
-    hover_at(&mut h, 50, 5);
-    wait_until("no button", TIMEOUT, || !h.screen_text().contains("[ New"));
+    sleep(Duration::from_millis(300));
+    assert!(!h.screen_text().contains("[ New"), "{}", h.screen_text());
 }
 
 #[test]
-fn a_click_on_the_button_opens_the_menu_and_a_click_on_the_name_folds() {
+fn a_click_on_new_opens_the_menu_above_the_bar_and_a_click_on_the_name_folds() {
     let mut h = attached();
-    open_menu_at(&mut h, 2);
+    open_menu(&mut h);
     let items: Vec<&str> = ["Terminal", "Claude", "OpenCode", "Codex"].into();
     for (i, item) in items.iter().enumerate() {
-        let row = rows(&h)[4 + i].clone();
+        let row = rows(&h)[16 + i].clone();
+        assert!(row.starts_with("│ "), "{row:?}");
         assert!(row.contains(item), "{row:?}");
         assert!(row.contains(&format!("{} ", i + 1)), "{row:?}");
     }
-    assert!(rows(&h)[3].contains("╭─ New in"));
+    assert!(rows(&h)[15].contains("╭─ New in"));
+    assert!(rows(&h)[21].starts_with('╰'));
     h.capture("new-menu");
     h.send_keys("\x1b");
     wait_gone(&h, "New in");
     // The name of the project still folds it.
     click_at(&mut h, 6, 2);
-    wait_gone(&h, "▌  ❯ sh");
+    wait_gone(&h, "▌  ❯  sh");
 }
 
 #[test]
 fn the_terminal_item_adds_a_panel_with_a_shell_in_the_project_root() {
     let mut h = attached();
-    open_menu_at(&mut h, 2);
-    pick(&mut h, 2, 0);
+    open_menu(&mut h);
+    pick(&mut h, 0);
     wait_until("two panels", TIMEOUT, || panels_in_sidebar(&h) == 2);
     let side = side(&h);
     // The old panel keeps one terminal (no count), the new one is active.
@@ -587,9 +581,9 @@ fn the_terminal_item_adds_a_panel_with_a_shell_in_the_project_root() {
 fn choosing_on_a_folded_project_unfolds_it_and_shows_the_active_new_panel() {
     let mut h = attached();
     click_at(&mut h, 6, 2);
-    wait_gone(&h, "▌  ❯ sh");
-    open_menu_at(&mut h, 2);
-    pick(&mut h, 2, 0);
+    wait_gone(&h, "▌  ❯  sh");
+    open_menu(&mut h);
+    pick(&mut h, 0);
     wait_until("two panels, the new one active", TIMEOUT, || {
         let side = side(&h);
         panels_in_sidebar(&h) == 2 && side.get(4).is_some_and(|r| r.starts_with('▌'))
@@ -602,8 +596,8 @@ fn the_agent_items_add_panels_running_the_fake_agents_in_the_project_root() {
     let mut h = with_agents(&bin, SIZE, &[]);
     let home = home_name(&h);
     for (i, name) in ["claude", "opencode", "codex"].into_iter().enumerate() {
-        open_menu_at(&mut h, 2);
-        pick(&mut h, 2, u16::try_from(i).unwrap() + 1);
+        open_menu(&mut h);
+        pick(&mut h, u16::try_from(i).unwrap() + 1);
         h.wait_for_text(&format!("FAKE-{name}-ready cwd={home} args="), TIMEOUT);
     }
     wait_until("the three panels", TIMEOUT, || {
@@ -619,7 +613,7 @@ fn a_missing_program_flashes_closes_the_menu_and_adds_no_panel() {
     let bin = fake_agents();
     fs::remove_file(bin.path().join("opencode")).unwrap();
     let mut h = with_agents(&bin, SIZE, &[]);
-    open_menu_at(&mut h, 2);
+    open_menu(&mut h);
     h.send_keys("3");
     h.wait_for_text("\"opencode\" not found in PATH", TIMEOUT);
     wait_gone(&h, "New in");
@@ -632,7 +626,7 @@ fn a_missing_program_flashes_closes_the_menu_and_adds_no_panel() {
 fn a_configured_agent_command_is_honoured() {
     let bin = fake_agents();
     let mut h = with_agents(&bin, SIZE, &[("agents.codex.command", "\"codex --fast\"")]);
-    open_menu_at(&mut h, 2);
+    open_menu(&mut h);
     h.send_keys("4");
     h.wait_for_text("args=--fast", TIMEOUT);
 }
@@ -671,8 +665,8 @@ fn the_sidebar_hints_list_the_menu() {
 #[test]
 fn a_click_outside_closes_the_menu_without_folding_the_row_under_it() {
     let mut h = attached();
-    open_menu_at(&mut h, 2);
-    // The project row, left of the menu's button: a click there would fold the project.
+    open_menu(&mut h);
+    // The project row: a click there would fold the project.
     click_at(&mut h, 3, 2);
     wait_gone(&h, "New in");
     sleep(Duration::from_millis(200));
@@ -680,24 +674,15 @@ fn a_click_outside_closes_the_menu_without_folding_the_row_under_it() {
 }
 
 #[test]
-fn the_menu_flips_above_a_row_near_the_bottom() {
+fn the_menu_sits_right_above_the_bar_in_a_short_window() {
     let mut h = attached_with((100, 12), &[]);
-    for name in ["pa", "pb", "pc"] {
-        new_project(&h, name);
-        h.wait_for_text(name, TIMEOUT);
-    }
-    let row = |h: &Harness| side(h).iter().position(|r| r.contains("pc")).unwrap();
-    let at = u16::try_from(row(&h)).unwrap();
-    assert!(at >= 7, "{}", h.screen_text());
-    open_menu_at(&mut h, at);
+    click_at(&mut h, 3, 10);
+    h.wait_for_text("New in", TIMEOUT);
     let screen = rows(&h);
-    let top = screen
-        .iter()
-        .position(|r| r.contains("╭─ New in pc"))
-        .unwrap();
-    let bottom = screen.iter().rposition(|r| r.contains('╰')).unwrap();
-    assert_eq!(bottom, usize::from(at) - 1, "{}", h.screen_text());
-    assert_eq!(bottom - top, 6);
+    let top = screen.iter().position(|r| r.contains("╭─ New in")).unwrap();
+    let bottom = screen.iter().rposition(|r| r.starts_with('╰')).unwrap();
+    assert_eq!((top, bottom), (3, 9), "{}", h.screen_text());
+    assert!(screen[10].starts_with("  + New"), "{}", h.screen_text());
 }
 
 #[test]
@@ -719,7 +704,12 @@ fn a_project_closed_by_another_client_closes_the_menu_with_a_flash() {
     let mut h = attached();
     let id = new_project(&h, "api");
     h.wait_for_text("api", TIMEOUT);
-    open_menu_at(&mut h, 4);
+    // Sidebar focus on `api`, then the bar's New button.
+    prefixed(&mut h, "\t");
+    h.wait_for_text("n menu", TIMEOUT);
+    h.send_keys("jj");
+    click_at(&mut h, 3, 22);
+    h.wait_for_text("New in api", TIMEOUT);
     let out = h.run_deck(&["close", &id]);
     assert!(out.status.success(), "{}", support::stderr(&out));
     h.wait_for_text("project \"api\" was closed", TIMEOUT);
@@ -757,7 +747,6 @@ fn a_new_menu_key_override_moves_the_binding_and_shows_in_the_help() {
 fn hovering_within_a_row_draws_no_extra_frames() {
     let mut h = attached();
     hover_at(&mut h, 3, 2);
-    wait_until("the button", TIMEOUT, || h.screen_text().contains("[ New"));
     sleep(Duration::from_millis(300));
     let settled = h.raw_output().len();
     for i in 1..100u16 {
@@ -765,4 +754,29 @@ fn hovering_within_a_row_draws_no_extra_frames() {
     }
     sleep(Duration::from_millis(500));
     assert_eq!(h.raw_output().len(), settled, "the screen was redrawn");
+}
+
+#[test]
+fn the_new_button_adds_a_terminal_panel_to_the_selected_project() {
+    let mut h = attached();
+    new_project(&h, "api");
+    h.wait_for_text("api", TIMEOUT);
+    // Sidebar focus on `api` (rows: project, its panel, api), then `+ New`.
+    prefixed(&mut h, "\t");
+    h.wait_for_text("n menu", TIMEOUT);
+    h.send_keys("jj");
+    click_at(&mut h, 3, 22);
+    h.wait_for_text("New in api", TIMEOUT);
+    // `api` holds its own first panel.
+    let api_panels = |h: &Harness| {
+        side(h)
+            .iter()
+            .skip_while(|r| !r.starts_with(" ▾ api"))
+            .skip(1)
+            .take_while(|r| r.contains('❯'))
+            .count()
+    };
+    assert_eq!(api_panels(&h), 1, "{}", h.screen_text());
+    h.send_keys("1");
+    wait_until("a second panel in api", TIMEOUT, || api_panels(&h) == 2);
 }

@@ -16,7 +16,7 @@ use crate::app::App;
 use crate::draw::{color, draw};
 use crate::mirror::tests::{frame, mockup, panel, project};
 
-fn agent(kind: AgentKind, status: AgentStatus) -> AgentState {
+pub(crate) fn agent(kind: AgentKind, status: AgentStatus) -> AgentState {
     AgentState {
         kind,
         status,
@@ -29,7 +29,7 @@ fn agent(kind: AgentKind, status: AgentStatus) -> AgentState {
 
 /// The sidebar of the spec: two agents, an editor, a shell and a renamed panel running
 /// `lazygit`. The first panel is active.
-fn titled() -> SessionView {
+pub(crate) fn titled() -> SessionView {
     let mut view = mockup();
     let mut panels = vec![
         panel(3, "Fix login bug", 1),
@@ -52,7 +52,7 @@ fn titled() -> SessionView {
     view
 }
 
-fn app_with(config: &str, view: SessionView) -> App {
+pub(crate) fn app_with(config: &str, view: SessionView) -> App {
     let config = Config::parse(config).unwrap().config;
     let mut app = App::new(&config, (100, 24), &[]).with_dirs(PathBuf::from("/work/proj"), None);
     app.on_server(ServerMsg::SessionView(view));
@@ -64,7 +64,7 @@ fn app_with(config: &str, view: SessionView) -> App {
     app
 }
 
-fn render(a: &App) -> (Buffer, Vec<String>) {
+pub(crate) fn render(a: &App) -> (Buffer, Vec<String>) {
     let mut t = Terminal::new(TestBackend::new(a.size.0, a.size.1)).unwrap();
     t.draw(|f| draw(f, a)).unwrap();
     let buf = t.backend().buffer().clone();
@@ -92,21 +92,21 @@ fn the_sidebar_of_the_spec_at_28_columns() {
     let a = app_with("", titled());
     let (buf, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[0], pad(" main"));
+    assert_eq!(side[0], pad(" Session main + New project "));
     assert_eq!(side[1], pad(""));
     assert_eq!(side[2], pad(" ▾ terminal-multiplexer"));
-    assert_eq!(side[3], pad("▌⠋ ✻ Fix login bug"));
-    assert_eq!(side[4], pad("   ✎ nvim"));
-    assert_eq!(side[5], pad(" ! ◎ Review the API changes"));
-    assert_eq!(side[6], pad("   ❯ ~/Projects/terminal-m…"));
-    assert_eq!(side[7], pad("   ± api"));
+    assert_eq!(side[3], pad("▌⠋ ✻  Fix login bug"));
+    assert_eq!(side[4], pad("   ✎  nvim"));
+    assert_eq!(side[5], pad(" ! ◎  Review the API chang…"));
+    assert_eq!(side[6], pad("   ❯  ~/Projects/terminal-…"));
+    assert_eq!(side[7], pad("   ±  api"));
     // The icon has the colour of its row: the accent, bold, for the active panel.
     assert_eq!(buf[(3, 3)].fg, color(a.theme.accent));
     assert!(buf[(3, 3)].modifier.contains(Modifier::BOLD));
     assert_ne!(buf[(3, 4)].fg, color(a.theme.accent));
     // The status bar has the icon and the name of the active panel.
     assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ⠋ ✻ Fix login bug  "),
+        rows[23].starts_with(" main  terminal-multiplexer › ⠋ ✻  Fix login bug  "),
         "{}",
         rows[23]
     );
@@ -121,7 +121,7 @@ fn a_terminal_count_and_a_long_name_leave_room_for_the_icon() {
     view.projects[0].panels[1].terminals.push(extra);
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad("   ✎ a-very-long-panel-n… 2 "));
+    assert_eq!(sidebar(&rows)[4], pad("   ✎  a-very-long-panel-… 2 "));
 }
 
 #[test]
@@ -148,17 +148,17 @@ fn the_nerd_preset_and_overrides_pick_the_glyphs() {
     let a = app_with("[theme]\nicons = \"nerd\"", titled());
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[3], pad("▌⠋ \u{ec82} Fix login bug"));
-    assert_eq!(side[4], pad("   \u{f040} nvim"));
-    assert_eq!(side[5], pad(" ! \u{ec81} Review the API changes"));
-    assert_eq!(side[7], pad("   \u{f126} api"));
+    assert_eq!(side[3], pad("▌⠋ \u{ec82}  Fix login bug"));
+    assert_eq!(side[4], pad("   \u{f040}  nvim"));
+    assert_eq!(side[5], pad(" ! \u{ec81}  Review the API chang…"));
+    assert_eq!(side[7], pad("   \u{f126}  api"));
 
     let a = app_with("[theme.icon_glyphs]\nclaude = \"C\"\ngit = \"G\"", titled());
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[3], pad("▌⠋ C Fix login bug"));
-    assert_eq!(side[7], pad("   G api"));
-    assert_eq!(side[4], pad("   ✎ nvim"));
+    assert_eq!(side[3], pad("▌⠋ C  Fix login bug"));
+    assert_eq!(side[7], pad("   G  api"));
+    assert_eq!(side[4], pad("   ✎  nvim"));
 }
 
 #[test]
@@ -168,9 +168,9 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].active_panel = Some(PanelId(7));
     let mut a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad("▌  ± api"));
+    assert_eq!(sidebar(&rows)[7], pad("▌  ±  api"));
     assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ± api · lazygit - repo"),
+        rows[23].starts_with(" main  terminal-multiplexer › ±  api · lazygit - repo"),
         "{}",
         rows[23]
     );
@@ -181,10 +181,10 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].panels[4].terminals[0].title = Some("api".into());
     a.on_server(ServerMsg::SessionView(view));
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad("▌  ❯ api"));
+    assert_eq!(sidebar(&rows)[7], pad("▌  ❯  api"));
     // A title that equals the name adds nothing.
     assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ❯ api  "),
+        rows[23].starts_with(" main  terminal-multiplexer › ❯  api  "),
         "{}",
         rows[23]
     );
@@ -197,5 +197,5 @@ fn a_panel_without_terminals_has_no_icon() {
     view.projects[0].panels[1].focused_terminal = None;
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad("   nvim"));
+    assert_eq!(sidebar(&rows)[4], pad("      nvim"));
 }

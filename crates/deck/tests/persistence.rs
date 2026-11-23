@@ -206,7 +206,7 @@ fn the_sessions_panels_and_grid_come_back_after_kill_server() {
         h.screen_text()
             .lines()
             .nth(4)
-            .is_some_and(|r| r.starts_with("▌  ❯ sh"))
+            .is_some_and(|r| r.starts_with("▌  ❯  sh"))
     });
     add_terminals(&mut h, 3);
     prefixed(&mut h, "c");
@@ -214,12 +214,12 @@ fn the_sessions_panels_and_grid_come_back_after_kill_server() {
         h.screen_text()
             .lines()
             .nth(5)
-            .is_some_and(|r| r.starts_with("▌  ❯ sh"))
+            .is_some_and(|r| r.starts_with("▌  ❯  sh"))
     });
     add_terminals(&mut h, 5);
     prefixed(&mut h, ",");
     h.send_keys("\x15build\r");
-    h.wait_for_text("▌  ❯ build", TIMEOUT);
+    h.wait_for_text("▌  ❯  build", TIMEOUT);
     let other = h.run_deck(&["new", "other", "-d"]);
     assert!(other.status.success(), "{}", stderr(&other));
     wait_until("the grid to settle", TIMEOUT, || {

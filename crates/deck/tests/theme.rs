@@ -57,13 +57,13 @@ fn is_palette(color: Color) -> bool {
 #[test]
 fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     let mut h = themed(THEMED, &[]);
-    h.wait_for_text("▌  ❯ sh", TIMEOUT);
+    h.wait_for_text("▌  ❯  sh", TIMEOUT);
     // The active panel row and the session name.
     assert_eq!(h.cell(3, 0).ch, '▌');
     assert_eq!(h.cell(3, 0).fg, ACCENT);
     assert_eq!(h.cell(3, 3).fg, ACCENT);
     assert_eq!(h.cell(23, 1).fg, ACCENT, "the session name");
-    assert_eq!(h.cell(0, 1).fg, ACCENT, "the sidebar header");
+    assert_eq!(h.cell(0, 9).fg, ACCENT, "the sidebar header");
     // The sidebar's background, on empty cells of its rows.
     for row in [1, 8, 15] {
         assert_eq!(h.cell(row, 20).bg, Color::Indexed(236), "row {row}");
@@ -85,7 +85,7 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
 #[test]
 fn without_truecolor_the_theme_and_the_programs_use_the_palette() {
     let mut h = themed(THEMED, &[("COLORTERM", None)]);
-    h.wait_for_text("▌  ❯ sh", TIMEOUT);
+    h.wait_for_text("▌  ❯  sh", TIMEOUT);
     assert!(is_palette(h.cell(3, 0).fg), "{:?}", h.cell(3, 0).fg);
     assert!(is_palette(h.cell(23, 1).fg));
     assert_eq!(h.cell(1, 20).bg, Color::Indexed(236));
@@ -152,7 +152,7 @@ fn glyphs_follow_the_theme() {
         r#"{ glyphs = { expanded = "v", collapsed = ">", active = "|" } }"#,
         &[],
     );
-    h.wait_for_text("|  ❯ sh", TIMEOUT);
+    h.wait_for_text("|  ❯  sh", TIMEOUT);
     assert!(rows(&h)[2].starts_with(" v dk"), "{}", rows(&h)[2]);
     h.capture("glyphs");
     prefixed(&mut h, "\t");

@@ -101,8 +101,23 @@ pub fn refresh_panel(session: &mut Session, id: PanelId) -> bool {
 pub fn auto_name(input: &NameInput) -> Option<String> {
     match input.agent {
         Some(agent) => agent_name(agent, input),
+        // An agent's title seen before the agent is recognised ("✳ Claude Code") is named
+        // without its glyphs, so the name the agent then keeps is clean.
         None => input
             .title
+            .map(|t| {
+                // Only glyphs go, not `~` or `/`: a shell in `~/codex` keeps its path.
+                let core = t
+                    .trim_start_matches(|c: char| {
+                        !c.is_alphanumeric() && (c.is_whitespace() || !c.is_ascii())
+                    })
+                    .trim();
+                if PRODUCT_NAMES.contains(&core.to_lowercase().as_str()) {
+                    core
+                } else {
+                    t
+                }
+            })
             .and_then(finish)
             .or_else(|| finish(input.program)),
     }
@@ -238,6 +253,31 @@ mod tests {
         );
         assert_eq!(name(None, None, "zsh").as_deref(), Some("zsh"));
         assert_eq!(name(None, Some("  "), "zsh").as_deref(), Some("zsh"));
+    }
+
+    #[test]
+    fn a_product_title_before_the_agent_is_known_drops_its_glyphs() {
+        assert_eq!(
+            name(None, Some("✳ Claude Code"), "claude").as_deref(),
+            Some("Claude Code")
+        );
+        assert_eq!(
+            name(None, Some("⠹ codex"), "codex").as_deref(),
+            Some("codex")
+        );
+        // Other titles keep their leading characters, and a path stays a path.
+        assert_eq!(
+            name(None, Some("~/codex"), "zsh").as_deref(),
+            Some("~/codex")
+        );
+        assert_eq!(
+            name(None, Some("/srv/claude"), "zsh").as_deref(),
+            Some("/srv/claude")
+        );
+        assert_eq!(
+            name(None, Some("✳ Fix login bug"), "zsh").as_deref(),
+            Some("✳ Fix login bug")
+        );
     }
 
     #[test]

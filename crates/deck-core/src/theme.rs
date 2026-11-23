@@ -174,6 +174,25 @@ impl IconPreset {
     }
 }
 
+/// Whether the agents' logos are drawn as images where the terminal can: `[theme] icon_images`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IconImages {
+    /// Images in Ghostty and kitty, text icons elsewhere.
+    Auto,
+    /// Text icons only.
+    Off,
+}
+
+impl IconImages {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "auto" => Some(Self::Auto),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
+
 /// The glyph of each icon kind, one cell wide.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IconGlyphs {
@@ -320,6 +339,7 @@ pub struct Theme {
     pub border_style: BorderStyle,
     pub glyphs: Glyphs,
     pub icons: IconPreset,
+    pub icon_images: IconImages,
     pub icon_glyphs: IconGlyphs,
 }
 
@@ -382,6 +402,7 @@ impl Theme {
         border_style: BorderStyle,
         glyphs: Glyphs,
         icons: IconPreset,
+        icon_images: IconImages,
         icon_glyphs: IconGlyphs,
     ) -> Self {
         let [
@@ -420,6 +441,7 @@ impl Theme {
             border_style,
             glyphs,
             icons,
+            icon_images,
             icon_glyphs,
         }
     }
@@ -430,6 +452,7 @@ impl Theme {
         let mut border_style = BorderStyle::Rounded;
         let mut glyphs = Glyphs::default();
         let mut icons = IconPreset::Unicode;
+        let mut icon_images = IconImages::Auto;
         let mut overrides = Vec::new();
         for (key, value) in table {
             let path = format!("theme.{key}");
@@ -483,6 +506,12 @@ impl Theme {
                         .and_then(IconPreset::parse)
                         .ok_or_else(|| bad(&path, "expected \"unicode\", \"nerd\" or \"none\""))?;
                 }
+                "icon_images" => {
+                    icon_images = value
+                        .as_str()
+                        .and_then(IconImages::parse)
+                        .ok_or_else(|| bad(&path, "expected \"auto\" or \"off\""))?;
+                }
                 "icon_glyphs" => {
                     let table = value
                         .as_table()
@@ -514,6 +543,7 @@ impl Theme {
             border_style,
             glyphs,
             icons,
+            icon_images,
             icon_glyphs,
         ))
     }
@@ -531,6 +561,7 @@ impl Default for Theme {
             BorderStyle::Rounded,
             Glyphs::default(),
             IconPreset::Unicode,
+            IconImages::Auto,
             IconGlyphs::preset(IconPreset::Unicode),
         )
     }
@@ -616,6 +647,8 @@ mod tests {
             ("glyphs = 1", "theme.glyphs"),
             ("icons = \"emoji\"", "theme.icons"),
             ("icons = true", "theme.icons"),
+            ("icon_images = \"always\"", "theme.icon_images"),
+            ("icon_images = true", "theme.icon_images"),
             ("icon_glyphs = 1", "theme.icon_glyphs"),
             ("[icon_glyphs]\nclaude = \"日\"", "theme.icon_glyphs.claude"),
             ("[icon_glyphs]\ngit = \"\"", "theme.icon_glyphs.git"),
@@ -684,6 +717,19 @@ mod tests {
             "❯"
         );
         assert_eq!(parse("icons = \"none\"").unwrap().icons, IconPreset::None);
+    }
+
+    #[test]
+    fn icon_images_is_auto_or_off() {
+        assert_eq!(parse("").unwrap().icon_images, IconImages::Auto);
+        assert_eq!(
+            parse("icon_images = \"off\"").unwrap().icon_images,
+            IconImages::Off
+        );
+        assert_eq!(
+            parse("icon_images = \"auto\"").unwrap().icon_images,
+            IconImages::Auto
+        );
     }
 
     #[test]

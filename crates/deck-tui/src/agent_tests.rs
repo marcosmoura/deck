@@ -76,10 +76,10 @@ fn the_sidebar_status_column_shows_each_panels_glyph() {
     let a = app_with(mixed());
     let buf = render(&a);
     let side = |y| row(&buf, y).chars().take(14).collect::<String>();
-    assert_eq!(side(3), "▌⠋ ✻ editor   ");
-    assert_eq!(side(4), " ! ✻ claude   ");
-    assert_eq!(side(5), " ● ✻ tests    ");
-    assert_eq!(side(7), " ○ ✻ api      ");
+    assert_eq!(side(3), "▌⠋ ✻  editor  ");
+    assert_eq!(side(4), " ! ✻  claude  ");
+    assert_eq!(side(5), " ● ✻  tests   ");
+    assert_eq!(side(7), " ○ ✻  api     ");
     // Roles: waiting is a bold warning, idle is ok, quiet is muted, working is the accent.
     let theme = &a.theme;
     assert_eq!(buf[(1, 3)].fg, color(theme.accent));
@@ -146,7 +146,7 @@ fn a_single_terminal_shows_its_icon_and_name_in_the_status_bar() {
     let a = app_with(view);
     let buf = render(&a);
     let bar = row(&buf, 23);
-    assert!(bar.contains("terminal-multiplexer › ● ✻ editor"), "{bar}");
+    assert!(bar.contains("terminal-multiplexer › ● ✻  editor"), "{bar}");
     assert!(!bar.contains(" · "), "{bar}");
     let at = u16::try_from(bar.chars().position(|c| c == '●').unwrap()).unwrap();
     assert_eq!(buf[(at, 23)].fg, color(a.theme.ok));
@@ -188,13 +188,13 @@ fn the_spinner_advances_every_100_ms_and_only_while_something_spins() {
 }
 
 #[test]
-fn a_process_detected_agent_spins_muted() {
+fn a_process_detected_agent_spins_in_the_accent_colour() {
     let mut view = mockup();
     set(&mut view, 31, AgentStatus::Active);
     let a = app_with(view);
     let buf = render(&a);
     assert_eq!(buf[(1, 3)].symbol(), "⠋");
-    assert_eq!(buf[(1, 3)].fg, color(a.theme.muted));
+    assert_eq!(buf[(1, 3)].fg, color(a.theme.accent));
     assert!(a.wake_deadline().is_some());
 }
 
@@ -206,13 +206,13 @@ fn an_unseen_panel_is_bold_with_the_glyph_after_its_name() {
     let a = app_with(view);
     let buf = render(&a);
     let side = |y| row(&buf, y).chars().take(14).collect::<String>();
-    assert_eq!(side(4), " ! ✻ claude • ");
-    assert_eq!(side(5), "   ❯ tests    ");
-    for x in 5..11 {
+    assert_eq!(side(4), " ! ✻  claude •");
+    assert_eq!(side(5), "   ❯  tests   ");
+    for x in 6..12 {
         assert!(buf[(x, 4)].modifier.contains(Modifier::BOLD), "{x}");
     }
-    assert!(!buf[(5, 5)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(12, 4)].fg, color(a.theme.accent));
+    assert!(!buf[(6, 5)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(13, 4)].fg, color(a.theme.accent));
 }
 
 #[test]

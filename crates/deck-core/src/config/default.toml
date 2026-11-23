@@ -101,6 +101,10 @@ border_style = "rounded"
 # (an agent, or a program such as nvim, lazygit or ssh; a terminal icon otherwise). `unicode`
 # uses glyphs every font has, `nerd` needs a Nerd Font, `none` draws no icons.
 icons = "unicode"
+# auto or off: in Ghostty and kitty `auto` draws the logos of Claude Code, Codex and OpenCode
+# as images in place of their icons (not inside tmux, Zellij or a deck panel, and not without
+# truecolor); `off` keeps the text icons. Ignored with icons = "none".
+icon_images = "auto"
 
 # One cell wide each.
 [theme.glyphs]

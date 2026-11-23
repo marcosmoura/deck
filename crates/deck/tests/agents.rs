@@ -165,7 +165,7 @@ fn hook_events_show_working_and_waiting_and_typing_answers() {
     wait_until("the icon and the count in the status bar", TIMEOUT, || {
         rows(&h)
             .last()
-            .is_some_and(|bar| bar.contains("› ! ✻ ") && bar.contains("1 waiting"))
+            .is_some_and(|bar| bar.contains("› ! ✻  ") && bar.contains("1 waiting"))
     });
     h.capture("waiting");
     let agent = agent_json(&h);
@@ -265,8 +265,8 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
     assert_eq!(panel, "refactor the layout engine");
     let row = rows(&h)[3].clone();
     // The sidebar cuts the long name to its width.
-    assert!(row.starts_with(" ! ✻ refactor the layout"), "{row}");
-    assert!(h.cell(3, 5).bold(), "the name of an unseen panel is bold");
+    assert!(row.starts_with(" ! ✻  refactor the layou"), "{row}");
+    assert!(h.cell(3, 6).bold(), "the name of an unseen panel is bold");
 
     let body = format!("claude needs you · {project} › {panel}");
     let expected = format!("\x1b]9;{body}\x07");
@@ -439,10 +439,9 @@ fn a_collapsed_project_shows_how_many_of_its_panels_wait() {
     h.send_bytes(PREFIX);
     h.send_bytes(b"\t");
     h.send_bytes(b"\x1b[D");
-    // The selected project row shows its `[ New ▾ ]` button over the badge; leaving the
-    // sidebar brings the badge back.
-    wait_until("the button", TIMEOUT, || {
-        rows(&h).get(2).is_some_and(|r| r.contains("[ New"))
+    // The folded project row shows the badge, selected or not.
+    wait_until("the badge", TIMEOUT, || {
+        rows(&h).get(2).is_some_and(|r| r.contains(" !1"))
     });
     h.send_keys("\x1b");
     wait_until("the badge", TIMEOUT, || {

@@ -6,18 +6,18 @@ Read when you need how deck shows what a coding agent (Claude Code, Codex, OpenC
 
 A terminal that runs an agent has an agent state: its kind, a status and a source.
 
-| Status    | Glyph | Meaning                                               |
-| --------- | ----- | ----------------------------------------------------- |
-| `waiting` | `!`   | The agent needs you (warning colour, bold).           |
-| `working` | `⠋`…  | The agent works: a spinner, one frame every 100 ms.   |
-| `active`  | `⠋`…  | Found by its process, and it printed in the last 2 s. |
-| `idle`    | `●`   | The agent is done and waits for a prompt.             |
-| `quiet`   | `○`   | Found by its process, and it printed nothing for 2 s. |
-| none      |       | No agent: nothing is drawn.                           |
+| Status    | Glyph | Meaning                                                                               |
+| --------- | ----- | ------------------------------------------------------------------------------------- |
+| `waiting` | `!`   | The agent needs you (warning colour, bold).                                           |
+| `working` | `⠋`…  | The agent works: a spinner, one frame every 100 ms.                                   |
+| `active`  | `⠋`…  | Found by its process, and it printed in the last 2 s (accent colour, like `working`). |
+| `idle`    | `●`   | The agent is done and waits for a prompt.                                             |
+| `quiet`   | `○`   | Found by its process, and it printed nothing for 2 s.                                 |
+| none      |       | No agent: nothing is drawn.                                                           |
 
 Urgency, most to least: `waiting`, `working`, `active`, `idle`, `quiet`, none. The sidebar shows, in the status column of a panel row, the glyph of the panel's most urgent terminal. The glyphs and colours come from `[theme.glyphs]` (`spinner` is a list of frames, `waiting`, `idle`, `quiet`) and the theme colours; see the reference in `deck config default`.
 
-A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<glyph> <kind> · <name>` in place of the number. The status bar shows `project › <status> <icon> <name>` for the active panel (`project › ⠹ ✻ Fix login bug`), the same status glyph and icon as the sidebar row, so the state stays visible when the sidebar is hidden; there is no status glyph without an agent. The client redraws the spinner only while one spins.
+A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<glyph> <kind> · <name>` in place of the number. The status bar shows `project › <status> <icon> <name>` for the active panel (`project › ⠹ ✻  Fix login bug`), the same status glyph and icon as the sidebar row, so the state stays visible when the sidebar is hidden; there is no status glyph without an agent. The client redraws the spinner only while one spins.
 
 ## Detection by process
 
@@ -125,7 +125,7 @@ The daemon lists each agent's recent sessions for the restore dialog (`Request::
 The `Restore` button at the right of the sidebar's bottom bar, `Option+Space R` (binding `restore`, in the Session group of the help) and `R` in sidebar focus open a centered overlay, 90% of the window wide (at least 60 columns) and 80% high (at least 10 rows), with a filter line, three columns (`Claude Code`, `OpenCode`, `Codex`, each with its count) and a hint line. With no project, they flash `no project to restore into` instead.
 
 - **Opening** sends three `ListAgentSessions { kind, limit: 50 }` requests at once. Each column shows a muted `loading…` until its own answer comes, then its sessions, its error in the warning colour, or a muted `no sessions`. One slow agent never holds the others up, and closing the dialog drops answers that arrive later. An answer that arrives late from a dialog just closed can briefly fill a reopened one, until the fresh answer replaces it.
-- **Rows**: two lines per session, the title and, in muted text, `<directory> · <age> ago` (the directory cut from the left, `~` for the home directory). The selection starts on the first row of the first column that has any; each column scrolls on its own to keep it in sight. Below 60 window columns one column shows at a time, `‹ Claude Code (12) ›`, and `Tab` switches.
+- **Rows**: two lines per session, the title and, in muted text, `<directory> · <age> ago` (the directory cut from the left, `~` for the home directory). The selection starts on the first row of the first column that has any; each column scrolls on its own to keep it in sight. Each column heading starts with its agent's icon, two cells and a space (`✻  Claude Code (50)`), a logo where images are on. Below 60 window columns one column shows at a time, `‹ ✻  Claude Code (12) ›`, and `Tab` switches.
 - **Filter**: typing filters all three columns at once; every word must be in the title or the directory (case-insensitive). The selection moves to the nearest row. `Esc` clears the filter, a second `Esc` closes. [Keys](keys.md#restore-dialog).
 - **Mouse**: hovering a row highlights it, a click selects it and a click on the selected row resumes it, the wheel scrolls the column under the pointer, a click on a header moves the selection to that column, a click outside closes the dialog.
 - **Resuming** opens a new panel in the project whose root holds the session's directory (the longest root; the active project on a tie), else in the active project, running the agent's `resume` command in the session's directory (see above for a directory that is gone). The dialog closes at once and the new panel is active and focused. A refusal (`"claude" not found in PATH ...`, `not a valid session id`) is a 4 s error flash and creates nothing.

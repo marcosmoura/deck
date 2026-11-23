@@ -122,14 +122,17 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let a = app();
     let (t, rows) = screen(&a);
     let side: Vec<String> = rows.iter().map(|r| r.chars().take(29).collect()).collect();
-    assert_eq!(side[0], format!("{}│", pad(" main", 28)));
+    assert_eq!(
+        side[0],
+        format!("{}│", pad(" Session main + New project ", 28))
+    );
     assert_eq!(side[1], format!("{}│", pad("", 28)));
     assert_eq!(side[2], format!("{}│", pad(" ▾ terminal-multiplexer", 28)));
-    assert_eq!(side[3], format!("{}│", pad("▌  ❯ editor", 28)));
-    assert_eq!(side[4], format!("{}│", pad("   ❯ claude", 28)));
-    assert_eq!(side[5], format!("{}│", pad("   ❯ tests", 28)));
+    assert_eq!(side[3], format!("{}│", pad("▌  ❯  editor", 28)));
+    assert_eq!(side[4], format!("{}│", pad("   ❯  claude", 28)));
+    assert_eq!(side[5], format!("{}│", pad("   ❯  tests", 28)));
     assert_eq!(side[6], format!("{}│", pad(" ▾ budget", 28)));
-    assert_eq!(side[7], format!("{}│", pad("   ❯ api", 28)));
+    assert_eq!(side[7], format!("{}│", pad("   ❯  api", 28)));
     assert_eq!(side[8], format!("{}│", pad(" ▾ empty", 28)));
     assert_eq!(side[9], format!("{}│", pad("   no panels", 28)));
     assert_eq!(
@@ -141,7 +144,7 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     assert_eq!(rows[0].chars().count(), 100);
     assert!(!rows.iter().any(|r| r.contains('╭') || r.contains('╰')));
     assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ❯ editor"),
+        rows[23].starts_with(" main  terminal-multiplexer › ❯  editor"),
         "{}",
         rows[23]
     );
@@ -149,7 +152,9 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let buf = t.backend().buffer();
     // Styles: header and the active project bold, the active panel accent and bold with a
     // gutter marker, `no panels` and the count muted.
-    assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
+    assert!(buf[(9, 0)].modifier.contains(Modifier::BOLD));
+    assert!(!buf[(1, 0)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(1, 0)].fg, Color::DarkGray);
     assert!(buf[(3, 2)].modifier.contains(Modifier::BOLD));
     assert!(!buf[(3, 6)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(0, 3)].fg, Color::Blue);
@@ -179,7 +184,7 @@ fn long_names_end_in_an_ellipsis_and_a_count_keeps_its_place() {
     // The terminal count of a panel with two terminals is at the right.
     assert_eq!(
         rows[4].chars().take(29).collect::<String>(),
-        format!("{}│", pad("   ❯ a-very-long-panel-n… 2 ", 28))
+        format!("{}│", pad("   ❯  a-very-long-panel-… 2 ", 28))
     );
 }
 
@@ -708,7 +713,7 @@ fn many_panels() -> SessionView {
 fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     let mut a = app_at(&Config::default(), (100, 24), many_panels());
     let (_, rows) = screen(&a);
-    assert!(rows[3].starts_with("▌  ❯ p1"), "{}", rows[3]);
+    assert!(rows[3].starts_with("▌  ❯  p1"), "{}", rows[3]);
     // The active panel moves down the list.
     let mut view = many_panels();
     view.projects[0].active_panel = Some(PanelId(30));
@@ -717,17 +722,17 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     let (_, rows) = screen(&a);
     let at = rows
         .iter()
-        .position(|r| r.starts_with("▌  ❯ p30"))
+        .position(|r| r.starts_with("▌  ❯  p30"))
         .unwrap_or_else(|| panic!("{rows:#?}"));
     assert_eq!(at, 20, "the last row of the list");
-    assert!(rows[2].starts_with("   ❯ p12"), "{}", rows[2]);
+    assert!(rows[2].starts_with("   ❯  p12"), "{}", rows[2]);
     // The selection scrolls it back up.
     run(&mut a, &[prefix(), key(ct::KeyCode::Tab)]);
     for _ in 0..28 {
         run(&mut a, &[ch('k')]);
     }
     let (_, rows) = screen(&a);
-    assert!(rows.iter().any(|r| r.starts_with("   ❯ p2 ")), "{rows:#?}");
+    assert!(rows.iter().any(|r| r.starts_with("   ❯  p2 ")), "{rows:#?}");
     // The wheel scrolls by three rows and stops at the ends.
     run(&mut a, &[mouse(ct::MouseEventKind::ScrollDown, 5, 5)]);
     let first = a.sidebar_offset;

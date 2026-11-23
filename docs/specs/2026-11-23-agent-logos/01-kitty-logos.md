@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Agent logos through the kitty graphics protocol
@@ -20,28 +20,28 @@ In Ghostty or kitty, a Claude Code, Codex or OpenCode panel shows the agent's lo
    - `Indexed(16..=255)`: the xterm 6×6×6 cube and grey ramp (the inverse of `nearest_256`);
    - `Indexed(0..=15)`: the outer terminal's own palette, asked with `OSC 4;n;?` for n = 0..15 in the same start-up query as OSC 10 and 11 (before the DA1 request, so the existing probe still ends on DA1), and parsed like the OSC 10/11 replies; an index with no reply uses the standard xterm value.
 5. **Ids**: each pair gets a 24-bit id, never 0, unique within the client run (a counter from `0xDEC001`). The placeholder's foreground is `Color::Rgb` of the id's three bytes, built in the colour conversion module (`convert.rs`), the one exception to DECK-08's rule, with a comment. The 256-colour `downsample` never sees it, since images are off without truecolor (requirement 2).
-6. **Transmission**: before each `terminal.draw`, the client computes the pairs the frame needs with the same function the drawing uses to pick an icon and its style (a pre-pass over the app state, no change to `draw(&App)`), and for each pair not yet sent writes to `terminal.backend_mut()`, then flushes: `ESC _G a=T,U=1,f=32,s=64,v=64,c=1,r=1,i=<id>,q=2,m=1;<base64> ESC \` with the RGBA data in base64 chunks of at most 4096 bytes (`m=1` on every chunk but the last, which has `m=0`; later chunks carry only `m` and `q`). Each pair is sent once per client run.
-7. **Drawing**: where DECK-09 draws an agent's icon (sidebar row, status bar), the cell's symbol is U+10EEEE followed by U+0305 twice (row 0, column 0), with the id colour as foreground; the row's background and modifiers are kept. The placeholder and diacritic constants live in the new graphics module next to the escape-sequence code; they are not theme glyphs, so DECK-08's glyph scan is unchanged. Other kinds, and every icon when images are off, are DECK-09's text glyphs. Widths do not change (one cell), so truncation and counts stay DECK-09's.
+6. **Transmission**: before each `terminal.draw`, the client computes the pairs the frame needs with the same function the drawing uses to pick an icon and its style (a pre-pass over the app state, no change to `draw(&App)`), and for each pair not yet sent writes to `terminal.backend_mut()`, then flushes: `ESC _G a=T,U=1,f=32,s=64,v=64,c=2,r=1,i=<id>,q=2,m=1;<base64> ESC \` with the RGBA data in base64 chunks of at most 4096 bytes (`m=1` on every chunk but the last, which has `m=0`; later chunks carry only `m` and `q`). Each pair is sent once per client run.
+7. **Drawing**: where DECK-09 draws an agent's icon (sidebar row, status bar), the icon is two cells: the first cell's symbol is U+10EEEE followed by U+0305 twice (row 0, column 0), the second's U+10EEEE, U+0305, U+030D (row 0, column 1; the kitty table's index 1), both with the id colour as foreground. The cells show the row's visible colours with every modifier cleared (kitty reserves all attributes but the colours): `REVERSED` is resolved, so the cell's background is the row's visible background and the logo is tinted with its visible text colour (a reversed `default` is the outer terminal's other colour, from OSC 10/11). The pre-pass and the drawing use the same function for this. The placeholder and diacritic constants live in the new graphics module next to the escape-sequence code; they are not theme glyphs, so DECK-08's glyph scan is unchanged. Other kinds, and every icon when images are off, are DECK-09's text glyphs. An image icon is two cells wide, so the name starts one column later and the available-width maths uses the icon's real width (text icons stay one cell). The status bar never shows half an image: when its text is cut inside the icon, the remaining placeholder cell is blanked.
 8. **Cleanup**: when the client exits or detaches, it writes `ESC _G a=d,d=I,i=<id>,q=2 ESC \` for every id it sent, before leaving the alternate screen. A crash leaves a few kilobytes in the terminal's image store, freed when the window closes.
 9. **No input**: every command has `q=2`; the client never waits for or parses a graphics reply.
 10. **Test harness**: the e2e harness (`crates/deck/tests/support/mod.rs`) removes `TERM_PROGRAM`, `KITTY_WINDOW_ID`, `TMUX`, `ZELLIJ` and `DECK` from the client's environment by default, so a developer's own terminal never changes test results; a test opts in with `.env(...)`.
 
 ## Screen
 
-Ghostty, 28-column sidebar; `C`, `O` and `◆` below stand for the one-cell Claude, OpenAI and OpenCode logos, tinted like the text around them (the active row's logo in `accent`):
+Ghostty, 28-column sidebar; `C`, `O` and `◆` below stand for the two-cell Claude, OpenAI and OpenCode logos, tinted like the text around them (the active row's logo in `accent`):
 
 ```text
  main                       │
                             │
  ▾ terminal-multiplexer     │
-▌⠹ C Fix login bug          │
+▌⠹ CC Fix login bug         │
    ✎ nvim                   │
- ! O Review the API changes │
-   ◆ Plan the release       │
+ ! OO Review the API chang… │
+   ◆◆ Plan the release      │
    ❯ ~/Projects/terminal-m… │
 ```
 
-Status bar: ` main  terminal-multiplexer › ⠹ C Fix login bug   ⌥Space ? help  d detach`.
+Status bar: ` main  terminal-multiplexer › ⠹ CC Fix login bug   ⌥Space ? help  d detach`.
 
 The same screen in another terminal, inside tmux, or with 256 colours is DECK-09's, with `✻`, `◎` and `◇` (or the `nerd` glyphs).
 
@@ -50,11 +50,11 @@ The same screen in another terminal, inside tmux, or with 256 colours is DECK-09
 - [ ] Detection table: Ghostty (`TERM_PROGRAM=ghostty`, `TERM=xterm-ghostty`), kitty (`TERM=xterm-kitty`, `KITTY_WINDOW_ID=1`); off with `TMUX`, `ZELLIJ` or `DECK` set, with `TERM=screen-256color`, with `TERM=xterm-256color` alone, with `icon_images = "off"`, and without truecolor.
 - [ ] Colour resolution: `Rgb`, `Default` with and without an OSC 10 reply, `Indexed(4)` with an OSC 4 reply and without one, `Indexed(110)` from the cube, `Indexed(244)` from the grey ramp; the OSC 4 replies are parsed in both BEL and ST forms and never reach the input.
 - [ ] Base64 matches the RFC 4648 test vectors; the transmit sequence of a 64×64 image has the exact header above, chunks of at most 4096 base64 bytes, `m=1` on all but the last, and decodes back to the tinted RGBA.
-- [ ] `TestBackend` drawing with images on: the Claude row's icon cell is U+10EEEE with two U+0305 and the id colour as foreground; a shell row still shows `❯`; the status bar's icon cell is the placeholder; the active row's logo has a different id from an inactive row's (accent vs `sidebar_fg`).
+- [ ] `TestBackend` drawing with images on: the Claude row's icon cells are U+10EEEE with two U+0305, then U+10EEEE with U+0305 and U+030D, and the id colour as foreground; a shell row still shows `❯`; the status bar's icon cell is the placeholder; the active row's logo has a different id from an inactive row's (accent vs `sidebar_fg`).
 - [ ] With images off (or `icons = "none"`), drawing is byte-for-byte DECK-09's.
 - [ ] Each pair is transmitted once across many frames and before the first frame that draws it; a colour change after a config reload sends the new pair; reloading to `icon_images = "off"` draws text icons; exit writes one delete per sent id (writer captured in a unit test).
 - [ ] `icon_images = "always"` is a config error naming `theme.icon_images`; `default.toml` stays in sync.
-- [ ] End to end: with `TERM_PROGRAM=ghostty` and `COLORTERM=truecolor` set by the test, a fake `claude` panel's sidebar row holds U+10EEEE in the icon cell (capture `logos`); with `TMUX=/tmp/x,1,0` added it holds `✻`; existing e2e tests pass when run from Ghostty, kitty or tmux.
+- [ ] End to end: with `TERM_PROGRAM=ghostty` and `COLORTERM=truecolor` set by the test, a fake `claude` panel's sidebar row holds two U+10EEEE in the icon cells (capture `logos`); with `TMUX=/tmp/x,1,0` added it holds `✻`; existing e2e tests pass when run from Ghostty, kitty or tmux.
 - [ ] By hand, in Ghostty and in kitty: the three logos show in the sidebar and the status bar, follow the active row's colour, and disappear after `d` detach.
 
 ## Tests
@@ -67,4 +67,4 @@ The same screen in another terminal, inside tmux, or with 256 colours is DECK-09
 
 - Kitty documents Unicode placeholders in its graphics protocol page; Ghostty implements them (virtual placements with `U=1`, direct RGBA with `f=32`, chunking, `a=d,d=I`). The worker checks the current kitty protocol text for the placeholder rules before writing the code.
 - The third diacritic (the id's high byte) is left out on purpose: ids stay under 2^24. The row and column diacritics are written explicitly so a placeholder never takes its row and column from a placeholder to its left.
-- A cell is taller than it is wide, so the square logo is scaled to the cell's width. It is small but recognisable at common font sizes; a later change could use two cells.
+- A cell is about twice as tall as it is wide, so a 2x1 box is nearly square: kitty fits the square logo to the box with its aspect kept (https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders), centred, so it fills about one cell of height. A one-cell box scaled it to the cell's width and it read as a speck.

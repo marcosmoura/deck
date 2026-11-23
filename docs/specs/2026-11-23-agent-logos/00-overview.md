@@ -19,25 +19,26 @@ In Ghostty and kitty, the sidebar and the status bar show the real logos of Clau
 
 - Images for programs other than the three agents (editors, git, shells keep their text icons).
 - Terminals other than Ghostty and kitty, and other image protocols (iTerm2 inline images, Sixel). They get the text icon.
-- Images in the session picker, the help overlay, terminal borders or DECK-10's menu.
+- Images in the session picker, the help overlay or terminal borders.
 - Images through tmux or screen when deck itself runs inside them (they get the text icon).
 - Asking the terminal whether it supports graphics (a query and its reply on stdin); detection is by environment only.
 - Logos in brand colours; a later `icon_images = "brand"` could add them.
 
 ## Decisions
 
-- **Kitty graphics protocol with Unicode placeholders.** Ghostty and kitty both implement it. The client transmits each logo once as a _virtual placement_ (`U=1`, one cell: `c=1,r=1`), then draws it like text: the cell holds the placeholder character U+10EEEE with row and column diacritics, and its foreground colour carries the image id. ratatui's buffer, diffing and redraws treat it as one ordinary cell, so scrolling, hover, overlays and resizes need nothing special. Every command sets `q=2`, so the terminal sends no reply into deck's input.
+- **Kitty graphics protocol with Unicode placeholders.** Ghostty and kitty both implement it. The client transmits each logo once as a _virtual placement_ (`U=1`, two cells wide and one tall: `c=2,r=1`; the square logo is fitted to the box with its aspect kept, so it comes out about one cell tall), then draws it like text: the two cells hold the placeholder character U+10EEEE with row and column diacritics, and their foreground colour carries the image id. ratatui's buffer, diffing and redraws treat them as two ordinary cells, so scrolling, hover, overlays and resizes need nothing special. Every command sets `q=2`, so the terminal sends no reply into deck's input.
 - **Logos are alpha masks tinted at runtime.** Each logo ships as a 64×64 8-bit alpha mask (4096 bytes, `include_bytes!`) made once from its SVG. The client tints it with the colour the text icon would have had (the row's colour: `sidebar_fg`, `accent` for the active panel, and so on), resolved to RGB with the terminal's own answers (OSC 10 for the default foreground, OSC 4 for the 16 base colours), and sends raw RGBA (`f=32`). One image is transmitted per (logo, colour) pair, at most a handful.
 - **Sources.** Claude and OpenAI from [Simple Icons](https://simpleicons.org) 15.22.0 (CC0). OpenCode from its repository's brand files (`services/site/public/brand/files/` in `anomalyco/opencode`). The SVGs are committed next to the masks. The logos are trademarks of their owners, used only to identify the program that runs.
 - **Detection by environment** of the client process: on when `TERM` is `xterm-kitty` or `xterm-ghostty`, or `TERM_PROGRAM` is `ghostty`, or `KITTY_WINDOW_ID` is set; off inside tmux, Zellij or a deck panel, and without 24-bit colour. A config key forces it off.
 - **Row colours, not brand colours.** A logo is tinted with its row's colour, like the text icons, so the active panel's logo is in `accent`.
-- **No new crate.** Base64 (about 30 lines) and the escape sequences are written in `deck-tui`.
+- **No new crate.** Base64 reuses `deck_core::base64` (RFC 4648, already there for OSC 52); the escape sequences are written in `deck-tui`.
 
 ## Sub-specs
 
-| Sub-spec                | Type      | Crate                             | Summary                                                                                     | Depends | Status |
-| ----------------------- | --------- | --------------------------------- | ------------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-kitty-logos.md) | shippable | deck-tui, deck-core, deck (tests) | Logo masks, `icon_images`, detection, colour resolution, transmission and placeholder cells | DECK-09 | todo   |
+| Sub-spec                   | Type      | Crate                             | Summary                                                                                                                                   | Depends | Status |
+| -------------------------- | --------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------ |
+| [01](01-kitty-logos.md)    | shippable | deck-tui, deck-core, deck (tests) | Logo masks, `icon_images`, detection, colour resolution, transmission and placeholder cells                                               | DECK-09 | done   |
+| [02](02-sidebar-polish.md) | shippable | deck-tui, deck (tests)            | Aligned two-cell icons, icons in the New menu and restore dialog, `Session` header with `+ New project`, one `+ New` button at the bottom | 01      | done   |
 
 ## Affected docs
 

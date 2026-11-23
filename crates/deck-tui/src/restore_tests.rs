@@ -293,8 +293,10 @@ fn the_dialog_draws_three_columns_with_title_directory_and_age() {
     );
     // The active column's header is in the accent colour and bold.
     assert_eq!(buf[(7, 6)].fg, color(a.theme.accent));
-    assert!(buf[(7, 6)].modifier.contains(Modifier::BOLD));
+    assert!(buf[(10, 6)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(10, 6)].fg, color(a.theme.accent));
     assert_ne!(buf[(36, 6)].fg, color(a.theme.accent));
+    assert_ne!(buf[(39, 6)].fg, color(a.theme.accent));
 }
 
 #[test]
@@ -651,13 +653,13 @@ fn a_narrow_window_shows_one_column_and_tab_switches() {
     answer(&mut a, AgentKind::OpenCode, opencode(), None);
     answer(&mut a, AgentKind::Codex, codex(), None);
     let text = dialog(&a);
-    assert!(text.contains("‹ Claude Code (2) ›"), "{text}");
+    assert!(text.contains("‹ ✻  Claude Code (2) ›"), "{text}");
     assert!(text.contains("Fix the login redirect"));
     assert!(!text.contains("Rework login form"));
     assert!(text.contains("⏎ resume  tab column  esc close"));
     press(&mut a, ct::KeyCode::Tab);
     let text = dialog(&a);
-    assert!(text.contains("‹ OpenCode (1) ›") && text.contains("Rework login form"));
+    assert!(text.contains("‹ ◇  OpenCode (1) ›") && text.contains("Rework login form"));
     assert!(!text.contains("Fix the login redirect"));
     // The status bar shows the dialog's hints.
     assert!(
@@ -707,10 +709,10 @@ fn row_text(a: &App, y: u16, from: u16, to: u16) -> String {
 }
 
 #[test]
-fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_new_project() {
+fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_the_new_chip() {
     let mut a = app();
     let y = chip_row(&a);
-    assert_eq!(row_text(&a, y, 0, 29), "  + New project    Restore  │");
+    assert_eq!(row_text(&a, y, 0, 29), "  + New            Restore  │");
     moved(&mut a, 20, y);
     assert_eq!(a.hover, Some(Hover::Restore));
     let buf = buffer(&a);
@@ -723,8 +725,10 @@ fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_new_project() {
     // The new project chip is idle meanwhile, and the margin and the gap stay plain.
     assert_eq!(buf[(3, y)].fg, color(a.theme.muted));
     assert!(!buf[(27, y)].modifier.contains(Modifier::REVERSED));
+    moved(&mut a, 3, y);
+    assert_eq!(a.hover, Some(Hover::New));
     moved(&mut a, 10, y);
-    assert_eq!(a.hover, Some(Hover::NewProject));
+    assert_eq!(a.hover, None);
     moved(&mut a, 17, y);
     assert_eq!(a.hover, None);
     moved(&mut a, 18, y);
@@ -952,4 +956,38 @@ fn an_answer_does_not_snap_a_wheel_scrolled_column_back() {
     assert!(offset > 0);
     answer(&mut a, AgentKind::Claude, claude(), None);
     assert_eq!(a.restore.as_ref().unwrap().cols[1].offset, offset);
+}
+
+#[test]
+fn with_images_the_headings_draw_logos_sent_before_the_frame() {
+    let mut a = opened();
+    a.truecolor = true;
+    a.images = Some(crate::graphics::Images::new(
+        Some((10, 20, 30)),
+        Some((1, 1, 1)),
+        [None; 16],
+    ));
+    let whole = |buf: &Buffer, x: u16| {
+        buf[(x, 6)].symbol() == "\u{10EEEE}\u{0305}\u{0305}"
+            && buf[(x + 1, 6)].symbol() == "\u{10EEEE}\u{0305}\u{030D}"
+    };
+    // Before the images are sent the headings show text icons.
+    assert!(!whole(&buffer(&a), 7));
+    let mut sink = Vec::new();
+    a.send_images(&mut sink).unwrap();
+    let buf = buffer(&a);
+    // Each column's heading starts with its logo: the active column in the accent colour.
+    let starts: Vec<u16> = (3..95).filter(|&x| whole(&buf, x)).collect();
+    assert_eq!(starts.len(), 3, "{starts:?}");
+    assert_eq!(starts[0], 7);
+    let sent = &a.images.as_ref().unwrap().order;
+    for x in starts {
+        let ratatui::style::Color::Rgb(r, g, b) = buf[(x, 6)].fg else {
+            panic!("no id colour at {x}")
+        };
+        let id = u32::from_be_bytes([0, r, g, b]);
+        assert!(sent.iter().any(|(i, _)| *i == id), "{id:x}");
+    }
+    // The name follows the icon and a space.
+    assert_eq!(row_text(&a, 6, 10, 21), "Claude Code");
 }

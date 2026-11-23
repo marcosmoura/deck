@@ -51,6 +51,54 @@ pub fn style(s: protocol::Style) -> Style {
         .add_modifier(modifiers)
 }
 
+/// The foreground of an image placeholder cell: the image id's three bytes as an RGB colour.
+///
+/// This is the one place a colour is built outside the theme (DECK-08's rule): the colour is
+/// not drawn but read by the terminal as the id. The 256-colour `downsample` never sees it,
+/// since images are off without truecolor.
+pub fn image_id_color(id: u32) -> Color {
+    let [_, r, g, b] = id.to_be_bytes();
+    Color::Rgb(r, g, b)
+}
+
+/// An RGB colour as a ratatui colour, for image cells whose reversed colours are resolved.
+pub fn rgb(c: (u8, u8, u8)) -> Color {
+    Color::Rgb(c.0, c.1, c.2)
+}
+
+/// What a colour is, for resolving it to RGB: its own value, the outer terminal's default
+/// foreground, or a palette entry (the 16 named colours are entries 0 to 15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    Rgb(u8, u8, u8),
+    Default,
+    Indexed(u8),
+}
+
+pub fn classify(c: Color) -> Resolved {
+    match c {
+        Color::Rgb(r, g, b) => Resolved::Rgb(r, g, b),
+        Color::Reset => Resolved::Default,
+        Color::Indexed(n) => Resolved::Indexed(n),
+        Color::Black => Resolved::Indexed(0),
+        Color::Red => Resolved::Indexed(1),
+        Color::Green => Resolved::Indexed(2),
+        Color::Yellow => Resolved::Indexed(3),
+        Color::Blue => Resolved::Indexed(4),
+        Color::Magenta => Resolved::Indexed(5),
+        Color::Cyan => Resolved::Indexed(6),
+        Color::Gray => Resolved::Indexed(7),
+        Color::DarkGray => Resolved::Indexed(8),
+        Color::LightRed => Resolved::Indexed(9),
+        Color::LightGreen => Resolved::Indexed(10),
+        Color::LightYellow => Resolved::Indexed(11),
+        Color::LightBlue => Resolved::Indexed(12),
+        Color::LightMagenta => Resolved::Indexed(13),
+        Color::LightCyan => Resolved::Indexed(14),
+        Color::White => Resolved::Indexed(15),
+    }
+}
+
 /// Whether `COLORTERM` says the outer terminal does truecolor.
 pub fn truecolor(colorterm: Option<&str>) -> bool {
     matches!(colorterm, Some("truecolor" | "24bit"))

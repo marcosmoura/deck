@@ -99,6 +99,11 @@ impl Home {
         set("PS1", Some("$ "));
         set("COLORTERM", Some("truecolor"));
         set("TERM", Some("xterm-256color"));
+        // The terminal of the developer running the tests must not change the results (the
+        // client draws logos as images in Ghostty and kitty); a test opts in with `.env(...)`.
+        for key in ["TERM_PROGRAM", "KITTY_WINDOW_ID", "TMUX", "ZELLIJ", "DECK"] {
+            set(key, None);
+        }
         set("DECK_HOME", Some(&dir.path().to_string_lossy()));
         set(
             "DECK_TEST_PARENT_PID",

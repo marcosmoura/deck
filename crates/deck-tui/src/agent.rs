@@ -51,7 +51,7 @@ pub fn glyph(status: AgentStatus, spin: usize, theme: &Theme) -> Option<(String,
     match status {
         AgentStatus::None => None,
         AgentStatus::Working => Some((frame(), plain(theme.accent))),
-        AgentStatus::Active => Some((frame(), plain(theme.muted))),
+        AgentStatus::Active => Some((frame(), plain(theme.accent))),
         AgentStatus::Waiting => Some((
             glyphs.waiting.clone(),
             plain(theme.warning).add_modifier(Modifier::BOLD),

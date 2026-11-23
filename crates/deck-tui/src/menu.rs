@@ -1,13 +1,15 @@
 //! The New menu: a small overlay that starts a separate panel with a shell or an agent in a
-//! project. It opens from the New button of a project row, from `prefix N` and from
-//! `n` in sidebar focus.
+//! project. It opens from the `+ New` button of the sidebar's bottom bar, from `prefix N` and
+//! from `n` in sidebar focus.
 
 use std::time::Instant;
 
 use deck_core::action::{Action as Act, PanelLaunch};
 use deck_core::agents::AgentKind;
+use deck_core::icons::IconKind;
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::model::ProjectId;
+use deck_core::theme::IconPreset;
 use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
@@ -17,9 +19,17 @@ use ratatui::widgets::{Block, Clear, Widget};
 
 use crate::app::{App, Out};
 use crate::draw::{border_type, color, selection, truncate, width};
+use crate::sidebar::{ICON_CELLS, kind_icon_cell};
 
 /// The menu's items, in order; the digit that chooses one is its position from 1.
 pub const ITEMS: [&str; 4] = ["Terminal", "Claude", "OpenCode", "Codex"];
+/// The icon of each item, in the order of [`ITEMS`].
+pub const ICONS: [IconKind; 4] = [
+    IconKind::Terminal,
+    IconKind::Claude,
+    IconKind::OpenCode,
+    IconKind::Codex,
+];
 /// Columns inside the borders, at least.
 const INNER: u16 = 20;
 /// Rows with the borders: the items and the hint row.
@@ -85,35 +95,24 @@ impl App {
         (self.size.0, self.size.1.saturating_sub(1))
     }
 
-    /// Where the menu is: below its project's row with its right edge on the sidebar's last
-    /// column, above the row when there is no room below, and at the top right of the window
-    /// when the row is not on screen.
+    /// Where the menu is: above the sidebar's bottom bar with its left edge on the sidebar's
+    /// first column (the bottom of the window area when the sidebar has no bar), clamped to
+    /// the window, and at the top right of the window when the sidebar is not on screen.
     pub(crate) fn menu_rect(&self) -> Option<Rect> {
         let menu = self.menu.as_ref()?;
         let (cols, rows) = self.menu_area();
         let name = truncate(&menu.name, NAME_MAX.min(cols.saturating_sub(TITLE_CHROME)));
         let w = (width(&name) + TITLE_CHROME).max(INNER + 2).min(cols);
         let h = HEIGHT.min(rows);
-        let row = if self.sidebar_visible() {
-            self.project_row_y(menu.project)
+        let (x, y) = if self.sidebar_visible() {
+            let anchor = if rows >= crate::sidebar::BAR_MIN_HEIGHT {
+                rows - 1
+            } else {
+                rows
+            };
+            (0, anchor.saturating_sub(h))
         } else {
-            None
-        };
-        let (x, y) = match row {
-            Some(row) => {
-                // The last column of the sidebar, before the separator.
-                let right = self.sidebar_cols().saturating_sub(1);
-                let x = right.saturating_sub(w);
-                let y = if row + 1 + h <= rows {
-                    row + 1
-                } else if row >= h {
-                    row - h
-                } else {
-                    rows.saturating_sub(h)
-                };
-                (x, y)
-            }
-            None => (cols - w, 0),
+            (cols - w, 0)
         };
         Some(Rect::new(x.min(cols - w), y, w, h))
     }
@@ -241,6 +240,16 @@ impl App {
     }
 }
 
+/// The style of a menu item, highlighted or not.
+pub(crate) fn item_style(theme: &Theme, selected: bool) -> Style {
+    let base = Style::new().bg(color(theme.overlay_bg));
+    if selected {
+        selection(theme, base)
+    } else {
+        base
+    }
+}
+
 /// Draws the menu over everything else but the status bar.
 pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
     let (Some(menu), Some(rect)) = (&app.menu, app.menu_rect()) else {
@@ -272,22 +281,24 @@ pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
             break;
         }
         let selected = i == menu.selected;
-        let style = if selected {
-            selection(theme, base)
-        } else {
-            base
-        };
+        let style = item_style(theme, selected);
         buf.set_style(Rect::new(rect.x + 1, y, inner_w, 1), style);
-        let marker = if selected {
-            theme.glyphs.active.as_str()
+        // ` <icon, two cells> <label>`; without icons the label follows the space.
+        let label_x = if theme.icons == IconPreset::None {
+            rect.x + 2
         } else {
-            " "
+            let (icon, icon_style) = ICONS
+                .get(i)
+                .map(|kind| kind_icon_cell(app, theme, *kind, style))
+                .unwrap_or_default();
+            buf.set_stringn(rect.x + 2, y, icon, usize::from(ICON_CELLS), icon_style);
+            rect.x + 2 + ICON_CELLS + 1
         };
         buf.set_stringn(
-            rect.x + 1,
+            label_x,
             y,
-            format!(" {marker} {label}"),
-            usize::from(inner_w),
+            label,
+            usize::from((rect.x + 1 + inner_w).saturating_sub(label_x)),
             style,
         );
         buf.set_stringn(

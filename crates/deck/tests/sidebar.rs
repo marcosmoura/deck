@@ -32,13 +32,13 @@ fn attached_with(size: (u16, u16), config: &[(&str, &str)]) -> Harness {
 /// `deck` whose first panel is named `1` by hand, so panels can be told apart by number.
 fn numbered() -> Harness {
     let mut h = attached();
-    h.wait_for_text("▌  ❯ sh", TIMEOUT);
+    h.wait_for_text("▌  ❯  sh", TIMEOUT);
     prefixed(&mut h, ",");
     h.wait_for_text("Rename panel: sh", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("1");
     h.send_keys(ENTER);
-    wait_for_row(&h, "▌  ❯ 1");
+    wait_for_row(&h, "▌  ❯  1");
     h
 }
 
@@ -56,13 +56,13 @@ fn rows(h: &Harness) -> Vec<String> {
 /// tests can tell the panels apart.
 fn new_panel(h: &mut Harness, name: &str) {
     prefixed(h, "c");
-    wait_for_row(h, "▌  ❯ sh");
+    wait_for_row(h, "▌  ❯  sh");
     prefixed(h, ",");
     h.wait_for_text("Rename panel: sh", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys(name);
     h.send_keys(ENTER);
-    wait_for_row(h, &format!("▌  ❯ {name}"));
+    wait_for_row(h, &format!("▌  ❯  {name}"));
 }
 
 /// Waits until some screen row starts with `prefix`.
@@ -110,13 +110,13 @@ fn hint_prefix() -> &'static str {
 #[test]
 fn the_sidebar_shows_the_session_project_and_first_panel() {
     let mut h = attached();
-    h.wait_for_text("▌  ❯ sh", TIMEOUT);
+    h.wait_for_text("▌  ❯  sh", TIMEOUT);
     let path = h.capture("sidebar");
     assert!(path.is_file());
     let rows = rows(&h);
-    assert!(rows[0].starts_with(" main"), "{}", rows[0]);
+    assert!(rows[0].starts_with(" Session "), "{}", rows[0]);
     assert!(rows[2].starts_with(" ▾ dk"), "{}", rows[2]);
-    assert!(rows[3].starts_with("▌  ❯ sh"), "{}", rows[3]);
+    assert!(rows[3].starts_with("▌  ❯  sh"), "{}", rows[3]);
     assert_eq!(rows[0].chars().nth(28), Some('│'));
     // The terminal starts right after the separator: no border, no title.
     assert!(
@@ -129,7 +129,7 @@ fn the_sidebar_shows_the_session_project_and_first_panel() {
         rows[0]
     );
     assert!(rows[23].starts_with(" main  dk"), "{}", rows[23]);
-    assert!(rows[23].contains("› ❯ sh"), "{}", rows[23]);
+    assert!(rows[23].contains("› ❯  sh"), "{}", rows[23]);
     assert!(rows[23].ends_with(&format!("{} ? help  d detach", hint_prefix())));
     // The panel area is the window less the sidebar and its separator: 71 columns.
     assert_eq!(stty(&mut h), "23 71");
@@ -141,20 +141,20 @@ fn a_new_panel_is_added_focused_and_switching_shows_the_right_shell() {
     h.send_keys("echo ONE\r");
     h.wait_for_text("│ONE", TIMEOUT);
     new_panel(&mut h, "2");
-    h.wait_for_text("› ❯ 2", TIMEOUT);
+    h.wait_for_text("› ❯  2", TIMEOUT);
     wait_gone(&h, "│ONE");
     h.send_keys("echo TWO\r");
     h.wait_for_text("│TWO", TIMEOUT);
     // `p` goes back, `n` forward, `1` and `2` by number.
     prefixed(&mut h, "p");
     h.wait_for_text("│ONE", TIMEOUT);
-    wait_for_row(&h, "▌  ❯ 1");
+    wait_for_row(&h, "▌  ❯  1");
     assert!(!h.screen_text().contains("│TWO"));
     prefixed(&mut h, "n");
     h.wait_for_text("│TWO", TIMEOUT);
     prefixed(&mut h, "1");
     h.wait_for_text("│ONE", TIMEOUT);
-    wait_for_row(&h, "▌  ❯ 1");
+    wait_for_row(&h, "▌  ❯  1");
     prefixed(&mut h, "2");
     h.wait_for_text("│TWO", TIMEOUT);
     h.capture("two-panels");
@@ -172,8 +172,8 @@ fn renaming_a_panel_and_an_empty_name_shows_the_error_and_reopens_the_prompt() {
     h.capture("rename-error");
     h.send_keys("work");
     h.send_keys(ENTER);
-    wait_for_row(&h, "▌  ❯ work");
-    h.wait_for_text("› ❯ work", TIMEOUT);
+    wait_for_row(&h, "▌  ❯  work");
+    h.wait_for_text("› ❯  work", TIMEOUT);
     assert!(!h.screen_text().contains("Rename panel"));
 }
 
@@ -191,7 +191,7 @@ fn a_new_project_takes_a_directory_and_a_name() {
     h.wait_for_text("Project name: ~", TIMEOUT);
     h.send_keys(ENTER);
     wait_for_row(&h, " ▾ ~");
-    h.wait_for_text("› ❯ sh", TIMEOUT);
+    h.wait_for_text("› ❯  sh", TIMEOUT);
     wait_until("the new shell", TIMEOUT, || {
         rows(&h).iter().any(|r| r.contains("│$"))
     });
@@ -249,12 +249,12 @@ fn closing_a_panel_asks_first_and_focus_moves_on() {
     h.capture("confirm-close");
     h.send_keys("n");
     wait_gone(&h, "Close panel");
-    assert!(rows(&h).iter().any(|r| r.starts_with("▌  ❯ 2")));
+    assert!(rows(&h).iter().any(|r| r.starts_with("▌  ❯  2")));
     prefixed(&mut h, "X");
     h.wait_for_text("(y/n)", TIMEOUT);
     h.send_keys("y");
-    wait_for_row(&h, "▌  ❯ 1");
-    wait_gone(&h, "   ❯ 2");
+    wait_for_row(&h, "▌  ❯  1");
+    wait_gone(&h, "   ❯  2");
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn closing_the_last_panel_shows_the_empty_state_and_a_new_panel_recovers() {
     // Typing goes nowhere.
     h.send_keys("echo lost\r");
     prefixed(&mut h, "c");
-    wait_for_row(&h, "▌  ❯ sh");
+    wait_for_row(&h, "▌  ❯  sh");
     h.wait_for_text("│$", TIMEOUT);
     assert!(!h.screen_text().contains("lost"), "{}", h.screen_text());
 }
@@ -283,27 +283,26 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
     h.send_keys("echo TWO\r");
     h.wait_for_text("│TWO", TIMEOUT);
     prefixed(&mut h, "1");
-    wait_for_row(&h, "▌  ❯ 1");
+    wait_for_row(&h, "▌  ❯  1");
     prefixed(&mut h, TAB);
     h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("j");
     h.wait_for_text("↑↓ move", TIMEOUT);
     h.capture("sidebar-focus-selected");
     h.send_keys(ENTER);
-    wait_for_row(&h, "▌  ❯ 2");
+    wait_for_row(&h, "▌  ❯  2");
     h.wait_for_text("│TWO", TIMEOUT);
     wait_gone(&h, "SIDEBAR");
-    // Collapse: the panels go. The selected project row shows its `[ New ▾ ]` button; once
-    // the keyboard leaves the sidebar it shows how many panels it holds.
+    // Collapse: the panels go. The project row keeps its panel count.
     prefixed(&mut h, TAB);
     h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("h");
     wait_until("the collapsed project", TIMEOUT, || {
         rows(&h)
             .iter()
-            .any(|r| r.starts_with(" ▸ dk") && r.contains("[ New ▾ ] │"))
+            .any(|r| r.starts_with(" ▸ dk") && r.contains("2 │"))
     });
-    assert!(!rows(&h).iter().any(|r| r.starts_with("▌  ❯ 2")));
+    assert!(!rows(&h).iter().any(|r| r.starts_with("▌  ❯  2")));
     h.capture("sidebar-focus");
     h.send_keys(ESC);
     wait_until("the panel count", TIMEOUT, || {
@@ -314,7 +313,7 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
     prefixed(&mut h, TAB);
     h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("l");
-    wait_for_row(&h, "▌  ❯ 2");
+    wait_for_row(&h, "▌  ❯  2");
     // Esc hands the keyboard back to the shell.
     h.send_keys(ESC);
     wait_gone(&h, "SIDEBAR");
@@ -328,7 +327,7 @@ fn the_mouse_focuses_panels_and_folds_projects() {
     new_panel(&mut h, "2");
     // Panel 1 is on row 4 (1-based), the project on row 3.
     h.send_keys("\x1b[<0;6;4M\x1b[<0;6;4m");
-    wait_for_row(&h, "▌  ❯ 1");
+    wait_for_row(&h, "▌  ❯  1");
     h.send_keys("\x1b[<0;6;3M\x1b[<0;6;3m");
     wait_until("the collapsed project", TIMEOUT, || {
         rows(&h).iter().any(|r| r.starts_with(" ▸ dk"))
@@ -413,11 +412,11 @@ fn thirty_panels_scroll_the_sidebar_to_the_active_one() {
     for n in 2..=30 {
         new_panel(&mut h, &n.to_string());
     }
-    wait_for_row(&h, "▌  ❯ 30");
+    wait_for_row(&h, "▌  ❯  30");
     h.capture("sidebar-scrolled");
-    assert!(!rows(&h).iter().any(|r| r.starts_with("   ❯ 1 ")));
+    assert!(!rows(&h).iter().any(|r| r.starts_with("   ❯  1 ")));
     prefixed(&mut h, "1");
-    wait_for_row(&h, "▌  ❯ 1");
+    wait_for_row(&h, "▌  ❯  1");
 }
 
 #[test]
@@ -452,11 +451,11 @@ fn two_clients_share_the_active_panel_but_not_focus_prompts_or_overlays() {
     let mut a = numbered();
     new_panel(&mut a, "2");
     let mut b = second_client(&a, SIZE);
-    wait_for_row(&b, "▌  ❯ 2");
+    wait_for_row(&b, "▌  ❯  2");
     // `n` in A moves the active panel in both.
     prefixed(&mut a, "n");
-    wait_for_row(&a, "▌  ❯ 1");
-    wait_for_row(&b, "▌  ❯ 1");
+    wait_for_row(&a, "▌  ❯  1");
+    wait_for_row(&b, "▌  ❯  1");
     // Sidebar focus and prompts are local.
     prefixed(&mut a, TAB);
     a.wait_for_text("SIDEBAR", TIMEOUT);

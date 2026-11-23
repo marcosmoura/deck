@@ -504,10 +504,15 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
     // agent; coloured after the text is drawn); a manually named panel keeps its name, so
     // its source terminal's title follows it when it says something else.
     let mut mark = None;
+    let mut icon_mark = None;
     let location = match app.mirror.active_panel() {
         Some(panel) => {
-            let icon =
-                sidebar::panel_icon(panel, theme).map_or_else(String::new, |i| format!("{i} "));
+            let cell = sidebar::panel_icon_cell(app, panel, theme, base.fg(color(theme.muted)));
+            let image_style = cell
+                .as_ref()
+                .filter(|(text, _)| text.starts_with(crate::graphics::PLACEHOLDER))
+                .map(|(_, style)| *style);
+            let icon = cell.map_or_else(String::new, |(i, _)| format!("{i} "));
             let before = format!("{project} › ");
             let status = agent::glyph(agent::panel_status(panel), app.spin, theme).map_or_else(
                 String::new,
@@ -517,6 +522,9 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
                     text
                 },
             );
+            if let Some(style) = image_style {
+                icon_mark = Some((width(&before) + width(&status), style));
+            }
             let mut text = format!("{before}{status}{icon}{}", panel.name);
             let title = source_terminal_view(panel)
                 .and_then(|t| t.title.as_deref())
@@ -616,6 +624,26 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
                     .is_some_and(|cell| cell.symbol() == glyph)
             {
                 buf.set_stringn(at, bar.y, &glyph, 1, base.patch(glyph_style));
+            }
+        }
+        // An image is two placeholder cells with its id as colour. When the text was cut
+        // inside it, the half that is left is blanked: it would show half a logo.
+        if let Some((col, icon_style)) = icon_mark {
+            let at = x + 1 + col;
+            let is_image = |buf: &Buffer, x: u16| {
+                buf.cell((x, bar.y))
+                    .is_some_and(|c| c.symbol().starts_with(crate::graphics::PLACEHOLDER))
+            };
+            if at + 1 < x + room && is_image(buf, at) && is_image(buf, at + 1) {
+                for dx in 0..2 {
+                    if let Some(cell) = buf.cell_mut((at + dx, bar.y)) {
+                        cell.set_style(icon_style);
+                    }
+                }
+            } else if is_image(buf, at)
+                && let Some(cell) = buf.cell_mut((at, bar.y))
+            {
+                cell.set_symbol(" ");
             }
         }
     }
@@ -799,8 +827,8 @@ mod tests {
         assert_eq!(
             text[23],
             format!(
-                " main  proj › ❯ p{}{} ? help  d detach",
-                " ".repeat(80 - 17 - 17 - prefix_hint().chars().count()),
+                " main  proj › ❯  p{}{} ? help  d detach",
+                " ".repeat(80 - 18 - 17 - prefix_hint().chars().count()),
                 prefix_hint()
             )
         );
@@ -819,7 +847,7 @@ mod tests {
         let a = manual_app((80, 24), (80, 23), Some("vim: a title"));
         let (_, text) = render(&a);
         assert!(
-            text[23].starts_with(" main  proj › ❯ p · vim: a title "),
+            text[23].starts_with(" main  proj › ❯  p · vim: a title "),
             "{}",
             text[23]
         );
@@ -827,7 +855,7 @@ mod tests {
         let a = manual_app((50, 10), (50, 9), Some("vim: a very long title indeed"));
         let (_, text) = render(&a);
         let bar = &text[9];
-        assert!(bar.starts_with(" main  proj › ❯ p · vim"), "{bar}");
+        assert!(bar.starts_with(" main  proj › ❯  p · vim"), "{bar}");
         assert!(bar.contains("… "), "{bar}");
         assert!(bar.ends_with("d detach"), "{bar}");
         assert_eq!(width(bar), 50);
@@ -839,7 +867,7 @@ mod tests {
         assert!(!text[23].contains('·'), "{}", text[23]);
         let a = manual_app((80, 24), (80, 23), Some("p"));
         let (_, text) = render(&a);
-        assert!(text[23].starts_with(" main  proj › ❯ p  "), "{}", text[23]);
+        assert!(text[23].starts_with(" main  proj › ❯  p  "), "{}", text[23]);
 
         // No title when the panel area is empty.
         let mut v = view(Some("t"));
@@ -876,8 +904,8 @@ mod tests {
         assert_eq!(
             text[23],
             format!(
-                " SCROLL  [120/4096] proj › ❯ p{}q exit  g top  G bottom",
-                " ".repeat(80 - 30 - 23)
+                " SCROLL  [120/4096] proj › ❯  p{}q exit  g top  G bottom",
+                " ".repeat(80 - 31 - 23)
             )
         );
         let buf = t.backend().buffer();

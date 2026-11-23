@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::graphics::Images;
 use deck_core::action::Action as Act;
 use deck_core::config::Config;
 use deck_core::keys::{KeyCode, KeyEvent, Modifiers, encode};
@@ -51,6 +52,8 @@ pub fn notice_span(level: NoticeLevel) -> Duration {
 
 /// Lines the wheel scrolls per notch.
 const WHEEL_LINES: i32 = 3;
+/// The flash when the bottom `+ New` button has no project to open the menu for.
+const NO_PROJECT_FOR_NEW: &str = "no project";
 
 /// What the event loop must do after the state changed.
 #[derive(Debug, PartialEq, Eq)]
@@ -75,6 +78,9 @@ pub struct App {
     pub config: Config,
     /// The outer terminal does truecolor; if not, RGB colours are drawn as palette colours.
     pub truecolor: bool,
+    /// The logos as images; `None` unless the outer terminal is one that shows them (see
+    /// [`crate::graphics::detect`]).
+    pub(crate) images: Option<Images>,
     /// The outer terminal's size in columns and rows.
     pub size: (u16, u16),
     pub armed: bool,
@@ -179,6 +185,7 @@ impl App {
             theme: config.theme.clone(),
             config: config.clone(),
             truecolor: true,
+            images: None,
             size,
             armed: false,
             flash: None,
@@ -503,7 +510,6 @@ impl App {
         if matches!(event.kind, ct::MouseEventKind::Up(_)) {
             self.swallow_release = false;
         }
-        let before = self.pointer;
         self.pointer = Some((event.column, event.row));
         // The press on the chip survives the pointer drifting (a drag with the left button);
         // anything else but its release ends it.
@@ -547,12 +553,6 @@ impl App {
                 ct::MouseEventKind::Moved => {
                     let hover = self.hover_at(event.column, event.row);
                     self.set_hover(hover);
-                    // The button's colours change when the pointer gets on or off it.
-                    let on =
-                        |p: Option<(u16, u16)>| p.is_some_and(|(c, r)| self.on_button_at(c, r));
-                    if on(before) != on(self.pointer) {
-                        self.dirty = true;
-                    }
                     Vec::new()
                 }
                 ct::MouseEventKind::Up(ct::MouseButton::Left)
@@ -561,10 +561,14 @@ impl App {
                 {
                     self.dirty = true;
                     self.hover = None;
-                    if chip_down == Some(Hover::Restore) {
-                        return self.open_restore(now);
+                    match chip_down {
+                        Some(Hover::Restore) => return self.open_restore(now),
+                        Some(Hover::New) => match self.new_target() {
+                            Some(project) => self.open_new_menu(project),
+                            None => self.set_flash(NO_PROJECT_FOR_NEW.into(), now, false),
+                        },
+                        _ => self.open_new_project(),
                     }
-                    self.open_new_project();
                     Vec::new()
                 }
                 kind => {

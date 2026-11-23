@@ -2,7 +2,7 @@
 //! drawing.
 
 use deck_core::action::Action as Act;
-use deck_core::icons::icon_for;
+use deck_core::icons::{IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::model::{PanelId, PanelView, ProjectId, SessionView};
 use deck_core::naming::source_terminal_view;
@@ -14,14 +14,16 @@ use ratatui::style::{Modifier, Style};
 
 use crate::agent;
 use crate::app::{App, Out};
+use crate::convert::image_id_color;
 use crate::draw::{color, selection, truncate, width};
+use crate::graphics::{Logo, Pair, placeholder};
 
 /// The session name and a blank row above the project rows.
 pub const HEADER_ROWS: u16 = 2;
 /// Rows the bottom bar and the blank row above it take.
 const BAR_ROWS: u16 = 2;
 /// A sidebar shorter than this has no bottom bar.
-const BAR_MIN_HEIGHT: u16 = 8;
+pub(crate) const BAR_MIN_HEIGHT: u16 = 8;
 /// Under this width the bar's chips shorten to their icon.
 const BAR_WIDE: u16 = 26;
 /// Rows the wheel scrolls per notch.
@@ -40,21 +42,20 @@ pub enum Sel {
 /// What the pointer is over in the sidebar. Client-local: never sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
+    /// The `+ New project` chip of the header.
     NewProject,
+    /// The `+ New` chip of the bottom bar.
+    New,
     Restore,
-    /// A project row, with its New button on show.
-    ProjectNew(ProjectId),
 }
 
-/// Columns of the project row's button, and its margin from the right edge.
-const BUTTON_MARGIN: u16 = 1;
-/// Cells kept between the name and the button, besides the name's own `…`.
-const BUTTON_GAP: u16 = 2;
-
-/// The text of the project row's button.
-fn button_text(theme: &Theme) -> String {
-    format!("[ New {} ]", theme.glyphs.expanded)
-}
+/// The word before the session's name in the header.
+const SESSION_LABEL: &str = "Session ";
+/// Cells an icon takes: a text icon and a blank, or a logo.
+pub const ICON_CELLS: u16 = 2;
+/// The column the icon of a panel row starts in, and the one its name starts in with icons.
+const ICON_X: u16 = 3;
+const NAME_X_ICONS: u16 = ICON_X + ICON_CELLS + 1;
 
 /// Rows the bottom bar and its spacer take in a sidebar `height` rows tall.
 fn bar_rows(height: u16) -> u16 {
@@ -65,13 +66,32 @@ fn bar_rows(height: u16) -> u16 {
     }
 }
 
-/// The `New project` chip: `" + New project "`, or `" + "` in a narrow sidebar.
-fn chip(width: u16) -> &'static str {
+/// The `New project` chip of the header: `"+ New project"`, or `"+"` in a narrow sidebar.
+/// No side padding, so `Session main` fits beside it in the default 28 columns.
+fn new_project_chip(width: u16) -> &'static str {
     if width < BAR_WIDE {
-        " + "
+        "+"
     } else {
-        " + New project "
+        "+ New project"
     }
+}
+
+/// The `New` chip: `" + New "`, or `" + "` in a narrow sidebar.
+fn new_chip(width: u16) -> &'static str {
+    if width < BAR_WIDE { " + " } else { " + New " }
+}
+
+/// The columns the `New project` chip takes in a sidebar `w` columns wide: right-aligned on
+/// the header row, with a margin of one column.
+fn new_project_span(w: u16) -> std::ops::Range<u16> {
+    let cells = width(new_project_chip(w));
+    let x = w.saturating_sub(1 + cells);
+    x..x + cells
+}
+
+/// The columns the `New` chip takes: from the second column.
+fn new_span(w: u16) -> std::ops::Range<u16> {
+    1..1 + width(new_chip(w))
 }
 
 /// The `Restore` chip: `" Restore "`, or `" ↻ "` in a narrow sidebar.
@@ -109,7 +129,7 @@ pub enum Row {
 }
 
 impl Row {
-    fn sel(self) -> Option<Sel> {
+    pub(crate) fn sel(self) -> Option<Sel> {
         match self {
             Self::Project(p) => Some(Sel::Project(p)),
             Self::Panel(p, panel) => Some(Sel::Panel(p, panel)),
@@ -152,53 +172,42 @@ impl App {
         usize::from(height.saturating_sub(HEADER_ROWS + bar_rows(height)))
     }
 
-    /// The window row of a project's row, when it is in the list on screen.
-    pub(crate) fn project_row_y(&self, project: ProjectId) -> Option<u16> {
-        let at = self
-            .sidebar_rows()
-            .iter()
-            .position(|r| *r == Row::Project(project))?;
-        let line = at.checked_sub(self.sidebar_offset)?;
-        (line < self.list_height()).then(|| HEADER_ROWS + u16::try_from(line).unwrap_or(0))
-    }
-
-    /// Whether the project row shows its button: the pointer is on the row, or the row is
-    /// the selection of the sidebar focus, or its menu is open.
-    pub(crate) fn button_shown(&self, project: ProjectId) -> bool {
-        self.hover == Some(Hover::ProjectNew(project))
-            || (self.sidebar_focus && self.selection == Some(Sel::Project(project)))
-            || self.menu.as_ref().is_some_and(|m| m.project == project)
-    }
-
-    /// What the cell is over: a project row, or the `New project` chip if the bar is drawn
-    /// and shows it.
+    /// What the cell is over: the `New project` chip of the header, or the chips of the bottom
+    /// bar when it is drawn.
     pub(crate) fn hover_at(&self, column: u16, row: u16) -> Option<Hover> {
         let height = self.size.1.saturating_sub(1);
-        if column >= self.sidebar_width.min(self.sidebar_cols()) {
+        let w = self.sidebar_width;
+        if column >= w.min(self.sidebar_cols()) {
             return None;
         }
-        if let Some(line) = row.checked_sub(HEADER_ROWS)
-            && usize::from(line) < self.list_height()
-        {
-            return match self
-                .sidebar_rows()
-                .get(self.sidebar_offset + usize::from(line))
-            {
-                Some(Row::Project(id)) => Some(Hover::ProjectNew(*id)),
-                _ => None,
-            };
+        if row == 0 {
+            return new_project_span(w)
+                .contains(&column)
+                .then_some(Hover::NewProject);
         }
         if bar_rows(height) == 0 || row != height - 1 {
             return None;
         }
-        let chip_w = width(chip(self.sidebar_width));
-        if (1..1 + chip_w).contains(&column) {
-            Some(Hover::NewProject)
-        } else if restore_span(self.sidebar_width).contains(&column) {
+        if new_span(w).contains(&column) {
+            Some(Hover::New)
+        } else if restore_span(w).contains(&column) {
             Some(Hover::Restore)
         } else {
             None
         }
+    }
+
+    /// The project the bottom `+ New` button opens the menu for: the selection in sidebar
+    /// focus, else the active project.
+    pub(crate) fn new_target(&self) -> Option<ProjectId> {
+        // A selection whose project another client closed falls back to the active project.
+        if self.sidebar_focus
+            && let Some(sel) = self.selection
+            && self.mirror.find_project(sel.project()).is_some()
+        {
+            return Some(sel.project());
+        }
+        self.mirror.active_project().map(|p| p.id)
     }
 
     /// Sets the hover, redrawing only when it changed.
@@ -390,18 +399,6 @@ impl App {
         outs
     }
 
-    /// Whether a sidebar column is on the project row's button.
-    fn on_button(&self, column: u16) -> bool {
-        let button = width(&button_text(&self.theme));
-        let x = self.sidebar_width.saturating_sub(button + BUTTON_MARGIN);
-        (x..x + button).contains(&column)
-    }
-
-    /// Whether the cell is on a project row's button.
-    pub(crate) fn on_button_at(&self, column: u16, row: u16) -> bool {
-        matches!(self.hover_at(column, row), Some(Hover::ProjectNew(_))) && self.on_button(column)
-    }
-
     /// A mouse event over the sidebar or its separator.
     pub(crate) fn sidebar_mouse(&mut self, event: ct::MouseEvent) -> Vec<Out> {
         if event.column >= self.sidebar_width {
@@ -420,7 +417,7 @@ impl App {
             }
             ct::MouseEventKind::Down(ct::MouseButton::Left) => {
                 let target = self.hover_at(event.column, event.row);
-                if matches!(target, Some(Hover::NewProject | Hover::Restore)) {
+                if target.is_some() {
                     self.chip_down = target;
                     return Vec::new();
                 }
@@ -437,12 +434,6 @@ impl App {
                         vec![self.act(Act::FocusPanel { panel: *panel }, None)]
                     }
                     Some(Row::Project(project)) => {
-                        // A click on the button opens the menu; on the rest of the row it
-                        // folds the project.
-                        if self.button_shown(*project) && self.on_button(event.column) {
-                            self.open_new_menu(*project);
-                            return Vec::new();
-                        }
                         self.selection = Some(Sel::Project(*project));
                         self.toggle_collapsed(*project)
                     }
@@ -454,15 +445,76 @@ impl App {
     }
 }
 
-/// The icon of a panel: the one of its source terminal's agent or program; none with
+/// The kind of icon of a panel: the one of its source terminal's agent or program; none with
 /// `icons = "none"` or without terminals.
-pub fn panel_icon<'a>(panel: &PanelView, theme: &'a Theme) -> Option<&'a str> {
+pub fn panel_icon_kind(panel: &PanelView, theme: &Theme) -> Option<IconKind> {
     if theme.icons == IconPreset::None {
         return None;
     }
     let term = source_terminal_view(panel)?;
-    let kind = icon_for(term.agent.as_ref().map(|a| a.kind), Some(&term.program));
-    Some(theme.icon_glyphs.get(kind))
+    Some(icon_for(
+        term.agent.as_ref().map(|a| a.kind),
+        Some(&term.program),
+    ))
+}
+
+/// The icon of an icon kind as it is drawn, two cells wide, with the style to draw it in. For a
+/// logo that was sent, the placeholder cells: the visible colours of `style`, no modifiers, the
+/// id as foreground (see [`crate::graphics::Images::cell_for`]); else the text icon and a
+/// blank cell, in `style`.
+pub fn kind_icon_cell(app: &App, theme: &Theme, kind: IconKind, style: Style) -> (String, Style) {
+    let image = app.logos().and_then(|images| {
+        let (rgb, cell) = images.cell_for(style);
+        let pair = Pair {
+            logo: Logo::of(kind)?,
+            rgb,
+        };
+        images.id(&pair).map(|id| cell.fg(image_id_color(id)))
+    });
+    match image {
+        Some(cell) => (placeholder(), cell),
+        None => (format!("{} ", theme.icon_glyphs.get(kind)), style),
+    }
+}
+
+/// The icon of a panel as it is drawn (see [`kind_icon_cell`]); none with `icons = "none"` or
+/// without terminals.
+pub fn panel_icon_cell(
+    app: &App,
+    panel: &PanelView,
+    theme: &Theme,
+    style: Style,
+) -> Option<(String, Style)> {
+    let kind = panel_icon_kind(panel, theme)?;
+    Some(kind_icon_cell(app, theme, kind, style))
+}
+
+/// The style of the sidebar's rows before any of them is selected or active.
+pub fn base_style(theme: &Theme) -> Style {
+    Style::new()
+        .fg(color(theme.sidebar_fg))
+        .bg(color(theme.sidebar_bg))
+}
+
+/// The style of a panel row's name and icon (before the unseen mark makes it bold).
+pub fn panel_style(theme: &Theme, base: Style, is_selected: bool, active: bool) -> Style {
+    let row_style = if is_selected {
+        selection(theme, base)
+    } else {
+        base
+    };
+    if !active {
+        return row_style;
+    }
+    // The accent must not replace a custom selection colour.
+    let accent = base.fg(color(theme.accent));
+    let style = row_style.patch(accent);
+    let style = if is_selected && theme.selection_fg != Default::default() {
+        style.fg(color(theme.selection_fg))
+    } else {
+        style
+    };
+    style.add_modifier(Modifier::BOLD)
 }
 
 /// Draws the sidebar in `area` (its columns, without the separator) and the separator
@@ -471,9 +523,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     let Some(view) = app.mirror.view() else {
         return;
     };
-    let base = Style::new()
-        .fg(color(theme.sidebar_fg))
-        .bg(color(theme.sidebar_bg));
+    let base = base_style(theme);
     buf.set_style(area, base);
     // The separator is drawn in the accent colour while it is dragged.
     let (bar, bar_color) = if app.sidebar_drag.is_some() {
@@ -496,8 +546,40 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         buf.set_stringn(area.x + x, y, text, usize::from(w.saturating_sub(x)), style);
     };
 
-    let header = truncate(&view.name, w.saturating_sub(2));
-    put(buf, area.y, 1, &header, accent.add_modifier(Modifier::BOLD));
+    // The chips: the selection colours under the pointer.
+    let style_of = |hover| {
+        if app.hover == Some(hover) {
+            selection(theme, base)
+        } else {
+            muted
+        }
+    };
+    // `Session <name>`, cut before the `New project` chip, which the name gives way to.
+    let span = new_project_span(w);
+    let header = truncate(
+        &format!("{SESSION_LABEL}{}", view.name),
+        span.start.saturating_sub(2),
+    );
+    let label_len = SESSION_LABEL.len();
+    if header.starts_with(SESSION_LABEL) {
+        let (label, name) = header.split_at(label_len);
+        put(buf, area.y, 1, label, muted);
+        put(
+            buf,
+            area.y,
+            1 + width(label),
+            name,
+            accent.add_modifier(Modifier::BOLD),
+        );
+    } else {
+        put(buf, area.y, 1, &header, muted);
+    }
+    let style = style_of(Hover::NewProject);
+    buf.set_style(
+        Rect::new(area.x + span.start, area.y, span.end - span.start, 1),
+        style,
+    );
+    put(buf, area.y, span.start, new_project_chip(w), style);
 
     let rows = rows(view);
     let height = usize::from(
@@ -546,18 +628,13 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     &theme.glyphs.expanded
                 };
                 put(buf, y, 1, glyph, keep(row_style.patch(muted)));
-                // The button, while shown, wins the right edge over the count and the badge.
-                let button = app
-                    .button_shown(id)
-                    .then(|| button_text(theme))
-                    .map(|text| (width(&text), text));
-                let (count, count_w) = if p.collapsed && button.is_none() {
+                let (count, count_w) = if p.collapsed {
                     side(p.panels.len().to_string())
                 } else {
                     (String::new(), 0)
                 };
                 // `!n` after the name of a collapsed project with n waiting panels.
-                let waiting = if p.collapsed && button.is_none() {
+                let waiting = if p.collapsed {
                     agent::waiting_panels(p)
                 } else {
                     0
@@ -566,12 +643,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 let badge_w = badge.as_deref().map_or(0, |b| width(b) + 1);
                 let room = w
                     .saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 })
-                    .saturating_sub(badge_w)
-                    .saturating_sub(
-                        button
-                            .as_ref()
-                            .map_or(0, |(n, _)| n + BUTTON_MARGIN + BUTTON_GAP),
-                    );
+                    .saturating_sub(badge_w);
                 let mut style = row_style;
                 if view.active_project == Some(id) {
                     style = style.add_modifier(Modifier::BOLD);
@@ -599,27 +671,13 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                         keep(row_style.patch(muted)),
                     );
                 }
-                if let Some((button_w, text)) = button {
-                    let x = w.saturating_sub(button_w + BUTTON_MARGIN);
-                    let on_it = app.hover == Some(Hover::ProjectNew(id))
-                        && app
-                            .pointer
-                            .is_some_and(|(px, py)| py == y && (x..x + button_w).contains(&px));
-                    let style = if on_it {
-                        selection(theme, base)
-                    } else {
-                        keep(row_style.patch(accent))
-                    };
-                    buf.set_style(Rect::new(area.x + x, y, button_w, 1), style);
-                    put(buf, y, x, &text, style);
-                }
             }
             Row::Panel(_, id) => {
                 let Some((_, p)) = app.mirror.find_panel(id) else {
                     continue;
                 };
                 let active = view.active_panel == Some(id);
-                let mut style = row_style;
+                let mut style = panel_style(theme, base, is_selected, active);
                 if active {
                     put(
                         buf,
@@ -628,7 +686,6 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                         &theme.glyphs.active,
                         keep(row_style.patch(accent)),
                     );
-                    style = keep(style.patch(accent)).add_modifier(Modifier::BOLD);
                 }
                 // The status column: the panel's most urgent agent.
                 if let Some((text, glyph_style)) =
@@ -647,16 +704,21 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     0
                 };
                 // The icon and its space come before the name.
-                let icon = panel_icon(p, theme);
-                let name_x = icon.map_or(3, |i| 4 + width(i));
+                let icon = panel_icon_cell(app, p, theme, style);
+                // With icons on the names all start in the same column.
+                let name_x = if theme.icons == IconPreset::None {
+                    ICON_X
+                } else {
+                    NAME_X_ICONS
+                };
                 let room = w
                     .saturating_sub(name_x + 1 + if count_w > 0 { count_w + 1 } else { 0 })
                     .saturating_sub(marker_w);
                 if p.unseen {
                     style = style.add_modifier(Modifier::BOLD);
                 }
-                if let Some(icon) = icon {
-                    put(buf, y, 3, icon, style);
+                if let Some((icon, icon_style)) = icon {
+                    put(buf, y, ICON_X, &icon, icon_style);
                 }
                 let name = truncate(&p.name, room);
                 put(buf, y, name_x, &name, style);
@@ -684,15 +746,8 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     }
     if bar_rows(area.height) > 0 {
         let y = area.y + area.height - 1;
-        let style_of = |hover| {
-            if app.hover == Some(hover) {
-                selection(theme, base)
-            } else {
-                muted
-            }
-        };
-        let style = style_of(Hover::NewProject);
-        let text = chip(w);
+        let style = style_of(Hover::New);
+        let text = new_chip(w);
         let cells = width(text);
         buf.set_style(Rect::new(area.x + 1, y, cells, 1), style);
         put(buf, y, 1, text, style);

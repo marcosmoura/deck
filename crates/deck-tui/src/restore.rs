@@ -8,10 +8,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use deck_core::action::{Action as Act, PanelLaunch};
 use deck_core::agent_sessions::{AgentSession, age, matches, project_for, short_dir};
 use deck_core::agents::AgentKind;
+use deck_core::icons::IconKind;
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::model::ProjectId;
 use deck_core::protocol::{ClientMsg, Request};
-use deck_core::theme::Theme;
+use deck_core::theme::{IconPreset, Theme};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
 use ratatui::layout::Rect;
@@ -21,6 +22,7 @@ use ratatui::widgets::{Block, Clear, Widget};
 use crate::app::{App, Out};
 use crate::draw::{border_type, color, selection, truncate, width};
 use crate::modal::Editor;
+use crate::sidebar::{ICON_CELLS, kind_icon_cell};
 
 /// The columns, left to right.
 pub const COLUMNS: [AgentKind; 3] = [AgentKind::Claude, AgentKind::OpenCode, AgentKind::Codex];
@@ -268,7 +270,7 @@ impl Geometry {
     }
 
     /// The columns on screen: all three, or the active one alone.
-    fn shown(&self, active: usize) -> Vec<usize> {
+    pub(crate) fn shown(&self, active: usize) -> Vec<usize> {
         if self.narrow {
             vec![active]
         } else {
@@ -670,6 +672,25 @@ fn detail(session: &AgentSession, home: Option<&Path>, now: u64, room: u16) -> S
 }
 
 /// Draws the dialog over everything else but the status bar.
+/// The style of a column heading: the accent for the active column and in the narrow layout.
+pub(crate) fn heading_style(theme: &Theme, accent: bool) -> Style {
+    let base = Style::new().bg(color(theme.overlay_bg));
+    if accent {
+        base.fg(color(theme.accent))
+    } else {
+        base
+    }
+}
+
+/// The icon kind of an agent.
+pub(crate) fn agent_icon_kind(kind: AgentKind) -> IconKind {
+    match kind {
+        AgentKind::Claude => IconKind::Claude,
+        AgentKind::Codex => IconKind::Codex,
+        AgentKind::OpenCode => IconKind::OpenCode,
+    }
+}
+
 pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
     let (Some(restore), Some(g)) = (&app.restore, app.restore_geometry()) else {
         return;
@@ -684,7 +705,6 @@ pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
         .title("─ Restore agent session ")
         .render(rect, buf);
     let muted = base.fg(color(theme.muted));
-    let accent = base.fg(color(theme.accent));
     // Everything is clipped to the inside of the border, so a short window never draws over it.
     let (top, bottom) = (rect.y + 1, rect.y + rect.height.saturating_sub(1));
     let right = rect.x + rect.width.saturating_sub(1);
@@ -725,20 +745,34 @@ pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
             Load::Ready(_) => format!(" ({})", visible.len()),
             _ => String::new(),
         };
-        let header = if g.narrow {
-            format!("‹ {name}{count} ›")
+        let style = heading_style(theme, active || g.narrow);
+        let bold = style.add_modifier(Modifier::BOLD);
+        // `‹ ` in the narrow layout, then the agent's icon (two cells) and a space, the name
+        // and the count, then ` ›`.
+        let mut at = cx;
+        if g.narrow {
+            put(buf, at, g.header_y, "‹ ", cw, bold);
+            at += 2;
+        }
+        let kind = agent_icon_kind(COLUMNS.get(i).copied().unwrap_or(AgentKind::Claude));
+        if theme.icons != IconPreset::None {
+            let (icon, icon_style) = kind_icon_cell(app, theme, kind, style);
+            put(
+                buf,
+                at,
+                g.header_y,
+                &icon,
+                cw.saturating_sub(at - cx),
+                icon_style,
+            );
+            at += ICON_CELLS + 1;
+        }
+        let tail = if g.narrow {
+            format!("{name}{count} ›")
         } else {
             format!("{name}{count}")
         };
-        let style = if active || g.narrow { accent } else { base };
-        put(
-            buf,
-            cx,
-            g.header_y,
-            &header,
-            cw,
-            style.add_modifier(Modifier::BOLD),
-        );
+        put(buf, at, g.header_y, &tail, cw.saturating_sub(at - cx), bold);
         if !g.narrow {
             put(
                 buf,

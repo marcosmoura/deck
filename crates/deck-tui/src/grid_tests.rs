@@ -132,7 +132,7 @@ fn three_terminals_are_drawn_in_the_grid_with_borders_and_numbered_titles() {
     assert_eq!(rows[22].chars().next(), Some('╰'));
     // The status bar has the panel's icon and name, not a terminal's title.
     assert!(
-        rows[23].contains("terminal-multiplexer › ❯ tests"),
+        rows[23].contains("terminal-multiplexer › ❯  tests"),
         "{}",
         rows[23]
     );
