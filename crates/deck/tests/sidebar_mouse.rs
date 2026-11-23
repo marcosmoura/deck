@@ -357,13 +357,13 @@ fn a_panel_row_under_the_pointer_has_the_hover_background_and_a_click_moves_the_
 }
 
 #[test]
-fn the_bottom_bar_shows_the_new_chip_and_the_restore_chip_at_the_right() {
+fn the_bottom_bar_shows_the_new_chip_and_the_resume_chip_at_the_right() {
     let h = attached();
     wait_bar(&h);
     let screen = rows(&h);
     let bar = &screen[BAR_ROW];
     let sidebar: String = bar.chars().take(28).collect();
-    assert_eq!(sidebar.trim_end(), "  + New            Restore", "{bar:?}");
+    assert_eq!(sidebar.trim_end(), "  + New             Resume", "{bar:?}");
     assert!(screen[BAR_ROW - 1].chars().take(28).all(|c| c == ' '));
     h.capture("bottom-bar");
 }
@@ -374,8 +374,7 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip() {
     wait_bar(&h);
     let header = rows(&h)[0].clone();
     let sidebar: String = header.chars().take(28).collect();
-    assert!(sidebar.starts_with(" main "), "{header:?}");
-    assert!(sidebar.trim_end().ends_with("+ New space"), "{header:?}");
+    assert_eq!(sidebar, " main          + New space  ", "{header:?}");
     h.capture("header");
 }
 
@@ -383,8 +382,8 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip() {
 fn clicking_the_header_chip_adds_a_project_like_the_prefix_flow() {
     let mut h = attached();
     wait_bar(&h);
-    h.send_keys("\x1b[<0;18;1M");
-    h.send_keys("\x1b[<0;18;1m");
+    h.send_keys("\x1b[<0;15;1M");
+    h.send_keys("\x1b[<0;15;1m");
     h.wait_for_text("Directory", TIMEOUT);
     h.send_keys("\x15/tmp");
     h.send_keys(ENTER);
@@ -401,8 +400,8 @@ fn clicking_the_header_chip_with_a_prompt_open_does_nothing() {
     wait_bar(&h);
     prefixed(&mut h, "P");
     h.wait_for_text("Directory", TIMEOUT);
-    h.send_keys("\x1b[<0;18;1M");
-    h.send_keys("\x1b[<0;18;1m");
+    h.send_keys("\x1b[<0;15;1M");
+    h.send_keys("\x1b[<0;15;1m");
     sleep(Duration::from_millis(300));
     let screen = h.screen_text();
     assert_eq!(screen.matches("Directory").count(), 1, "{screen}");
@@ -468,7 +467,7 @@ fn motion_over_the_sidebar_never_reaches_a_program() {
 fn a_seven_row_window_has_no_bar() {
     let h = attached_with((100, 7), &[]);
     sleep(Duration::from_millis(300));
-    assert!(!h.screen_text().contains("Restore"), "{}", h.screen_text());
+    assert!(!h.screen_text().contains("Resume"), "{}", h.screen_text());
 }
 
 // The New button and menu.

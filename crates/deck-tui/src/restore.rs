@@ -1,6 +1,6 @@
 //! The Restore dialog: three columns of recent agent sessions (Claude Code, OpenCode, Codex),
 //! a filter across all of them, and the resume of the chosen one in a new panel. It opens
-//! from the sidebar's `Restore` chip, `prefix R` and `R` in sidebar focus.
+//! from the sidebar's `Resume` chip, `prefix R` and `R` in sidebar focus.
 
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};

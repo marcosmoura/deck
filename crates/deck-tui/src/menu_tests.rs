@@ -156,7 +156,7 @@ fn project_rows_have_no_button_and_keep_their_counts_under_the_pointer() {
 fn the_new_chip_has_the_hover_background_under_the_pointer_and_is_muted_otherwise() {
     let mut a = app();
     let buf = buffer(&a);
-    assert_eq!(text(&buf, BAR, 0, 29), "  + New            Restore  │");
+    assert_eq!(text(&buf, BAR, 0, 29), "  + New             Resume  │");
     assert_eq!(buf[(NEW_CHIP, BAR)].fg, color(a.theme.muted));
     moved(&mut a, NEW_CHIP, BAR);
     assert_eq!(a.hover, Some(Hover::New));
@@ -226,7 +226,7 @@ fn the_menu_sits_above_the_bottom_bar_with_its_icons_and_no_gutter() {
             "│ ◎  Codex         4 │",
             "│ ⏎ choose  esc close│",
             "╰────────────────────╯",
-            "  + New            Res",
+            "  + New             Re",
         ]
     );
 }

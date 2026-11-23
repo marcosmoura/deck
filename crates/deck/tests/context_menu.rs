@@ -36,7 +36,7 @@ fn panel_rows(h: &Harness) -> usize {
     sidebar_rows(h)
         .iter()
         .skip(3)
-        .filter(|r| !r.trim().is_empty() && !r.contains("New") && !r.contains("Restore"))
+        .filter(|r| !r.trim().is_empty() && !r.contains("New") && !r.contains("Resume"))
         .count()
 }
 

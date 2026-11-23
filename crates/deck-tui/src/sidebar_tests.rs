@@ -124,7 +124,7 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let side: Vec<String> = rows.iter().map(|r| r.chars().take(29).collect()).collect();
     assert_eq!(
         side[0],
-        format!("{}│", pad(" main           + New space ", 28))
+        format!("{}│", pad(" main          + New space  ", 28))
     );
     assert_eq!(side[1], format!("{}│", pad("", 28)));
     assert_eq!(side[2], format!("{}│", pad(" ▾ terminal-multiplexer", 28)));

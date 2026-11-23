@@ -1,5 +1,5 @@
 //! The sidebar's header and bottom bar: the `New space` chip at the top, the `New` and
-//! `Restore` chips at the bottom, the hover state and the redraw rule.
+//! `Resume` chips at the bottom, the hover state and the redraw rule.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -77,19 +77,19 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
 
 /// The bar row of a 24-row window: the sidebar is as tall as the window.
 const BAR: u16 = 23;
-/// A column inside the header's `New space` chip of a 28-column sidebar (it takes 16..27).
-const CHIP: u16 = 17;
+/// A column inside the header's `New space` chip of a 28-column sidebar (it takes 14..27).
+const CHIP: u16 = 14;
 
 #[test]
 fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right() {
     // (sidebar width, the left part as shown, the chip's glyph text)
     for (width, left, chip) in [
-        (40, " main", "+ New space"),
-        (30, " main", "+ New space"),
-        (28, " main", "+ New space"),
-        (26, " main", "+ New space"),
-        (25, " main", "+"),
-        (20, " main", "+"),
+        (40, " main", " + New space "),
+        (30, " main", " + New space "),
+        (28, " main", " + New space "),
+        (26, " main", " + New space "),
+        (25, " main", " + "),
+        (20, " main", " + "),
     ] {
         let a = app_at((100, 24), width, mockup());
         let buf = draw_app(&a);
@@ -107,7 +107,7 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right()
 }
 
 #[test]
-fn the_bar_shows_the_chip_at_the_left_and_the_restore_chip_at_the_right() {
+fn the_bar_shows_the_chip_at_the_left_and_the_resume_chip_at_the_right() {
     for (cols, width, label) in [
         (100, 20, " + "),
         (100, 25, " + "),
@@ -118,9 +118,9 @@ fn the_bar_shows_the_chip_at_the_left_and_the_restore_chip_at_the_right() {
         let a = app_at((cols, 24), width, mockup());
         let buf = draw_app(&a);
         let text = row_text(&buf, BAR, width);
-        let restore = if width < 26 { " ↻ " } else { " Restore " };
-        let gap = usize::from(width) - 2 - label.len() - restore.chars().count();
-        let expected = format!(" {label}{}{restore} ", " ".repeat(gap));
+        let resume = if width < 26 { " ↻ " } else { " Resume " };
+        let gap = usize::from(width) - 2 - label.len() - resume.chars().count();
+        let expected = format!(" {label}{}{resume} ", " ".repeat(gap));
         assert_eq!(text, expected, "width {width}");
         // The spacer above is blank.
         assert_eq!(
@@ -166,7 +166,7 @@ fn a_short_sidebar_has_no_bar_and_the_list_uses_the_full_height() {
     view.active_panel = Some(PanelId(1));
     let a = app_at((100, 7), 28, view.clone());
     let buf = draw_app(&a);
-    assert!(!(0..7).any(|y| row_text(&buf, y, 28).contains("Restore")));
+    assert!(!(0..7).any(|y| row_text(&buf, y, 28).contains("Resume")));
     assert!(
         row_text(&buf, 6, 28).contains("p4"),
         "{}",
@@ -275,7 +275,7 @@ fn a_move_that_keeps_the_hover_target_does_not_mark_the_screen_dirty() {
     // Onto the chip: one redraw; further moves over it: none.
     moved(&mut a, CHIP, 0);
     assert!(a.take_dirty());
-    for x in 16..27 {
+    for x in 14..27 {
         moved(&mut a, x, 0);
         assert!(!a.take_dirty(), "column {x}");
     }
@@ -405,7 +405,7 @@ fn a_prompt_reopened_by_an_answer_ends_the_hover() {
 #[test]
 fn a_config_reload_that_narrows_the_sidebar_recomputes_the_hover() {
     let mut a = app();
-    moved(&mut a, 16, 0);
+    moved(&mut a, CHIP, 0);
     assert_eq!(a.hover, Some(Hover::NewProject));
     let config = Config {
         sidebar_width: 20,
@@ -435,13 +435,17 @@ fn motion_over_the_sidebar_never_reaches_a_program_but_motion_over_it_does() {
 
 #[test]
 fn the_chips_are_hit_where_they_are_drawn_at_any_width() {
-    // (sidebar width, a column on the header chip, the column before it)
-    for (width, on, before) in [(20, 18, 17), (28, 16, 15), (40, 28, 27)] {
+    // Both padding cells are part of the chip.
+    for (width, start) in [(20, 16), (28, 14), (40, 26)] {
         let mut a = app_at((100, 24), width, mockup());
-        moved(&mut a, on, 0);
-        assert_eq!(a.hover, Some(Hover::NewProject), "width {width}");
-        moved(&mut a, before, 0);
-        assert_eq!(a.hover, None, "width {width}");
+        for column in [start, width - 2] {
+            moved(&mut a, column, 0);
+            assert_eq!(a.hover, Some(Hover::NewProject), "width {width}");
+        }
+        for column in [start - 1, width - 1] {
+            moved(&mut a, column, 0);
+            assert_eq!(a.hover, None, "width {width}");
+        }
     }
     // `+ New` takes columns 1..4 at 20 columns (` + `).
     let mut a = app_at((100, 24), 20, mockup());
@@ -549,7 +553,7 @@ fn rows_and_chips_under_the_pointer_have_the_hover_background() {
     let buf = draw_app(&a);
     assert!((0..28).all(|x| buf[(x, 7)].bg == hover));
     // The chips: their own cells only.
-    for (x, y, from, to) in [(CHIP, 0, 16, 27), (5, BAR, 1, 8), (20, BAR, 18, 27)] {
+    for (x, y, from, to) in [(CHIP, 0, 14, 27), (5, BAR, 1, 8), (20, BAR, 19, 27)] {
         moved(&mut a, x, y);
         let buf = draw_app(&a);
         assert!((from..to).all(|c| buf[(c, y)].bg == hover), "{x}");

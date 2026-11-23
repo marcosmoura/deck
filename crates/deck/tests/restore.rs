@@ -1,4 +1,4 @@
-//! The Restore button and dialog, end to end: the real `deck` in a PTY, fixture trees in a
+//! The Resume button and dialog, end to end: the real `deck` in a PTY, fixture trees in a
 //! temp `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and fake `claude`, `codex` and `opencode`
 //! `#!/bin/sh` scripts on a `PATH` that holds only them. Every
 //! test has its own `HOME`; no real agent runs and nothing of the user's is read.
@@ -27,7 +27,7 @@ const UUID_B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const UUID_X: &str = "11111111-1111-4111-8111-111111111111";
 /// The bar row of the 24-row window, 0-based.
 const BAR_ROW: u16 = 23;
-/// A column on the `Restore` chip of the 28-column sidebar.
+/// A column on the `Resume` chip of the 28-column sidebar.
 const CHIP: u16 = 20;
 
 /// The sandbox of one test: a home, the agents' directories and the fake agents.
@@ -191,7 +191,7 @@ fn start(sb: &Sandbox) -> Harness {
     wait_until("the bottom bar", TIMEOUT, || {
         rows(&h)
             .get(usize::from(BAR_ROW))
-            .is_some_and(|r| r.contains("Restore"))
+            .is_some_and(|r| r.contains("Resume"))
     });
     h
 }
@@ -315,7 +315,7 @@ fn the_button_sits_at_the_right_of_the_bar_and_highlights_on_hover() {
     let mut h = start(&sb);
     let bar = rows(&h)[usize::from(BAR_ROW)].clone();
     let side: String = bar.chars().take(28).collect();
-    assert_eq!(side.trim_end(), "  + New            Restore", "{bar:?}");
+    assert_eq!(side.trim_end(), "  + New             Resume", "{bar:?}");
     hover_at(&mut h, CHIP, BAR_ROW);
     // The hovered chip is drawn in the selection colours: its cells change colour.
     let idle = h.cell(usize::from(BAR_ROW), usize::from(CHIP));

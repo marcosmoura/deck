@@ -80,7 +80,7 @@ A key you set replaces the same key on any other action's default keys, with a w
 
 ## Restore dialog
 
-`Option+Space R` (or `R` in sidebar focus, or the `Restore` button) opens the [restore dialog](agents.md#the-restore-dialog). Its keys are fixed, and the prefix key is ordinary text there:
+`Option+Space R` (or `R` in sidebar focus, or the `Resume` button) opens the [restore dialog](agents.md#the-restore-dialog). Its keys are fixed, and the prefix key is ordinary text there:
 
 | Keys                                  | What they do                                                                                                                    |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |

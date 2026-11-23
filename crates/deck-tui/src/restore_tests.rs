@@ -1,4 +1,4 @@
-//! The Restore button and dialog: drawing, keys, mouse, project choice and late answers.
+//! The Resume button and dialog: drawing, keys, mouse, project choice and late answers.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -700,7 +700,7 @@ fn row_text(a: &App, y: u16, from: u16, to: u16) -> String {
 fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_the_new_chip() {
     let mut a = app();
     let y = chip_row(&a);
-    assert_eq!(row_text(&a, y, 0, 29), "  + New            Restore  │");
+    assert_eq!(row_text(&a, y, 0, 29), "  + New             Resume  │");
     moved(&mut a, 20, y);
     assert_eq!(a.hover, Some(Hover::Restore));
     let buf = buffer(&a);
@@ -714,9 +714,9 @@ fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_the_new_chip() {
     assert_eq!(a.hover, Some(Hover::New));
     moved(&mut a, 10, y);
     assert_eq!(a.hover, None);
-    moved(&mut a, 17, y);
-    assert_eq!(a.hover, None);
     moved(&mut a, 18, y);
+    assert_eq!(a.hover, None);
+    moved(&mut a, 19, y);
     assert_eq!(a.hover, Some(Hover::Restore));
     moved(&mut a, 27, y);
     assert_eq!(a.hover, None);

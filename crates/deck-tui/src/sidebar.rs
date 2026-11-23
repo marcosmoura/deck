@@ -74,10 +74,13 @@ fn bar_rows(height: u16) -> u16 {
     }
 }
 
-/// The `New space` chip of the header: `"+ New space"`, or `"+"` in a narrow sidebar.
-/// No side padding, so the title keeps its room in narrow sidebars.
+/// The `New space` chip of the header: `" + New space "`, or `" + "` in a narrow sidebar.
 fn new_project_chip(width: u16) -> &'static str {
-    if width < BAR_WIDE { "+" } else { "+ New space" }
+    if width < BAR_WIDE {
+        " + "
+    } else {
+        " + New space "
+    }
 }
 
 /// The `New` chip: `" + New "`, or `" + "` in a narrow sidebar.
@@ -98,16 +101,16 @@ fn new_span(w: u16) -> std::ops::Range<u16> {
     1..1 + width(new_chip(w))
 }
 
-/// The `Restore` chip: `" Restore "`, or `" ↻ "` in a narrow sidebar.
+/// The `Resume` chip: `" Resume "`, or `" ↻ "` in a narrow sidebar.
 fn restore_chip(width: u16) -> &'static str {
     if width < BAR_WIDE {
         " ↻ "
     } else {
-        " Restore "
+        " Resume "
     }
 }
 
-/// The columns the `Restore` chip takes in a sidebar `w` columns wide: right-aligned, with a
+/// The columns the `Resume` chip takes in a sidebar `w` columns wide: right-aligned, with a
 /// margin of one column.
 fn restore_span(w: u16) -> std::ops::Range<u16> {
     let cells = width(restore_chip(w));

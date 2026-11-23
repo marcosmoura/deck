@@ -5,7 +5,7 @@ A session holds spaces, a space holds panels, and a panel shows one terminal (th
 ## The sidebar
 
 ```text
- main           + New space │
+ main          + New space  │
                             │
  ▾ terminal-multiplexer     │
    ✎  editor                │
@@ -14,13 +14,13 @@ A session holds spaces, a space holds panels, and a panel shows one terminal (th
    no panels                │
  ▸ dotfiles               2 │
                             │
-  + New            Restore  │
+  + New             Resume  │
 ```
 
-- The header reads the session's name (accent, bold) with a `+ New space` chip right-aligned on it, one cell from the edge (`+` alone when the sidebar is under 26 columns wide); the name is cut with `…` to leave room for the chip, and a rename of the session shows at once. Each space is a row with `▾` (expanded) or `▸` (collapsed), its name and, when collapsed, its panel count at the right. Each panel of an expanded space is a row with its name and, when it holds more than one terminal, the terminal count at the right. A space with no panels shows a muted `no panels`. Names that do not fit end in `…`.
+- The header reads the session's name (accent, bold) with a `+ New space` chip at the right, with one cell of clickable padding on each side and a one-cell margin at the right edge. The chip shows only `+` when the sidebar is under 26 columns wide. The name is cut with `…` to leave room for the chip, and a rename of the session shows at once. Each space is a row with `▾` (expanded) or `▸` (collapsed), its name and, when collapsed, its panel count at the right. Each panel of an expanded space is a row with its name and, when it holds more than one terminal, the terminal count at the right. A space with no panels shows a muted `no panels`. Names that do not fit end in `…`.
 - The active panel's row is a band across the sidebar's full width in the selection colours (`selection_fg` and `selection_bg`, reversed while both are `default`), bold, with the status glyph, counts and notes in the row's text colour while the selection colours are the default reversed pair; the active space's name is bold. In sidebar focus only the selected row has the band, and the active panel's row is drawn in the accent colour, bold, with no band. The row or chip under the pointer gets the `hover` background (a row across the full width, a chip over its own cells), and muted text on it turns `sidebar_fg`; the `no panels` row, blank rows and the header's session name do not hover, and a row with the band keeps it under the pointer. The cell before each name shows the agent status of the panel's most urgent terminal (see [agents](agents.md)). A panel whose agent needed you while you were not looking is bold with a `•` after its name, and a collapsed space shows `!<n>` for its waiting panels ([attention](agents.md#attention)).
 - With more rows than fit, the list scrolls to keep the active panel (or, in sidebar focus, the selection) in view. The wheel scrolls it too, three rows a notch.
-- The last row of the sidebar is a bottom bar with a `+ New` chip at the left (`+` alone when the sidebar is under 26 columns wide), and the row above it is blank, so the list is two rows shorter. A sidebar under 8 rows tall draws neither. The right-hand end has the `Restore` button (`Restore`, or `↻` under 26 columns), which opens the [restore dialog](agents.md#the-restore-dialog). All chips, the header's included, are muted and get the `hover` background under the pointer; a click is a press and a release on the same chip. With no space, `+ New` flashes `no space` and `Restore` flashes `no space to restore into`.
+- The last row of the sidebar is a bottom bar with a `+ New` chip at the left (`+` alone when the sidebar is under 26 columns wide), and the row above it is blank, so the list is two rows shorter. A sidebar under 8 rows tall draws neither. The right-hand end has the `Resume` button (`Resume`, or `↻` under 26 columns), which opens the [restore dialog](agents.md#the-restore-dialog). All chips, the header's included, are muted and get the `hover` background under the pointer; a click is a press and a release on the same chip. With no space, `+ New` flashes `no space` and `Resume` flashes `no space to restore into`.
 - The sidebar takes `sidebar_width` columns (default 28) and a separator; the panels get the rest. When the window is narrower than 41 columns the sidebar hides, and it comes back when the window grows, unless you hid it with `toggle_sidebar`. A shrinking window narrows a wide sidebar so the panel area keeps its 20 columns (a sidebar at 60 in an 81-column window becomes 59 in an 80-column one); a growing window does not widen it again.
 - The active space, active panel and which spaces are collapsed are shared by every client attached to the session. The selection, sidebar focus, prompts and overlays are each client's own.
 
