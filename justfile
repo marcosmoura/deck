@@ -3,14 +3,14 @@ set positional-arguments
 # Run the gate: format check, Clippy with warnings denied, all tests.
 check:
     cargo fmt --all --check
-    oxfmt --check
+    git ls-files -z --cached --others --exclude-standard | xargs -0 oxfmt --check
     just lint
     just test
 
 # Format everything.
 fmt:
     cargo fmt --all
-    oxfmt
+    git ls-files -z --cached --others --exclude-standard | xargs -0 oxfmt
 
 # Clippy on every crate, warnings denied.
 lint:

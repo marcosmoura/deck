@@ -162,7 +162,7 @@ Declared once in the root `[workspace.dependencies]` with these versions (the ne
 | `unicode-width`      | 0.2     | core                   | glyph width checks in `[theme]` (DECK-08); already in the tree through ratatui                                                                                                                                  |
 | `tempfile`           | 3.27    | dev-dependency         | temp `DECK_HOME` in tests                                                                                                                                                                                       |
 
-Tools, pinned in `.mise.toml`: Rust (stable channel at a pinned version, with rustfmt and Clippy), `just`, `cargo-nextest`, `lefthook`, `oxfmt` (the native binary from the aqua backend, no Node; formats the Markdown, TOML, JSON and YAML files rustfmt does not, with its default settings).
+Tools, pinned in `.mise.toml`: Rust (stable channel at a pinned version, with rustfmt and Clippy), `just`, `cargo-nextest`, `lefthook`, `oxfmt` (the native binary from the aqua backend, no Node; formats the Markdown, TOML, JSON and YAML files rustfmt does not, with its default settings). `just fmt` and `just check` pass it the files git lists as not ignored (`git ls-files --cached --others --exclude-standard`), because on its own it reads only the root `.gitignore`: a file ignored by the global or `.git/info/exclude` excludes would be checked.
 
 ## Releases
 
