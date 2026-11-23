@@ -44,12 +44,12 @@ Open tasks the user has not placed in the queue: none.
 | DECK-18 | Sidebar reorder and space gaps            | done        | —                                                             | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
 | DECK-19 | Images in panels                          | in-progress | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
 | DECK-20 | Built-in icons                            | in-progress | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
-| DECK-21 | Live upgrade                              | draft spec  | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
-| DECK-22 | Terminal compatibility                    | draft spec  | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
-| DECK-23 | Daemon stats and stress tests             | draft spec  | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
-| DECK-24 | Scrollback search and copy mode           | draft spec  | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
-| DECK-25 | Release automation and Homebrew           | draft spec  | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
-| DECK-26 | Security, privacy and performance reviews | draft spec  | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
+| DECK-21 | Live upgrade                              | ready       | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
+| DECK-22 | Terminal compatibility                    | ready       | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
+| DECK-23 | Daemon stats and stress tests             | ready       | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
+| DECK-24 | Scrollback search and copy mode           | ready       | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
+| DECK-25 | Release automation and Homebrew           | ready       | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
+| DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
 
 ### Withdrawn
 
