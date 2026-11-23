@@ -206,7 +206,8 @@ impl Conn {
         self.send(&ClientMsg::Hello {
             version: PROTOCOL_VERSION,
             role,
-            cwd: std::env::current_dir().context("cannot read the current directory")?,
+            // A directory that was removed: `/`, as the attach client does.
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             env: std::env::vars_os().collect(),
             colors: None,
         })
@@ -304,14 +305,28 @@ fn newer_state_line(log: &Path, from: u64) -> Option<String> {
         .map(|(_, rest)| format!("{NEWER_STATE}{rest}"))
 }
 
-/// Connects to the daemon, starting it when the socket does not accept a connection.
+/// Whether a daemon answers on the socket. A daemon that is shutting down does not: it says
+/// `Bye`, or the connection breaks when it stops listening.
+fn daemon_answers(paths: &DaemonPaths) -> bool {
+    // Within the start-up deadline, so a daemon that never answers cannot stall it.
+    let Ok(mut conn) = Conn::open(&paths.socket, START_TIMEOUT) else {
+        return false;
+    };
+    // A daemon of another version answers too; the command that follows says so.
+    matches!(
+        conn.control(Request::ListSessions),
+        Outcome::Response(_) | Outcome::Mismatch(_)
+    )
+}
+
+/// Connects to the daemon, starting it when none answers on the socket.
 ///
 /// A daemon this launcher spawns can exit at once: it lost the race for the lock to another
 /// starter, or an old daemon still holds the lock while it shuts down. So the launcher keeps
 /// polling the socket until the deadline and, once its daemon is gone, starts another after
 /// a short back-off (a few times at most).
 fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
-    if UnixStream::connect(&paths.socket).is_ok() {
+    if daemon_answers(paths) {
         return Ok(());
     }
     let exe = std::env::current_exe().context("cannot find the deck executable")?;
@@ -320,7 +335,7 @@ fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
     let mut attempts = 0;
     let mut exited: Option<Arc<AtomicBool>> = None;
     loop {
-        if UnixStream::connect(&paths.socket).is_ok() {
+        if daemon_answers(paths) {
             return Ok(());
         }
         let gone = exited.as_ref().is_none_or(|e| e.load(Ordering::Acquire));
@@ -340,7 +355,7 @@ fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
         if gone && attempts < START_ATTEMPTS {
             if attempts > 0 {
                 std::thread::sleep(RESTART_BACKOFF);
-                if UnixStream::connect(&paths.socket).is_ok() {
+                if daemon_answers(paths) {
                     return Ok(());
                 }
             }

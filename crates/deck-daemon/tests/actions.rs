@@ -336,8 +336,18 @@ async fn after_focus_panel_only_the_new_panels_full_frames_follow() {
     c.wait(|c| c.view.as_ref().and_then(|v| v.layout_viewport) == Some((60, 18)))
         .await;
     c.type_line("echo ON2").await;
-    c.wait_row("ON2").await;
-    sleep(Duration::from_millis(150)).await;
+    // The prompt after the answer is the second panel's last output; no frame of it may
+    // come after the focus change.
+    c.wait(|c| {
+        c.screens.get(&second).is_some_and(|rows| {
+            let rows: Vec<&str> = rows.iter().map(|r| r.trim_end()).collect();
+            rows.windows(2)
+                .any(|w| matches!(w[0], "ON2" | "$ ON2") && w[1] == "$")
+        })
+    })
+    .await;
+    // Until the connection is quiet: a frame already on its way would land after the focus.
+    while c.recv(Duration::from_millis(300)).await.is_some() {}
 
     let before = c.log.len();
     let p1 = c.panel_at(&main, 1);
@@ -350,7 +360,14 @@ async fn after_focus_panel_only_the_new_panels_full_frames_follow() {
         })
         .collect();
     assert!(!frames.is_empty());
-    assert!(frames.iter().all(|f| f.terminal == first && f.full));
+    assert!(
+        frames.iter().all(|f| f.terminal == first && f.full),
+        "first {first:?}, second {second:?}: {:?}",
+        frames
+            .iter()
+            .map(|f| (f.terminal, f.full, f.size))
+            .collect::<Vec<_>>()
+    );
     assert!(frames.iter().all(|f| f.size == (60, 18)), "{frames:?}");
 
     // Input for the inactive panel still runs but is no longer streamed.

@@ -207,8 +207,10 @@ fn the_wheel_on_the_alternate_screen_sends_cursor_keys_until_1007_is_off() {
     h.capture("alt-scroll");
     // Ctrl+C ends the sleep; a fresh program with `?1007` turned off.
     h.send_bytes(&[3]);
-    h.send_keys("printf '\\033[?1049l'\r");
-    h.wait_for_text("$", TIMEOUT);
+    // Back on the main screen before the next reader, or its `READY` could be the first
+    // reader's, and the wheel would still go to that program as cursor keys.
+    h.send_keys("printf '\\033[?1049l'; echo BA''CK\r");
+    h.wait_for_text("BACK", TIMEOUT);
     h.send_keys("clear\r");
     start_reader(&mut h, "printf '\\033[?1049h\\033[?1007l'", 1);
     wheel(&mut h, true);

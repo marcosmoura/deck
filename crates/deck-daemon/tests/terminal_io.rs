@@ -116,7 +116,8 @@ async fn typed_text_reaches_another_terminal_and_capture_shows_it() {
     let mut c = attach(&daemon).await;
     let first = c.terminal();
     let other = new_terminal(&mut c, "echo ready; exec sh", false).await;
-    screen_has(&mut c, other, "ready").await;
+    // The new shell's prompt: dash prints the answer to a line typed before it on its row.
+    screen_has(&mut c, other, "$").await;
     ok(
         &mut c,
         Request::Send {
@@ -746,8 +747,8 @@ async fn capture_reads_history_the_alternate_screen_and_wide_characters() {
     let mut c = attach(&daemon).await;
     let t = new_terminal(&mut c, "seq 1 100; echo done; exec sh", false).await;
     screen_has(&mut c, t, "done").await;
-    // Let the shell print its prompt.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The shell's prompt.
+    screen_has(&mut c, t, "$").await;
     let shot = capture(&mut c, t, Some(3), true).await;
     assert_eq!(shot.lines[0], "100", "{:?}", shot.lines);
     assert_eq!(shot.lines[1], "done");

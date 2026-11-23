@@ -527,6 +527,7 @@ impl Harness {
         let deadline = Instant::now() + limit;
         loop {
             if let Some(status) = self.child.try_wait().expect("wait for the program") {
+                self.drain();
                 return status;
             }
             assert!(
@@ -534,6 +535,29 @@ impl Harness {
                 "the program did not exit; the screen is:\n{}",
                 self.screen_text()
             );
+            std::thread::sleep(POLL);
+        }
+    }
+
+    /// After the program exited: its last output may still be in the PTY. Waits for the
+    /// end of the output, or until nothing came for 100 ms (another process can hold the
+    /// PTY open), at most 2 s.
+    fn drain(&self) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut len = lock(&self.mirror).raw.len();
+        let mut quiet_since = Instant::now();
+        while Instant::now() < deadline {
+            let m = lock(&self.mirror);
+            if m.eof {
+                return;
+            }
+            if m.raw.len() != len {
+                len = m.raw.len();
+                quiet_since = Instant::now();
+            } else if quiet_since.elapsed() >= Duration::from_millis(100) {
+                return;
+            }
+            drop(m);
             std::thread::sleep(POLL);
         }
     }

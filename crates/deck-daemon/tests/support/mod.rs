@@ -522,7 +522,9 @@ impl Client {
     /// The decimal number after `marker` on a row that is not the echoed command line.
     pub fn number_after(&self, marker: &str) -> Option<i32> {
         self.screen().iter().find_map(|row| {
-            let rest = row.trim_start().strip_prefix(marker)?;
+            // After the prompt too: dash prints the answer to a line typed ahead there.
+            let row = row.trim_start();
+            let rest = row.strip_prefix("$ ").unwrap_or(row).strip_prefix(marker)?;
             let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
             digits.parse().ok()
         })

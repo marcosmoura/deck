@@ -1277,6 +1277,9 @@ impl Shared {
             ));
             self.end_session(&mut st, sid, reason);
             let none_left = st.sessions.is_empty() && st.creating == 0;
+            if none_left {
+                Self::mark_shutting_down(&mut st);
+            }
             drop(st);
             if none_left {
                 self.request_shutdown();
@@ -1608,8 +1611,7 @@ impl Shared {
             }
         }
         self.settle_named(&mut st, sid, before, renamed_panel);
-        drop(st);
-        self.hang_up(doomed);
+        self.hang_up(&mut st, doomed);
         Ok(())
     }
 
@@ -1904,28 +1906,28 @@ impl Shared {
         answer();
         self.end_session(&mut st, sid, ByeReason::SessionEnded);
         let none_left = st.sessions.is_empty() && st.creating == 0;
-        drop(st);
-        self.hang_up(handles);
+        if none_left {
+            Self::mark_shutting_down(&mut st);
+        }
+        self.hang_up(&mut st, handles);
         Ok(none_left)
     }
 
     /// Hangs up terminals that left the model: `SIGHUP`, `SIGKILL` after two seconds.
-    fn hang_up(self: &Arc<Self>, handles: Vec<Arc<TermHandle>>) {
+    /// Called under the lock that removed them, so a wait never finds them nowhere.
+    fn hang_up(self: &Arc<Self>, st: &mut State, handles: Vec<Arc<TermHandle>>) {
         if handles.is_empty() {
             return;
         }
-        {
-            let mut st = self.st();
-            // Retention runs from removal: a kept terminal closed long after it exited can
-            // still be waited on for a minute.
-            let now = self.clock.now();
-            for h in &handles {
-                if let Some(code) = h.finished() {
-                    st.exits.record(h.id, code, now);
-                }
+        // Retention runs from removal: a kept terminal closed long after it exited can
+        // still be waited on for a minute.
+        let now = self.clock.now();
+        for h in &handles {
+            if let Some(code) = h.finished() {
+                st.exits.record(h.id, code, now);
             }
-            st.hanging.extend(handles.iter().cloned());
         }
+        st.hanging.extend(handles.iter().cloned());
         let shared = Arc::clone(self);
         self.handle.spawn(async move {
             hang_up_and_wait(handles.clone()).await;
@@ -2017,7 +2019,14 @@ impl Shared {
 
     /// Tells every client and wakes `Daemon::run`. Idempotent.
     pub fn request_shutdown(&self) {
-        let mut st = self.st();
+        Self::mark_shutting_down(&mut self.st());
+        self.bump();
+        let _ = self.shutdown_tx.send(true);
+    }
+
+    /// Sets the shutdown flag and says `Bye` to every client, once. Called under the lock
+    /// that ended the last session too, so no new client gets in between.
+    fn mark_shutting_down(st: &mut State) {
         if st.shutting_down {
             return;
         }
@@ -2027,9 +2036,6 @@ impl Shared {
                 reason: ByeReason::ServerShutdown,
             });
         }
-        drop(st);
-        self.bump();
-        let _ = self.shutdown_tx.send(true);
     }
 
     /// Lets the writers deliver their `Bye`, then hangs up every terminal (`SIGHUP`, then

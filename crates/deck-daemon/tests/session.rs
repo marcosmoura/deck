@@ -116,8 +116,10 @@ async fn the_pty_follows_the_client_that_was_active_last() {
         },
     )
     .await;
-    // Attaching to an existing session is a viewport claim too.
-    assert_eq!(b.view.as_ref().unwrap().layout_viewport, Some((60, 18)));
+    // Attaching to an existing session is a viewport claim too; its view follows the
+    // attach's first view, maybe in a later read.
+    b.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((60, 18)))
+        .await;
 
     b.type_line("stty size").await;
     b.wait_row("18 60").await;

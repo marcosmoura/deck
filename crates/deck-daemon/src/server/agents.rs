@@ -77,6 +77,10 @@ impl Shared {
             let mut moved_terminals: Vec<(SessionId, TerminalId)> = Vec::new();
             let mut resume_changed = false;
             for (h, argv) in found {
+                // It may have exited during the lookup, after its exit cleared its agent.
+                if h.has_exited() {
+                    continue;
+                }
                 let kind = argv.as_deref().and_then(|a| match_argv(a, &config.agents));
                 let Some(sess) = st.session_mut(h.session) else {
                     continue;
