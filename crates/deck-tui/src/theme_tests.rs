@@ -85,10 +85,15 @@ fn alt_space() -> ct::Event {
 #[test]
 fn the_sidebar_follows_the_theme() {
     let buf = render(&app(THEME));
-    // The active row: marker and name in the accent.
-    assert_eq!(buf[(0, 3)].symbol(), "▌");
-    assert_eq!(buf[(0, 3)].fg, Color::Rgb(0xcb, 0xa6, 0xf7));
-    assert_eq!(buf[(3, 3)].fg, Color::Rgb(0xcb, 0xa6, 0xf7));
+    // The session name is in the accent; the active row is a band of the selection colours.
+    assert_eq!(buf[(1, 0)].fg, Color::Rgb(0xcb, 0xa6, 0xf7));
+    assert_eq!(buf[(0, 3)].symbol(), " ");
+    for x in [0, 3, 27] {
+        assert_eq!(
+            (buf[(x, 3)].fg, buf[(x, 3)].bg),
+            (Color::Black, Color::Yellow)
+        );
+    }
     // The background and text colours, the separator and the collapsed glyph.
     assert_eq!(buf[(10, 5)].bg, Color::Indexed(236));
     assert_eq!(buf[(5, 5)].fg, Color::Gray);
@@ -99,22 +104,25 @@ fn the_sidebar_follows_the_theme() {
 }
 
 #[test]
-fn the_status_bar_follows_the_theme() {
+fn the_floating_bar_follows_the_theme() {
     let mut a = app(THEME);
-    let buf = render(&a);
-    assert_eq!(buf[(1, 23)].fg, Color::Rgb(0xcb, 0xa6, 0xf7));
-    assert_eq!(buf[(60, 23)].bg, Color::Indexed(17));
-    assert_eq!(buf[(99, 23)].fg, Color::LightRed);
-    // The location is muted, on the status background.
-    let x = u16::try_from(row(&buf, 23).chars().take_while(|c| *c != '›').count()).unwrap() - 2;
-    assert_eq!(
-        (buf[(x, 23)].fg, buf[(x, 23)].bg),
-        (Color::LightRed, Color::Indexed(17))
-    );
+    // No bar until something is going on.
+    assert!(!row(&render(&a), 23).contains("PREFIX"));
     send(&mut a, &[alt_space()]);
     let buf = render(&a);
-    assert_eq!(buf[(1, 23)].symbol(), "P");
-    assert_eq!(buf[(1, 23)].fg, Color::Rgb(255, 255, 0));
+    let (x, y) = find(&buf, "PREFIX");
+    assert_eq!(y, 23);
+    assert_eq!(buf[(x, y)].fg, Color::Rgb(255, 255, 0));
+    // The padding cell is on the status background, the labels are muted, the keys are in
+    // the status foreground.
+    assert_eq!(buf[(x - 2, y)].bg, Color::Indexed(17));
+    let (x, y) = find(&buf, "cancel");
+    assert_eq!(
+        (buf[(x, y)].fg, buf[(x, y)].bg),
+        (Color::LightRed, Color::Indexed(17))
+    );
+    let (x, y) = find(&buf, "esc");
+    assert_eq!(buf[(x, y)].fg, Color::Green);
     a.flash = Some(("oops".into(), Instant::now()));
     a.flash_error = true;
     let buf = render(&a);
@@ -141,8 +149,8 @@ fn the_selection_uses_the_selection_roles() {
         .count();
     assert!(selected >= 10, "{selected}");
     // The active panel's row keeps the selection colour, bold, when it is selected.
-    let (x, y) = find(&buf, "▌");
-    assert_eq!(buf[(x, y)].fg, Color::Black);
+    let (x, y) = (0, 3);
+    assert_eq!(buf[(x, y)].bg, Color::Yellow);
     assert_eq!(buf[(x + 3, y)].fg, Color::Black);
     assert!(
         buf[(x + 3, y)]
@@ -199,8 +207,11 @@ fn without_truecolor_rgb_becomes_the_nearest_palette_colour() {
     let mut a = app(THEME);
     a.truecolor = false;
     let buf = render(&a);
-    assert!(matches!(buf[(0, 3)].fg, Color::Indexed(n) if n >= 16));
-    assert!(matches!(buf[(1, 23)].fg, Color::Indexed(n) if n >= 16));
+    assert!(matches!(buf[(1, 0)].fg, Color::Indexed(n) if n >= 16));
+    send(&mut a, &[alt_space()]);
+    let buf = render(&a);
+    let (x, y) = find(&buf, "PREFIX");
+    assert!(matches!(buf[(x, y)].fg, Color::Indexed(n) if n >= 16));
     assert!(buf.content.iter().all(|c| !matches!(c.fg, Color::Rgb(..))));
     // Indexed theme colours pass through unchanged.
     assert_eq!(buf[(10, 5)].bg, Color::Indexed(236));

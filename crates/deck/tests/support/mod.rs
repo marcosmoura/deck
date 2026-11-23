@@ -26,6 +26,9 @@ use alacritty_terminal::term::{Config, Term};
 use alacritty_terminal::vte::ansi::{Color, Processor, Rgb};
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 
+/// The default theme's `accent`: the focused border.
+pub const ACCENT: Color = Color::Indexed(4);
+
 /// Marks a config key to be left out.
 const UNSET: &str = "\0unset";
 
@@ -578,6 +581,32 @@ impl Harness {
             lines.push(line.trim_end().to_string());
         }
         lines.join("\n")
+    }
+
+    /// Whether the sidebar row `row` has the selection band (reversed with the default
+    /// colours): the active panel's row outside sidebar focus.
+    pub fn is_active_row(&self, row: usize) -> bool {
+        self.cell(row, 0).inverse()
+    }
+
+    /// Waits for the band on a row that starts with `prefix`.
+    pub fn wait_for_active_row(&self, prefix: &str, limit: Duration) {
+        let deadline = Instant::now() + limit;
+        loop {
+            let screen = self.screen_text();
+            if screen
+                .lines()
+                .enumerate()
+                .any(|(y, r)| r.starts_with(prefix) && self.is_active_row(y))
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for the band on a row starting with {prefix:?}; the screen is:\n{screen}"
+            );
+            std::thread::sleep(POLL);
+        }
     }
 
     pub fn cell(&self, row: usize, col: usize) -> CellView {

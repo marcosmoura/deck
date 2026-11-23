@@ -162,10 +162,8 @@ fn hook_events_show_working_and_waiting_and_typing_answers() {
     wait_status(&h, "the working spinner", is_spinner);
     event(&h, terminal, AgentStatus::Waiting, "s1");
     wait_status(&h, "the waiting mark", |c| c == '!');
-    wait_until("the icon and the count in the status bar", TIMEOUT, || {
-        rows(&h)
-            .last()
-            .is_some_and(|bar| bar.contains("› ! ✻  ") && bar.contains("1 waiting"))
+    wait_until("the mark and the agent's icon", TIMEOUT, || {
+        rows(&h).get(3).is_some_and(|row| row.contains("! ✻  "))
     });
     h.capture("waiting");
     let agent = agent_json(&h);
@@ -211,9 +209,7 @@ fn inactive_first_panel(h: &mut Harness) -> (String, String, TerminalId) {
     let terminal = terminal_id(h);
     h.send_bytes(PREFIX);
     h.send_keys("c");
-    wait_until("a second panel", TIMEOUT, || {
-        rows(h).get(4).is_some_and(|r| r.starts_with('▌'))
-    });
+    wait_until("a second panel", TIMEOUT, || h.is_active_row(4));
     let out = h.run_deck(&["ls", "--json"]);
     let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
     let project = &doc["sessions"][0]["spaces"][0];
@@ -254,10 +250,8 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
     let before = h.raw_output().len();
     event(&h, terminal, AgentStatus::Working, "s1");
     event(&h, terminal, AgentStatus::Waiting, "s1");
-    wait_until("the unseen mark and the count", TIMEOUT, || {
-        let r = rows(&h);
-        r.get(3).is_some_and(|row| row.contains(" •"))
-            && r.last().is_some_and(|b| b.contains("1 waiting"))
+    wait_until("the unseen mark", TIMEOUT, || {
+        rows(&h).get(3).is_some_and(|row| row.contains(" •"))
     });
     h.capture("attention");
     // The panel was named after the agent's first prompt by the events.
@@ -276,15 +270,14 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
     let text = String::from_utf8_lossy(&written).into_owned();
     assert_eq!(text.matches("\x1b]9;").count(), 1, "{text:?}");
 
-    // Focusing the panel clears the mark; the count stays while the agent waits.
+    // Focusing the panel clears the mark; the agent still waits.
     h.send_bytes(PREFIX);
     h.send_keys("1");
     wait_until("the mark gone", TIMEOUT, || {
         let r = rows(&h);
-        r.get(3).is_some_and(|row| !row.contains('•'))
-            && r.get(3).is_some_and(|row| row.starts_with('▌'))
+        r.get(3).is_some_and(|row| !row.contains('•')) && h.is_active_row(3)
     });
-    assert!(rows(&h).last().unwrap().contains("1 waiting"));
+    assert_eq!(status_cell(&h), Some('!'));
     h.capture("attention-seen");
 }
 
@@ -370,9 +363,7 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
         h.send_bytes(PREFIX);
         h.send_keys("c");
         let count = ids.len() + 1;
-        wait_until("a new panel", TIMEOUT, || {
-            rows(&h).get(2 + count).is_some_and(|r| r.starts_with('▌'))
-        });
+        wait_until("a new panel", TIMEOUT, || h.is_active_row(2 + count));
         let out = h.run_deck(&["ls", "--json"]);
         let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
         let panels = doc["sessions"][0]["spaces"][0]["panels"]
@@ -388,28 +379,31 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
     event(&h, ids[0], AgentStatus::Waiting, "s");
     event(&h, ids[1], AgentStatus::Idle, "s");
     event(&h, ids[2], AgentStatus::Waiting, "s");
-    wait_until("two waiting", TIMEOUT, || {
-        rows(&h).last().is_some_and(|b| b.contains("2 waiting"))
-    });
+    let waiting = |h: &Harness, row: usize| {
+        rows(h)
+            .get(row)
+            .is_some_and(|r| r.chars().nth(1) == Some('!'))
+    };
+    wait_until("two waiting", TIMEOUT, || waiting(&h, 3) && waiting(&h, 5));
 
     // From the third panel (active): wraps to the first, then back to the third.
     h.send_bytes(PREFIX);
     h.send_keys("a");
-    wait_until("the first panel", TIMEOUT, || rows(&h)[3].starts_with('▌'));
+    wait_until("the first panel", TIMEOUT, || h.is_active_row(3));
     h.capture("jump");
     h.send_bytes(PREFIX);
     h.send_keys("a");
-    wait_until("the third panel", TIMEOUT, || rows(&h)[5].starts_with('▌'));
+    wait_until("the third panel", TIMEOUT, || h.is_active_row(5));
 
     // Nobody waits any more: the unseen idle panel, then the flash.
     event(&h, ids[0], AgentStatus::Working, "s");
     event(&h, ids[2], AgentStatus::Working, "s");
     wait_until("no one waiting", TIMEOUT, || {
-        rows(&h).last().is_some_and(|b| !b.contains("waiting"))
+        !waiting(&h, 3) && !waiting(&h, 5)
     });
     h.send_bytes(PREFIX);
     h.send_keys("a");
-    wait_until("the idle panel", TIMEOUT, || rows(&h)[4].starts_with('▌'));
+    wait_until("the idle panel", TIMEOUT, || h.is_active_row(4));
     h.send_bytes(PREFIX);
     h.send_keys("a");
     wait_until("the flash", TIMEOUT, || {
@@ -432,9 +426,7 @@ fn a_collapsed_project_shows_how_many_of_its_panels_wait() {
     h.send_keys("c");
     event(&h, terminal, AgentStatus::Working, "s1");
     event(&h, terminal, AgentStatus::Waiting, "s1");
-    wait_until("the waiting count", TIMEOUT, || {
-        rows(&h).last().is_some_and(|b| b.contains("1 waiting"))
-    });
+    wait_status(&h, "the waiting mark", |c| c == '!');
     // Fold the project: the sidebar's Left key.
     h.send_bytes(PREFIX);
     h.send_bytes(b"\t");

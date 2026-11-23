@@ -294,7 +294,7 @@ impl App {
     /// The dialog's geometry for the window, when it is open.
     pub(crate) fn restore_geometry(&self) -> Option<Geometry> {
         self.restore.as_ref()?;
-        let (cols, rows) = (self.size.0, self.size.1.saturating_sub(1));
+        let (cols, rows) = self.size;
         let narrow = cols < NARROW;
         let w = if narrow {
             cols * 9 / 10
@@ -621,15 +621,6 @@ impl App {
     }
 }
 
-/// The hints for the status bar while the dialog is open.
-pub fn hints(app: &App) -> &'static str {
-    if app.size.0 < NARROW {
-        HINTS_NARROW
-    } else {
-        HINTS
-    }
-}
-
 /// The agent's name in the column header.
 fn label(kind: AgentKind) -> &'static str {
     match kind {
@@ -671,7 +662,6 @@ fn detail(session: &AgentSession, home: Option<&Path>, now: u64, room: u16) -> S
     format!("  {dir}{suffix}")
 }
 
-/// Draws the dialog over everything else but the status bar.
 /// The style of a column heading: the accent for the active column and in the narrow layout.
 pub(crate) fn heading_style(theme: &Theme, accent: bool) -> Style {
     let base = Style::new().bg(color(theme.overlay_bg));
@@ -691,6 +681,7 @@ pub(crate) fn agent_icon_kind(kind: AgentKind) -> IconKind {
     }
 }
 
+/// Draws the dialog over everything else but a dialog and the floating bar.
 pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
     let (Some(restore), Some(g)) = (&app.restore, app.restore_geometry()) else {
         return;

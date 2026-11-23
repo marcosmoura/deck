@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Dialogs
@@ -55,3 +55,5 @@ A refused name: row 3 shows the daemon's reason in `error` for 4 s, and the edit
 - End-to-end (`crates/deck/tests/`): the tests that type into a prompt or answer a question find the label and the question in the dialog instead of the status bar; one scenario renames a panel through the dialog and one refuses a duplicate space name.
 
 ## Notes
+
+A live flash widens the dialog up to the window width minus 2 (decided in review: refusals were cut).

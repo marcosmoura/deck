@@ -1,4 +1,4 @@
-//! Program and agent icons in the sidebar rows and the status bar.
+//! Program and agent icons in the sidebar rows.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,7 +13,7 @@ use ratatui::buffer::Buffer;
 use ratatui::style::Modifier;
 
 use crate::app::App;
-use crate::draw::{color, draw};
+use crate::draw::draw;
 use crate::mirror::tests::{frame, mockup, panel, project};
 
 pub(crate) fn agent(kind: AgentKind, status: AgentStatus) -> AgentState {
@@ -92,25 +92,21 @@ fn the_sidebar_of_the_spec_at_28_columns() {
     let a = app_with("", titled());
     let (buf, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[0], pad(" Spaces         + New space "));
+    assert_eq!(side[0], pad(" main           + New space "));
     assert_eq!(side[1], pad(""));
     assert_eq!(side[2], pad(" ▾ terminal-multiplexer"));
-    assert_eq!(side[3], pad("▌⠋ ✻  Fix login bug"));
+    assert_eq!(side[3], pad(" ⠋ ✻  Fix login bug"));
     assert_eq!(side[4], pad("   ✎  nvim"));
     assert_eq!(side[5], pad(" ! ◎  Review the API chang…"));
     assert_eq!(side[6], pad("   ❯  ~/Projects/terminal-…"));
     assert_eq!(side[7], pad("   ±  api"));
-    // The icon has the colour of its row: the accent, bold, for the active panel.
-    assert_eq!(buf[(3, 3)].fg, color(a.theme.accent));
-    assert!(buf[(3, 3)].modifier.contains(Modifier::BOLD));
-    assert_ne!(buf[(3, 4)].fg, color(a.theme.accent));
-    // The status bar has the icon and the name of the active panel.
+    // The icon has the style of its row: the selection band, bold, for the active panel.
     assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ⠋ ✻  Fix login bug  "),
-        "{}",
-        rows[23]
+        buf[(3, 3)]
+            .modifier
+            .contains(Modifier::BOLD | Modifier::REVERSED)
     );
-    assert!(!rows[23].contains(" · "), "{}", rows[23]);
+    assert!(!buf[(3, 4)].modifier.contains(Modifier::REVERSED));
 }
 
 #[test]
@@ -132,15 +128,10 @@ fn icons_none_draws_the_plain_rows() {
     );
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[3], pad("▌⠋ Fix login bug"));
+    assert_eq!(side[3], pad(" ⠋ Fix login bug"));
     assert_eq!(side[4], pad("   nvim"));
     assert_eq!(side[5], pad(" ! Review the API changes"));
     assert_eq!(side[7], pad("   api"));
-    assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ⠋ Fix login bug  "),
-        "{}",
-        rows[23]
-    );
 }
 
 #[test]
@@ -148,7 +139,7 @@ fn the_nerd_preset_and_overrides_pick_the_glyphs() {
     let a = app_with("[theme]\nicons = \"nerd\"", titled());
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[3], pad("▌⠋ \u{ec82}  Fix login bug"));
+    assert_eq!(side[3], pad(" ⠋ \u{ec82}  Fix login bug"));
     assert_eq!(side[4], pad("   \u{f040}  nvim"));
     assert_eq!(side[5], pad(" ! \u{ec81}  Review the API chang…"));
     assert_eq!(side[7], pad("   \u{f126}  api"));
@@ -156,7 +147,7 @@ fn the_nerd_preset_and_overrides_pick_the_glyphs() {
     let a = app_with("[theme.icon_glyphs]\nclaude = \"C\"\ngit = \"G\"", titled());
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[3], pad("▌⠋ C  Fix login bug"));
+    assert_eq!(side[3], pad(" ⠋ C  Fix login bug"));
     assert_eq!(side[7], pad("   G  api"));
     assert_eq!(side[4], pad("   ✎  nvim"));
 }
@@ -168,12 +159,7 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].active_panel = Some(PanelId(7));
     let mut a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad("▌  ±  api"));
-    assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ±  api · lazygit - repo"),
-        "{}",
-        rows[23]
-    );
+    assert_eq!(sidebar(&rows)[7], pad("   ±  api"));
 
     // The program ends: the name stays, the icon follows what is left.
     let mut view = a.mirror.view().unwrap().clone();
@@ -181,13 +167,7 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].panels[4].terminals[0].title = Some("api".into());
     a.on_server(ServerMsg::SessionView(view));
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad("▌  ❯  api"));
-    // A title that equals the name adds nothing.
-    assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ❯  api  "),
-        "{}",
-        rows[23]
-    );
+    assert_eq!(sidebar(&rows)[7], pad("   ❯  api"));
 }
 
 #[test]

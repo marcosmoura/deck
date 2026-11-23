@@ -81,7 +81,13 @@ fn h_and_h_are_different_actions() {
         assert_eq!(b.lookup(&shift(big)), Some(Action::Resize(dir)));
     }
     assert_eq!(b.lookup(&plain('=')), Some(Action::ResetLayout));
-    assert_eq!(b.resize_hints(), "H J K L resize  = reset");
+    assert_eq!(
+        b.resize_hints(),
+        [
+            ("H J K L".to_string(), "resize".to_string()),
+            ("=".to_string(), "reset".to_string())
+        ]
+    );
 }
 
 /// The ratios of the one `SetRatios` in `out`.
@@ -158,18 +164,16 @@ fn the_badge_shows_while_repeating_and_goes_with_the_deadline() {
     let (_, buf, rows) = render(&a);
     let theme = Theme::default();
     assert!(
-        rows[23].starts_with(" RESIZE  terminal-multiplexer › ❯  tests"),
+        rows[23].contains(" RESIZE  H J K L resize  = reset "),
         "{}",
         rows[23]
     );
+    // The badge's first cell, after the bar's padding cell.
+    let at = rows[23].find(" RESIZE ").unwrap();
+    let badge = u16::try_from(rows[23][..at].chars().count()).unwrap();
+    assert_eq!(buf[(badge, 23)].fg, color(theme.warning));
     assert!(
-        rows[23].ends_with("H J K L resize  = reset"),
-        "{}",
-        rows[23]
-    );
-    assert_eq!(buf[(1, 23)].fg, color(theme.warning));
-    assert!(
-        buf[(1, 23)]
+        buf[(badge, 23)]
             .modifier
             .contains(ratatui::style::Modifier::REVERSED)
     );
@@ -179,7 +183,7 @@ fn the_badge_shows_while_repeating_and_goes_with_the_deadline() {
     a.tick(t0 + MS(1000));
     assert!(a.resize_until.is_none() && a.is_dirty());
     let (_, _, rows) = render(&a);
-    assert!(rows[23].starts_with(" main  "), "{}", rows[23]);
+    assert!(!rows[23].contains("RESIZE"), "{}", rows[23]);
 }
 
 #[test]
@@ -314,7 +318,7 @@ fn a_drag_stops_at_the_minimum_and_a_row_border_drags_vertically() {
     assert_eq!(out, [set(3, 3, ratios(Some(880), &[1000], &[500, 500]))]);
     at(&mut a, t0, &[left(up, 99, 5)]);
 
-    let area = Rect::new(0, 0, SIZE.0, SIZE.1 - 1);
+    let area = Rect::new(0, 0, SIZE.0, SIZE.1);
     let rects = layout::panel_rects(area, 3, &Ratios::default_for(3));
     let y = rects[2].y;
     at(&mut a, t0, &[left(down, 70, y)]);

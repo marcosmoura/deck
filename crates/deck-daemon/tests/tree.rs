@@ -545,7 +545,7 @@ async fn keep_is_saved_and_a_restart_restores_only_the_running_kept_terminal() {
                 session: Some("main".into()),
                 create: false,
                 cols: 80,
-                rows: 25,
+                rows: 24,
             },
             std::env::temp_dir(),
             hello_env(),

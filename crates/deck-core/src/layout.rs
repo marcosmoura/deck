@@ -34,13 +34,13 @@ pub fn clamp_sidebar_width(cols: u16, wanted: u16) -> u16 {
 }
 
 /// The panel area of an `outer` window (columns, rows): what is left of it after the
-/// sidebar and the status-bar row. `sidebar_visible` says the user has not hidden the
+/// sidebar; it keeps every row. `sidebar_visible` says the user has not hidden the
 /// sidebar; a window too narrow for it hides it anyway.
 pub fn panel_area(outer: (u16, u16), sidebar_width: u16, sidebar_visible: bool) -> (u16, u16) {
     let (cols, rows) = outer;
     (
         cols - sidebar_cols(cols, sidebar_width, sidebar_visible),
-        rows.saturating_sub(1),
+        rows,
     )
 }
 

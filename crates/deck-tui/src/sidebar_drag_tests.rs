@@ -53,7 +53,7 @@ fn release(a: &mut App, column: u16, now: Instant) -> Vec<Out> {
 }
 
 fn viewport(cols: u16) -> Out {
-    Out::Send(ClientMsg::Viewport { cols, rows: 23 })
+    Out::Send(ClientMsg::Viewport { cols, rows: 24 })
 }
 
 fn later(t0: Instant, ms: u64) -> Instant {
@@ -255,7 +255,7 @@ fn a_config_reload_replaces_the_width_only_when_it_changes_it() {
     assert_eq!(a.sidebar_width, 35);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::ReloadViewport { cols: 64, rows: 23 })]
+        [Out::Send(ClientMsg::ReloadViewport { cols: 64, rows: 24 })]
     );
 }
 
@@ -318,7 +318,7 @@ fn the_separator_is_accent_while_dragged_and_the_badge_shows_the_width() {
     assert_eq!(dragged[(40, 5)].symbol(), "┃");
     assert_eq!(dragged[(40, 5)].fg, color(theme.accent));
     assert!(
-        row(&dragged, 23).starts_with(" SIDEBAR 40 "),
+        row(&dragged, 23).contains(" SIDEBAR 40 "),
         "{}",
         row(&dragged, 23)
     );
@@ -336,7 +336,7 @@ fn a_wide_sidebar_is_clamped_to_the_window_at_attach_and_on_a_config_change() {
     let mut a = App::new(&config, (70, 24), &[]);
     assert_eq!(a.sidebar_width, 49);
     assert!(a.sidebar_visible());
-    assert_eq!(a.viewport(), (20, 23));
+    assert_eq!(a.viewport(), (20, 24));
     // The daemon derives the same area, so the first view sends nothing.
     let outs = a.on_server(ServerMsg::SessionView(mockup()));
     assert!(

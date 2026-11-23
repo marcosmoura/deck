@@ -6,7 +6,7 @@ Keys go to the focused terminal, except the prefix and what follows it.
 
 The default prefix is `Option+Space` (`M-Space`; shown as `⌥Space` on macOS). Press it, then a binding's key:
 
-- While the prefix is armed, the status bar shows a `PREFIX` badge.
+- While the prefix is armed, the [floating bar](#the-floating-bar) shows a `PREFIX` badge with `esc cancel  ? help` (`?` is the first key bound to `help`).
 - A bound key runs its action and disarms.
 - `Esc` disarms without doing anything.
 - An unbound key disarms and shows `no binding for <key>` for 2 seconds; nothing reaches the terminal.
@@ -19,6 +19,21 @@ On macOS:
 - `Ctrl+Space` is not the default because macOS reserves it for switching input sources.
 
 `Shift+Enter` arrives as `Enter`: deck does not use the kitty keyboard protocol.
+
+## The floating bar
+
+No row of the window is reserved. A one-row floating bar shows over the last row of the panel area, centered, only while one of these holds, with the first that applies picking the badge:
+
+| State                                        | Badge         | Then                                                                         |
+| -------------------------------------------- | ------------- | ---------------------------------------------------------------------------- |
+| Dragging the sidebar separator               | `SIDEBAR <w>` | nothing                                                                      |
+| The prefix is armed                          | `PREFIX`      | `esc cancel  ? help` (`?` is the first key of `help`; left out when unbound) |
+| A resize repeat or a terminal border drag    | `RESIZE`      | the repeat: `H J K L resize  = reset`; a drag: nothing                       |
+| Scroll mode                                  | `SCROLL`      | `[offset/history]` when scrolled back, then `q exit  g top  G bottom`        |
+| Sidebar focus                                | `SIDEBAR`     | the sidebar hints                                                            |
+| A message (a flash or a daemon notice) alone | none          | the text, in its level colour                                                |
+
+A message replaces the hints and keeps the badge. The badge is the `warning` role reversed, each hint is its key in bold and its label `muted`, on `status_bg`; hints that do not fit are cut with `…`. The bar is not drawn under a dialog, in a window too small for deck, or, apart from a message, over the help overlay, the session picker, the New menu or the restore dialog. It covers the terminal's cells while it shows; the cursor is hidden under it, and a press on it reaches no program.
 
 ## Bindings
 
@@ -78,7 +93,7 @@ A key you set replaces the same key on any other action's default keys, with a w
 
 ## Scroll mode
 
-`Option+Space [` scrolls back through the focused terminal's history. The status bar shows a `SCROLL` badge instead of the session name, with the hints `q exit  g top  G bottom`, and `[offset/history]` follows the badge: how many lines the terminal is scrolled back out of how many it holds.
+`Option+Space [` scrolls back through the focused terminal's history. The floating bar shows a `SCROLL` badge with the hints `q exit  g top  G bottom`, and `[offset/history]` follows the badge: how many lines the terminal is scrolled back out of how many it holds.
 
 | Keys                                       | What they do                          |
 | ------------------------------------------ | ------------------------------------- |
@@ -102,7 +117,7 @@ The wheel works over any terminal, focused or not, and never enters scroll mode:
 - Otherwise, on the alternate screen (`less`, `man`), the wheel sends three `Up` or `Down` presses per notch (the program's own `?1007` setting; with it off the wheel does nothing there).
 - Otherwise the wheel scrolls the history, 3 lines per notch, and shows the indicator. Without history it does nothing.
 
-A click in an unfocused terminal focuses it and is not sent to the program ([layout](layout.md#focus)); the wheel scrolls the terminal under the pointer. Clicks, releases, drags and motion inside the focused terminal go to programs that asked for them, with coordinates relative to the terminal's screen (inside its border, if it has one; SGR encoding when the program asked for it, X10 otherwise). Events on the sidebar, its separator or the status bar are never sent. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
+A click in an unfocused terminal focuses it and is not sent to the program ([layout](layout.md#focus)); the wheel scrolls the terminal under the pointer. Clicks, releases, drags and motion inside the focused terminal go to programs that asked for them, with coordinates relative to the terminal's screen (inside its border, if it has one; SGR encoding when the program asked for it, X10 otherwise). Events on the sidebar, its separator or the floating bar are never sent: a press on the bar reaches no program and starts no selection or drag, while a selection or drag already in progress goes on across it. When the outer terminal gains or loses focus, a program that asked for focus reporting gets `ESC[I` or `ESC[O` (a focus report does not move a scrolled-back terminal).
 
 ## Selecting and copying
 

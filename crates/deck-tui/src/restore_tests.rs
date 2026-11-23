@@ -22,7 +22,7 @@ use crate::restore::{Hit, Load};
 use crate::sidebar::Hover;
 
 const LEFT: ct::MouseButton = ct::MouseButton::Left;
-/// The window the dialog tests use: the dialog is 90 columns wide at column 5 and 23 rows high
+/// The window the dialog tests use: the dialog is 90 columns wide at column 5 and 24 rows high
 /// at row 3; its list starts on row 8, its columns at 7, 36 and 65.
 const SIZE: (u16, u16) = (100, 30);
 const NOW: u64 = 1_700_000_000;
@@ -566,8 +566,8 @@ fn a_hundred_sessions_scroll_with_the_selection_and_end_reaches_the_last() {
     assert_eq!(selected(&a).as_deref(), Some("id49"));
     assert!(dialog(&a).contains("Session number 49"));
     press(&mut a, ct::KeyCode::PageUp);
-    assert_eq!(selected(&a).as_deref(), Some("id42"));
-    assert!(dialog(&a).contains("Session number 42"));
+    assert_eq!(selected(&a).as_deref(), Some("id41"));
+    assert!(dialog(&a).contains("Session number 41"));
     press(&mut a, ct::KeyCode::Home);
     assert!(dialog(&a).contains("Session number 0"));
 }
@@ -661,13 +661,6 @@ fn a_narrow_window_shows_one_column_and_tab_switches() {
     let text = dialog(&a);
     assert!(text.contains("‹ ◇  OpenCode (1) ›") && text.contains("Rework login form"));
     assert!(!text.contains("Fix the login redirect"));
-    // The status bar shows the dialog's hints.
-    assert!(
-        screen(&a)
-            .last()
-            .unwrap()
-            .contains("⏎ resume  tab column  esc close")
-    );
     // A click on the selected row resumes it.
     let rows = screen(&a);
     let y = rows
@@ -687,20 +680,15 @@ fn a_narrow_window_shows_one_column_and_tab_switches() {
 }
 
 #[test]
-fn the_status_bar_shows_the_dialogs_hints_and_the_dialog_is_gone_with_esc() {
+fn the_dialog_shows_its_own_hints_and_is_gone_with_esc() {
     let mut a = opened();
-    assert!(
-        screen(&a)
-            .last()
-            .unwrap()
-            .contains("⏎ resume  ←→ column  ↑↓ row  type to filter  esc close")
-    );
+    assert!(dialog(&a).contains("⏎ resume  ←→ column  ↑↓ row  type to filter  esc close"));
     press(&mut a, ct::KeyCode::Esc);
     assert!(!dialog(&a).contains("Restore agent session"));
 }
 
 fn chip_row(a: &App) -> u16 {
-    a.size.1 - 2
+    a.size.1 - 1
 }
 
 fn row_text(a: &App, y: u16, from: u16, to: u16) -> String {
@@ -717,11 +705,8 @@ fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_the_new_chip() {
     assert_eq!(a.hover, Some(Hover::Restore));
     let buf = buffer(&a);
     let cell = &buf[(20, y)];
-    let themed = cell.bg == color(a.theme.selection_bg) && cell.fg == color(a.theme.selection_fg);
-    assert!(
-        cell.modifier.contains(Modifier::REVERSED) || themed,
-        "{cell:?}"
-    );
+    assert_eq!(cell.bg, color(a.theme.hover), "{cell:?}");
+    assert_eq!(cell.fg, color(a.theme.sidebar_fg), "{cell:?}");
     // The new project chip is idle meanwhile, and the margin and the gap stay plain.
     assert_eq!(buf[(3, y)].fg, color(a.theme.muted));
     assert!(!buf[(27, y)].modifier.contains(Modifier::REVERSED));
@@ -838,13 +823,12 @@ fn the_dialog_closes_over_the_hover_and_a_new_session_view_forgets_it() {
 /// Every cell outside the dialog's rectangle is the same as in a frame without the dialog.
 fn nothing_outside(a: &mut App) {
     let g = a.restore_geometry().unwrap();
-    // The status bar (the last row) shows the dialog's hints; the dialog stays above it.
-    assert!(g.rect.y + g.rect.height < a.size.1);
+    assert!(g.rect.y + g.rect.height <= a.size.1);
     let with = buffer(a);
     let restore = a.restore.take();
     let without = buffer(a);
     a.restore = restore;
-    for y in 0..with.area.height - 1 {
+    for y in 0..with.area.height {
         for x in 0..with.area.width {
             let inside = (g.rect.x..g.rect.x + g.rect.width).contains(&x)
                 && (g.rect.y..g.rect.y + g.rect.height).contains(&y);

@@ -164,7 +164,7 @@ impl App {
             KeyCode::Char('x') if ctrl && !alt => {
                 if let Some((name, terminals)) = selected {
                     let question = format!(
-                        "Kill session \"{name}\" and its {terminals} {}? (y/n)",
+                        "Kill session \"{name}\" and its {terminals} {}?",
                         if terminals == 1 {
                             "terminal"
                         } else {
@@ -572,10 +572,7 @@ mod tests {
         let Some(Modal::Confirm(c)) = &a.modal else {
             panic!("no confirmation")
         };
-        assert_eq!(
-            c.question,
-            "Kill session \"work\" and its 2 terminals? (y/n)"
-        );
+        assert_eq!(c.question, "Kill session \"work\" and its 2 terminals?");
         assert!(typed_out(&mut a).is_empty());
         assert!(a.modal.is_some());
         assert_eq!(

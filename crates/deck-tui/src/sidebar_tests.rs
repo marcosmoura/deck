@@ -124,11 +124,11 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let side: Vec<String> = rows.iter().map(|r| r.chars().take(29).collect()).collect();
     assert_eq!(
         side[0],
-        format!("{}│", pad(" Spaces         + New space ", 28))
+        format!("{}│", pad(" main           + New space ", 28))
     );
     assert_eq!(side[1], format!("{}│", pad("", 28)));
     assert_eq!(side[2], format!("{}│", pad(" ▾ terminal-multiplexer", 28)));
-    assert_eq!(side[3], format!("{}│", pad("▌  ❯  editor", 28)));
+    assert_eq!(side[3], format!("{}│", pad("   ❯  editor", 28)));
     assert_eq!(side[4], format!("{}│", pad("   ❯  claude", 28)));
     assert_eq!(side[5], format!("{}│", pad("   ❯  tests", 28)));
     assert_eq!(side[6], format!("{}│", pad(" ▾ budget", 28)));
@@ -143,22 +143,22 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     // The panel area is the rest: the terminal from column 29 on, with no border.
     assert_eq!(rows[0].chars().count(), 100);
     assert!(!rows.iter().any(|r| r.contains('╭') || r.contains('╰')));
-    assert!(
-        rows[23].starts_with(" main  terminal-multiplexer › ❯  editor"),
-        "{}",
-        rows[23]
-    );
-    assert!(rows[23].ends_with(&format!("{} ? help  d detach", prefix_label())));
+    // The last row is the sidebar's bottom bar and the terminal's.
+    assert!(rows[23].starts_with("  + New "), "{}", rows[23]);
+    assert!(!rows[23].contains("detach"), "{}", rows[23]);
     let buf = t.backend().buffer();
-    // Styles: header and the active project bold, the active panel accent and bold with a
-    // gutter marker, `no panels` and the count muted.
+    // Styles: header and the active project bold, the active panel a bold band of the
+    // selection colours (reversed here), `no panels` and the count muted.
     assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(1, 0)].fg, Color::Blue);
     assert!(buf[(3, 2)].modifier.contains(Modifier::BOLD));
     assert!(!buf[(3, 6)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(0, 3)].fg, Color::Blue);
-    assert_eq!(buf[(3, 3)].fg, Color::Blue);
+    for x in [0, 3, 27] {
+        assert!(buf[(x, 3)].modifier.contains(Modifier::REVERSED), "{x}");
+    }
     assert!(buf[(3, 3)].modifier.contains(Modifier::BOLD));
+    assert!(!buf[(28, 3)].modifier.contains(Modifier::REVERSED));
+    assert!(!buf[(3, 4)].modifier.contains(Modifier::REVERSED));
     assert_eq!(buf[(3, 4)].fg, Color::Reset);
     assert_eq!(buf[(3, 9)].fg, Color::DarkGray);
     assert_eq!(buf[(26, 10)].fg, Color::DarkGray);
@@ -200,10 +200,9 @@ fn sidebar_focus_selects_with_reversed_and_shows_the_hints() {
     assert!(buf[(5, 4)].modifier.contains(Modifier::REVERSED));
     assert!(buf[(28 - 1, 4)].modifier.contains(Modifier::REVERSED));
     assert!(!buf[(5, 3)].modifier.contains(Modifier::REVERSED));
-    assert!(rows[23].starts_with(" SIDEBAR "), "{}", rows[23]);
-    assert!(
-        rows[23].ends_with("↑↓ move  ⏎ open  ←→ fold  c new  n menu  r rename  x close  esc back")
-    );
+    // The floating bar, centered in the panel area, cuts the hints to fit.
+    assert!(rows[23].contains(" SIDEBAR  ↑↓ move"), "{}", rows[23]);
+    assert!(rows[23].contains("…"), "{}", rows[23]);
     // Keys do not reach the terminal while the sidebar has them.
     let outs = run(&mut a2, &[ch('x'), ch('z')]);
     assert!(
@@ -296,7 +295,7 @@ fn sidebar_rename_and_close_act_on_the_selected_row() {
     let Some(Modal::Confirm(c)) = &a.modal else {
         panic!("{:?}", a.modal)
     };
-    assert_eq!(c.question, "Close panel \"claude\" and its terminal? (y/n)");
+    assert_eq!(c.question, "Close panel \"claude\" and its terminal?");
     run(&mut a, &[ch('n'), ch('k'), ch('k'), ch('r')]);
     let Some(Modal::Prompt(p)) = &a.modal else {
         panic!("{:?}", a.modal)
@@ -331,12 +330,9 @@ fn renaming_a_panel_prompts_prefilled_and_an_error_reopens_the_prompt() {
     let mut a = app();
     assert!(pfx(&mut a, ',').is_empty());
     let (_, rows) = screen(&a);
-    assert!(
-        rows[23].starts_with(" Rename panel: editor█"),
-        "{}",
-        rows[23]
-    );
-    assert!(rows[23].ends_with("⏎ save  esc cancel"), "{}", rows[23]);
+    assert!(rows[9].contains("╭ Rename panel "), "{}", rows[9]);
+    assert!(rows[10].contains("│ editor█"), "{}", rows[10]);
+    assert!(rows[12].contains("│ ⏎ save  esc cancel"), "{}", rows[12]);
     // Ctrl+u clears; Enter submits an empty name; the daemon refuses.
     let ctrl_u = ct::Event::Key(ct::KeyEvent::new(
         ct::KeyCode::Char('u'),
@@ -355,10 +351,17 @@ fn renaming_a_panel_prompts_prefilled_and_an_error_reopens_the_prompt() {
     assert_eq!(a.flash.as_ref().unwrap().0, "name must not be empty");
     assert!(a.flash_error);
     let (t, rows) = screen(&a);
-    assert!(rows[23].starts_with(" Rename panel: █"), "{}", rows[23]);
-    assert!(rows[23].ends_with("name must not be empty"), "{}", rows[23]);
-    let red = t.backend().buffer()[(99, 23)].fg;
+    assert!(rows[10].contains("│ █"), "{}", rows[10]);
+    assert!(
+        rows[12].contains("│ name must not be empty"),
+        "{}",
+        rows[12]
+    );
+    let at = rows[12].split("name must").next().unwrap().chars().count();
+    let red = t.backend().buffer()[(u16::try_from(at).unwrap(), 12)].fg;
     assert_eq!(red, Color::Red);
+    // The floating bar does not repeat it.
+    assert!(!rows[23].contains("name must not"), "{}", rows[23]);
     // Typing again and saving: success closes it for good.
     typed(&mut a, "docs");
     let outs = run(&mut a, &[key(ct::KeyCode::Enter)]);
@@ -489,11 +492,16 @@ fn closing_asks_first_and_only_y_confirms() {
     pfx(&mut a, 'X');
     let (t, rows) = screen(&a);
     assert!(
-        rows[23].starts_with(" Close panel \"editor\" and its terminal? (y/n)"),
+        rows[10].contains("│ Close panel \"editor\" and its terminal?"),
         "{}",
-        rows[23]
+        rows[10]
     );
-    assert_eq!(t.backend().buffer()[(2, 23)].fg, Color::Yellow);
+    assert!(rows[12].contains("│ y yes  n no"), "{}", rows[12]);
+    let at = rows[10].split("Close").next().unwrap().chars().count();
+    assert_eq!(
+        t.backend().buffer()[(u16::try_from(at).unwrap(), 10)].fg,
+        Color::Yellow
+    );
     // Other keys, the prefix and pastes are ignored.
     assert!(
         run(
@@ -521,7 +529,7 @@ fn closing_asks_first_and_only_y_confirms() {
     };
     assert_eq!(
         c.question,
-        "Close space \"terminal-multiplexer\" and its 3 terminals? (y/n)"
+        "Close space \"terminal-multiplexer\" and its 3 terminals?"
     );
     assert_eq!(
         run(&mut a, &[ch('y')]),
@@ -572,7 +580,7 @@ fn empty_states_and_typing_that_goes_nowhere() {
     let mut a = app_at(&Config::default(), (100, 24), view);
     let (_, rows) = screen(&a);
     let text = format!("No panels in empty — {} c to create one", prefix_label());
-    assert!(rows[11].contains(&text), "{rows:#?}");
+    assert!(rows[12].contains(&text), "{rows:#?}");
     assert!(!rows.iter().any(|r| r.contains('╭')));
     // Typing and pasting go nowhere, and are not kept for later either.
     assert!(run(&mut a, &[ch('a'), key(ct::KeyCode::Enter)]).is_empty());
@@ -588,20 +596,20 @@ fn empty_states_and_typing_that_goes_nowhere() {
     let a = app_at(&Config::default(), (100, 24), view);
     let (_, rows) = screen(&a);
     let text = format!("No spaces — {} P to add one", prefix_label());
-    assert!(rows[11].contains(&text), "{rows:#?}");
+    assert!(rows[12].contains(&text), "{rows:#?}");
 }
 
 #[test]
 fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
     let wide = |width| app_at(&Config::default(), (width, 24), mockup());
     // The sidebar narrows with the window (to the 20-column limit); under 41 columns it hides.
-    assert_eq!(wide(49).viewport(), (20, 23));
+    assert_eq!(wide(49).viewport(), (20, 24));
     assert!(wide(48).sidebar_visible());
     assert_eq!(wide(48).sidebar_width, 27);
-    assert_eq!(wide(48).viewport(), (20, 23));
+    assert_eq!(wide(48).viewport(), (20, 24));
     assert!(wide(41).sidebar_visible());
     assert!(!wide(40).sidebar_visible());
-    assert_eq!(wide(40).viewport(), (40, 23));
+    assert_eq!(wide(40).viewport(), (40, 24));
     let wider = Config {
         sidebar_width: 60,
         ..Config::default()
@@ -610,19 +618,19 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
     assert!(app_at(&wider, (80, 24), mockup()).sidebar_visible());
 
     let mut a = app();
-    assert_eq!(a.viewport(), (71, 23));
+    assert_eq!(a.viewport(), (71, 24));
     assert_eq!(
         pfx(&mut a, 'b'),
         [Out::Send(ClientMsg::Viewport {
             cols: 100,
-            rows: 23
+            rows: 24
         })]
     );
     let (_, rows) = screen(&a);
     assert!(!rows[0].contains('│'), "{}", rows[0]);
     assert_eq!(
         pfx(&mut a, 'b'),
-        [Out::Send(ClientMsg::Viewport { cols: 71, rows: 23 })]
+        [Out::Send(ClientMsg::Viewport { cols: 71, rows: 24 })]
     );
     // It reappears when the window grows again, and resizing sends the panel area.
     let mut a = app_at(&Config::default(), (100, 24), mockup());
@@ -630,13 +638,13 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
     let outs = run(&mut a, &[ct::Event::Resize(40, 24)]);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::Viewport { cols: 40, rows: 23 })]
+        [Out::Send(ClientMsg::Viewport { cols: 40, rows: 24 })]
     );
     assert!(!a.sidebar_visible());
     let outs = run(&mut a, &[ct::Event::Resize(100, 24)]);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::Viewport { cols: 79, rows: 23 })]
+        [Out::Send(ClientMsg::Viewport { cols: 79, rows: 24 })]
     );
     assert_eq!(a.sidebar_width, 20);
     // A hidden sidebar stays hidden when the window grows.
@@ -647,7 +655,7 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
         outs,
         [Out::Send(ClientMsg::Viewport {
             cols: 120,
-            rows: 29
+            rows: 30
         })]
     );
     // Hidden from the config.
@@ -712,7 +720,7 @@ fn many_panels() -> SessionView {
 fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     let mut a = app_at(&Config::default(), (100, 24), many_panels());
     let (_, rows) = screen(&a);
-    assert!(rows[3].starts_with("▌  ❯  p1"), "{}", rows[3]);
+    assert!(rows[3].starts_with("   ❯  p1"), "{}", rows[3]);
     // The active panel moves down the list.
     let mut view = many_panels();
     view.projects[0].active_panel = Some(PanelId(30));
@@ -721,10 +729,10 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     let (_, rows) = screen(&a);
     let at = rows
         .iter()
-        .position(|r| r.starts_with("▌  ❯  p30"))
+        .position(|r| r.starts_with("   ❯  p30"))
         .unwrap_or_else(|| panic!("{rows:#?}"));
-    assert_eq!(at, 20, "the last row of the list");
-    assert!(rows[2].starts_with("   ❯  p12"), "{}", rows[2]);
+    assert_eq!(at, 21, "the last row of the list");
+    assert!(rows[2].starts_with("   ❯  p11"), "{}", rows[2]);
     // The selection scrolls it back up.
     run(&mut a, &[prefix(), key(ct::KeyCode::Tab)]);
     for _ in 0..28 {
@@ -740,7 +748,7 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     for _ in 0..20 {
         run(&mut a, &[mouse(ct::MouseEventKind::ScrollDown, 5, 5)]);
     }
-    assert_eq!(a.sidebar_offset, 31 - 19);
+    assert_eq!(a.sidebar_offset, 31 - 20);
     for _ in 0..20 {
         run(&mut a, &[mouse(ct::MouseEventKind::ScrollUp, 5, 5)]);
     }
@@ -782,7 +790,7 @@ fn the_help_overlay_lists_every_binding_and_closes() {
         assert!(all.contains(line), "{line:?} missing:\n{all}");
     }
     // A rounded box in the middle; the groups are in the documented order (the last match:
-    // the sidebar header reads `Spaces` too).
+    // the header names the session).
     assert!(all.contains('╭') && all.contains('╰'));
     let order = ["Session", "Panels", "Spaces", "Terminal", "Sidebar"].map(|g| {
         rows.iter()
@@ -860,7 +868,7 @@ fn a_wheel_scrolled_list_stays_put_on_a_view_update_until_the_active_panel_moves
     view.projects[0].active_panel = Some(PanelId(30));
     view.active_panel = Some(PanelId(30));
     a.on_server(ServerMsg::SessionView(view));
-    assert_eq!(a.sidebar_offset, 12);
+    assert_eq!(a.sidebar_offset, 11);
 }
 
 #[test]

@@ -49,6 +49,8 @@ pub struct NewMenu {
     pub name: String,
     /// The highlighted item.
     pub selected: usize,
+    /// Where the menu's top-left corner sits, when it was opened at a point.
+    pub anchor: Option<(u16, u16)>,
 }
 
 /// What an item sends for `project`.
@@ -72,6 +74,11 @@ pub fn item_action(project: ProjectId, index: usize) -> Option<Act> {
 impl App {
     /// Opens the menu for a project; nothing for one that is not there.
     pub(crate) fn open_new_menu(&mut self, project: ProjectId) {
+        self.open_new_menu_at(project, None);
+    }
+
+    /// Opens the menu for a project with its corner on a cell of the window.
+    pub(crate) fn open_new_menu_at(&mut self, project: ProjectId, anchor: Option<(u16, u16)>) {
         let Some(p) = self.mirror.find_project(project) else {
             return;
         };
@@ -80,6 +87,7 @@ impl App {
             project,
             name,
             selected: 0,
+            anchor,
         });
         self.dirty = true;
     }
@@ -90,9 +98,9 @@ impl App {
         }
     }
 
-    /// The window the menu sits in: everything above the status bar.
+    /// The window the menu sits in.
     fn menu_area(&self) -> (u16, u16) {
-        (self.size.0, self.size.1.saturating_sub(1))
+        self.size
     }
 
     /// Where the menu is: above the sidebar's bottom bar with its left edge on the sidebar's
@@ -104,7 +112,9 @@ impl App {
         let name = truncate(&menu.name, NAME_MAX.min(cols.saturating_sub(TITLE_CHROME)));
         let w = (width(&name) + TITLE_CHROME).max(INNER + 2).min(cols);
         let h = HEIGHT.min(rows);
-        let (x, y) = if self.sidebar_visible() {
+        let (x, y) = if let Some((x, y)) = menu.anchor {
+            (x, y.min(rows - h))
+        } else if self.sidebar_visible() {
             let anchor = if rows >= crate::sidebar::BAR_MIN_HEIGHT {
                 rows - 1
             } else {
@@ -250,7 +260,7 @@ pub(crate) fn item_style(theme: &Theme, selected: bool) -> Style {
     }
 }
 
-/// Draws the menu over everything else but the status bar.
+/// Draws the menu over everything else but a dialog and the floating bar.
 pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
     let (Some(menu), Some(rect)) = (&app.menu, app.menu_rect()) else {
         return;

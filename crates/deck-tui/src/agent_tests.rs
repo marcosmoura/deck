@@ -76,13 +76,14 @@ fn the_sidebar_status_column_shows_each_panels_glyph() {
     let a = app_with(mixed());
     let buf = render(&a);
     let side = |y| row(&buf, y).chars().take(14).collect::<String>();
-    assert_eq!(side(3), "▌⠋ ✻  editor  ");
+    assert_eq!(side(3), " ⠋ ✻  editor  ");
     assert_eq!(side(4), " ! ✻  claude  ");
     assert_eq!(side(5), " ● ✻  tests   ");
     assert_eq!(side(7), " ○ ✻  api     ");
-    // Roles: waiting is a bold warning, idle is ok, quiet is muted, working is the accent.
+    // Roles: waiting is a bold warning, idle is ok, quiet is muted; working is the accent, but
+    // on the reversed band of the active row it keeps the row's text colour.
     let theme = &a.theme;
-    assert_eq!(buf[(1, 3)].fg, color(theme.accent));
+    assert_eq!(buf[(1, 3)].fg, buf[(6, 3)].fg);
     assert_eq!(buf[(1, 4)].fg, color(theme.warning));
     assert!(buf[(1, 4)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(1, 5)].fg, color(theme.ok));
@@ -140,19 +141,6 @@ fn a_cut_grid_title_keeps_its_closing_border() {
 }
 
 #[test]
-fn a_single_terminal_shows_its_icon_and_name_in_the_status_bar() {
-    let mut view = mockup();
-    set(&mut view, 31, AgentStatus::Idle);
-    let a = app_with(view);
-    let buf = render(&a);
-    let bar = row(&buf, 23);
-    assert!(bar.contains("terminal-multiplexer › ● ✻  editor"), "{bar}");
-    assert!(!bar.contains(" · "), "{bar}");
-    let at = u16::try_from(bar.chars().position(|c| c == '●').unwrap()).unwrap();
-    assert_eq!(buf[(at, 23)].fg, color(a.theme.ok));
-}
-
-#[test]
 fn the_spinner_advances_every_100_ms_and_only_while_something_spins() {
     let mut a = app_with(mockup());
     a.take_dirty();
@@ -194,7 +182,8 @@ fn a_process_detected_agent_spins_in_the_accent_colour() {
     let a = app_with(view);
     let buf = render(&a);
     assert_eq!(buf[(1, 3)].symbol(), "⠋");
-    assert_eq!(buf[(1, 3)].fg, color(a.theme.accent));
+    // The active row has the reversed band: the glyph keeps the row's text colour.
+    assert_eq!(buf[(1, 3)].fg, buf[(6, 3)].fg);
     assert!(a.wake_deadline().is_some());
 }
 
@@ -233,26 +222,4 @@ fn a_collapsed_project_counts_its_waiting_panels() {
     set(&mut view, 41, AgentStatus::Waiting);
     let buf = render(&app_with(view));
     assert!(!row(&buf, 2).contains("!1"));
-}
-
-#[test]
-fn the_status_bar_counts_waiting_terminals_and_hints_the_jump() {
-    let a = app_with(mockup());
-    let bar = row(&render(&a), 23);
-    assert!(
-        !bar.contains("waiting") && !bar.contains(" a next"),
-        "{bar}"
-    );
-
-    let mut view = mockup();
-    set(&mut view, 41, AgentStatus::Waiting);
-    set(&mut view, 61, AgentStatus::Waiting);
-    set(&mut view, 91, AgentStatus::Idle);
-    let a = app_with(view);
-    let buf = render(&a);
-    let bar = row(&buf, 23);
-    assert!(bar.contains("2 waiting  "), "{bar}");
-    assert!(bar.contains(" a next  "), "{bar}");
-    let at = u16::try_from(bar.chars().position(|c| c == '2').unwrap()).unwrap();
-    assert_eq!(buf[(at, 23)].fg, color(a.theme.warning));
 }

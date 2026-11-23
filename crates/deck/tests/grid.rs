@@ -8,9 +8,9 @@
 
 mod support;
 
-use support::{Harness, TIMEOUT, wait_until};
+use support::{ACCENT, Harness, TIMEOUT, wait_until};
 
-/// The window of the spec's mockup: a 100×23 panel area under the status bar.
+/// The window of the spec's mockup: a 100×24 panel area, every row of the window.
 const SIZE: (u16, u16) = (100, 24);
 
 fn attached(size: (u16, u16)) -> Harness {
@@ -62,11 +62,9 @@ fn size_of(h: &mut Harness, tag: &str) -> (u16, u16) {
     find(h).unwrap()
 }
 
-/// The focused terminal, found by its border's colour: the accent of the session name in
-/// the status bar. `corners` are the (row, column) of the top-left corners of the boxes.
+/// The focused terminal, found by its border's colour: the theme's accent. `corners` are the (row, column) of the top-left corners of the boxes.
 fn focused_box(h: &Harness, corners: &[(usize, usize)]) -> Option<usize> {
-    let rows = rows(h);
-    let accent = h.cell(rows.len() - 1, 1).fg;
+    let accent = ACCENT;
     corners
         .iter()
         .position(|&(r, c)| h.cell(r, c).fg == accent && h.cell(r, c).ch == '╭')
@@ -93,7 +91,7 @@ fn three_four_and_five_terminals_get_the_grid_and_their_own_pty_sizes() {
     let mut h = attached(SIZE);
     assert_eq!(
         size_of(&mut h, "S0"),
-        (23, 100),
+        (24, 100),
         "one terminal: the panel area"
     );
 
@@ -107,25 +105,24 @@ fn three_four_and_five_terminals_get_the_grid_and_their_own_pty_sizes() {
     assert!(screen[0].contains("╮╭─ 2 · sh ─"), "{}", screen[0]);
     assert_eq!(screen[0].chars().count(), 100);
     // Terminal 3 starts under terminal 2 on the right half.
-    assert_eq!(find(&h, "╭─ 3 · sh"), Some((11, 50)));
-    assert!(screen[23].starts_with(" main "), "{}", screen[23]);
+    assert_eq!(find(&h, "╭─ 3 · sh"), Some((12, 50)));
 
     // The new terminal has focus: its PTY is the lower right box, 12 rows less the border.
     assert_eq!(size_of(&mut h, "S3"), (10, 48));
     h.capture("three");
-    let three = [(0, 0), (0, 50), (11, 50)];
+    let three = [(0, 0), (0, 50), (12, 50)];
     focus(&mut h, LEFT, &three, 0);
-    assert_eq!(size_of(&mut h, "S1"), (21, 48));
+    assert_eq!(size_of(&mut h, "S1"), (22, 48));
     focus(&mut h, RIGHT, &three, 1);
-    assert_eq!(size_of(&mut h, "S2"), (9, 48));
+    assert_eq!(size_of(&mut h, "S2"), (10, 48));
 
     // A fourth gives the 2x2 grid.
     prefixed(&mut h, "t");
     wait_until("four boxes", TIMEOUT, || {
         h.screen_text().contains("╭─ 4 · sh")
     });
-    assert_eq!(find(&h, "╭─ 4 · sh"), Some((11, 50)));
-    assert_eq!(find(&h, "╭─ 3 · sh"), Some((11, 0)));
+    assert_eq!(find(&h, "╭─ 4 · sh"), Some((12, 50)));
+    assert_eq!(find(&h, "╭─ 3 · sh"), Some((12, 0)));
     assert_eq!(size_of(&mut h, "S4"), (10, 48));
     h.capture("four");
 
@@ -136,21 +133,21 @@ fn three_four_and_five_terminals_get_the_grid_and_their_own_pty_sizes() {
     });
     assert_eq!(find(&h, "╭─ 2 · sh"), Some((0, 50)));
     assert_eq!(find(&h, "╭─ 3 · sh"), Some((0, 75)));
-    assert_eq!(find(&h, "╭─ 4 · sh"), Some((11, 50)));
-    assert_eq!(find(&h, "╭─ 5 · sh"), Some((11, 75)));
+    assert_eq!(find(&h, "╭─ 4 · sh"), Some((12, 50)));
+    assert_eq!(find(&h, "╭─ 5 · sh"), Some((12, 75)));
     assert_eq!(size_of(&mut h, "S5"), (10, 23));
     h.capture("five");
-    let five = [(0, 0), (0, 50), (0, 75), (11, 50), (11, 75)];
+    let five = [(0, 0), (0, 50), (0, 75), (12, 50), (12, 75)];
     focus(&mut h, LEFT, &five, 3);
     focus(&mut h, LEFT, &five, 0);
-    assert_eq!(size_of(&mut h, "T1"), (21, 48));
+    assert_eq!(size_of(&mut h, "T1"), (22, 48));
 }
 
 #[test]
 fn focus_keys_follow_the_layout_and_typing_reaches_only_the_focused_terminal() {
     let mut h = attached(SIZE);
     grow(&mut h, 3);
-    let boxes = [(0, 0), (0, 50), (11, 50)];
+    let boxes = [(0, 0), (0, 50), (12, 50)];
     let say = |h: &mut Harness, word: &str| {
         // The shell prints the word; the echoed command line has quotes inside it.
         let (a, b) = word.split_at(2);
@@ -169,7 +166,7 @@ fn focus_keys_follow_the_layout_and_typing_reaches_only_the_focused_terminal() {
     for (key, to, word, origin) in [
         (LEFT, 0, "AAAA", (1, 0)),
         (RIGHT, 1, "BBBB", (1, 50)),
-        (DOWN, 2, "CCCC", (12, 50)),
+        (DOWN, 2, "CCCC", (13, 50)),
         (UP, 1, "DDDD", (1, 50)),
     ] {
         prefixed(&mut h, key);
@@ -215,7 +212,7 @@ fn closing_a_terminal_asks_then_reflows_and_focus_follows() {
     let mut h = attached(SIZE);
     grow(&mut h, 3);
     prefixed(&mut h, "x");
-    h.wait_for_text("Close terminal 3? (y/n)", TIMEOUT);
+    h.wait_for_text("Close terminal 3?", TIMEOUT);
     h.capture("confirm");
     // `n` keeps it.
     h.send_keys("n");
@@ -225,17 +222,18 @@ fn closing_a_terminal_asks_then_reflows_and_focus_follows() {
     assert!(h.screen_text().contains("╭─ 3 · sh"));
 
     prefixed(&mut h, "x");
-    h.wait_for_text("Close terminal 3? (y/n)", TIMEOUT);
+    h.wait_for_text("Close terminal 3?", TIMEOUT);
     h.send_keys("y");
     wait_until("two boxes", TIMEOUT, || {
-        !h.screen_text().contains("╭─ 3 · sh")
+        let text = h.screen_text();
+        !text.contains("Close terminal") && !text.contains("╭─ 3 · sh")
     });
     assert_eq!(find(&h, "╭─ 2 · sh"), Some((0, 50)));
     // Terminal 2 took focus and grew to the full height of the right half.
-    assert_eq!(size_of(&mut h, "C2"), (21, 48));
+    assert_eq!(size_of(&mut h, "C2"), (22, 48));
     h.capture("closed");
     focus(&mut h, LEFT, &[(0, 0), (0, 50)], 0);
-    assert_eq!(size_of(&mut h, "C1"), (21, 48));
+    assert_eq!(size_of(&mut h, "C1"), (22, 48));
 }
 
 #[test]
@@ -248,14 +246,14 @@ fn exit_in_one_of_three_reflows_and_one_of_two_leaves_a_single_borderless_termin
     });
     assert_eq!(find(&h, "╭─ 2 · sh"), Some((0, 50)));
     h.capture("two");
-    assert_eq!(size_of(&mut h, "E2"), (21, 48));
+    assert_eq!(size_of(&mut h, "E2"), (22, 48));
 
     prefixed(&mut h, "x");
-    h.wait_for_text("Close terminal 2? (y/n)", TIMEOUT);
+    h.wait_for_text("Close terminal 2?", TIMEOUT);
     h.send_keys("y");
     wait_until("no borders", TIMEOUT, || !h.screen_text().contains('╭'));
     assert!(!h.screen_text().contains('│'), "{}", h.screen_text());
-    assert_eq!(size_of(&mut h, "E1"), (23, 100));
+    assert_eq!(size_of(&mut h, "E1"), (24, 100));
     h.capture("single");
 }
 
@@ -339,7 +337,7 @@ fn a_click_focuses_an_unfocused_terminal_and_only_the_next_one_reaches_the_progr
 fn a_smaller_client_sees_the_same_focus_and_the_layout_cropped() {
     let mut big = attached(SIZE);
     grow(&mut big, 3);
-    let boxes = [(0, 0), (0, 50), (11, 50)];
+    let boxes = [(0, 0), (0, 50), (12, 50)];
     prefixed(&mut big, LEFT);
     prefixed(&mut big, RIGHT);
     wait_until("focus on 2", TIMEOUT, || {
@@ -354,7 +352,7 @@ fn a_smaller_client_sees_the_same_focus_and_the_layout_cropped() {
     // The newest client sizes the terminals; the big one types, so they are sized for it
     // again, and the small window shows that layout cropped.
     let mut big = big;
-    assert_eq!(size_of(&mut big, "B2"), (9, 48));
+    assert_eq!(size_of(&mut big, "B2"), (10, 48));
     wait_until("the cropped layout", TIMEOUT, || {
         find(&small, "╭─ 2 · sh") == Some((0, 50))
     });

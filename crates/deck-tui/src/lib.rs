@@ -4,8 +4,16 @@ mod agent;
 #[cfg(test)]
 mod agent_tests;
 mod app;
+mod bar;
+#[cfg(test)]
+mod bar_tests;
 mod colors;
+mod context;
+#[cfg(test)]
+mod context_tests;
 mod convert;
+#[cfg(test)]
+mod dialog_tests;
 mod draw;
 mod graphics;
 #[cfg(test)]
@@ -549,8 +557,8 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     /// The theme glyphs and both icon presets: literals that belong to `deck-core`'s theme.
-    const GLYPHS: [&str; 5 + 11 + 11] = [
-        "▾", "▸", "▌", "⠋", "⠹", // The `unicode` icons.
+    const GLYPHS: [&str; 4 + 11 + 11] = [
+        "▾", "▸", "⠋", "⠹", // The `unicode` icons.
         "✻", "◎", "◇", "❯", "✎", "±", "◔", "⇄", "▲", "¶", "λ",
         // The `nerd` icons: Codicons for the agents, `▣` for OpenCode, Font Awesome for the rest.
         "\u{ec82}", "\u{ec81}", "▣", "\u{f120}", "\u{f040}", "\u{f126}", "\u{f0e4}", "\u{f0ec}",

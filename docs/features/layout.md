@@ -6,7 +6,7 @@ A panel shows one or more terminals in an automatic grid. You add, close and foc
 
 Terminals keep the order they were created in, and a new one is appended last.
 
-- One terminal fills the panel area and has no border; its title is in the status bar.
+- One terminal fills the panel area and has no border and no title, and the panel area is every row of the window.
 - Two or more terminals each get a border and a title, `<number> · <title>` (the number is the terminal's place in the panel; the title is the program's, else the program name).
 - An even count is a grid with as few more columns than rows as possible (2: side by side, 4: 2×2, 6: 3×2).
 - An odd count above 1 gives terminal 1 the left half at full height, and the others share the right half as a grid (3: two stacked, 5: 2×2).
@@ -25,7 +25,7 @@ The focused terminal's border is in the theme's `border_focused` colour and its 
 ## Adding and closing
 
 - `new_terminal` (`t` after the prefix) starts a shell in the space's root at the end of the panel and focuses it. It is refused with `not enough room for another terminal` when the default sizes for one more terminal would leave any terminal under 10×3 cells inside its border in the current window.
-- `close_terminal` (`x`) asks `Close terminal <number>? (y/n)`, then closes the focused terminal. A terminal whose shell exits goes the same way.
+- `close_terminal` (`x`) asks `Close terminal <number>?` in a centered dialog (`y yes  n no`), then closes the focused terminal. A terminal whose shell exits goes the same way.
 - The others reflow to the new count. When the focused terminal goes, focus moves to the terminal that took its place, else the previous one.
 - When the last terminal goes, the panel closes.
 
@@ -37,11 +37,17 @@ The panel's sizes are kept as proportions. Adding or closing a terminal keeps cu
 - Clicking in an unfocused terminal focuses it. That click is not sent to the program; later clicks are.
 - The wheel scrolls the terminal under the pointer, focused or not, and does not change focus.
 
+### The terminal menu
+
+A right click inside the border of a terminal of the active panel opens a context menu at the pointer with `New terminal` (1: what `prefix t` does, with the same refusal), `Rename panel` (2: the panel's rename prompt) and `Close terminal` (3: asks `Close terminal <number>?` for that terminal; a kept terminal whose process ended closes at once). It looks and works like the sidebar's [row menus](sidebar.md#row-menus). Borders, titles and the floating bar open no menu.
+
+On an unfocused terminal the right press focuses it as a left press does (and is not sent to the program); the menu opens too when deck has the right button there. Deck has it when the program has no mouse reporting, when Option/Alt is held, and always in scroll mode. Otherwise, on the focused terminal the press, motion and release go to the program as before, and on an unfocused one the press only focuses it. The menu acts on the terminal that was clicked even if focus moves before an item is chosen; when that terminal is gone, the menu closes with no message. The release of the press that opened a menu is not sent to a program.
+
 ## Resizing
 
 - `resize_left`, `resize_right`, `resize_up`, `resize_down` (`H`, `L`, `K`, `J` after the prefix, so `Shift+h` resizes where `h` focuses) move one border of the focused terminal by 5% of the space it divides (at least one cell). The border is the terminal's own edge on the side of the key when it has one, so the terminal grows; otherwise it is the opposite edge, and the terminal shrinks. In the 3-terminal layout, `L` on terminal 1 moves the main border right and grows it, `L` on terminal 2 moves the same border right and shrinks terminal 2, and `J` on terminal 3 moves the row border down and shrinks it.
 - A border stops where a terminal would get under 10×3 cells inside its border. Nothing is sent when a key has no room; with a single terminal the keys do nothing.
-- **Repeat**: for one second after a resize key, the four resize keys and `=` act without the prefix, and each one extends the second. The status bar shows a `RESIZE` badge (the `warning` role, like `PREFIX`) and the hints `H J K L resize  = reset`. Any other key, a paste or a focus event ends the repeat and is handled normally, so a key held at the limit never reaches the terminal.
+- **Repeat**: for one second after a resize key, the four resize keys and `=` act without the prefix, and each one extends the second. The floating bar shows a `RESIZE` badge (the `warning` role, like `PREFIX`) and the hints `H J K L resize  = reset`; a border drag shows the badge alone. Any other key, a paste or a focus event ends the repeat and is handled normally, so a key held at the limit never reaches the terminal.
 - `reset_layout` (`=`) restores the default sizes for the panel's terminal count.
 - **Dragging**: press the left button on a border between two terminals, move, and release. The border follows the pointer and is drawn in the `accent` colour while you drag; the same limits apply. The press, the motion and the release are never sent to a program, even one that asked for the mouse. A panel with one terminal has no border to drag.
 

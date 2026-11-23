@@ -129,9 +129,8 @@ impl App {
                 _ => return Some(Vec::new()),
             }
         }
-        let on_separator = self.sidebar_visible()
-            && event.column == self.sidebar_width
-            && event.row.saturating_add(1) < self.size.1;
+        let on_separator =
+            self.sidebar_visible() && event.column == self.sidebar_width && event.row < self.size.1;
         if event.kind == Kind::Down(Left) && on_separator {
             self.sidebar_drag = Some(SidebarDrag { applied: None });
             self.dirty = true;
@@ -188,8 +187,10 @@ impl App {
         }
         let grid = Grid::of(self).filter(Grid::bordered)?;
         let x = event.column.checked_sub(self.sidebar_cols())?;
-        let visible = (self.size.0, self.size.1.saturating_sub(1));
-        if event.column >= visible.0 || event.row >= visible.1 {
+        if event.column >= self.size.0
+            || event.row >= self.size.1
+            || self.bar_covers(event.column, event.row)
+        {
             return None;
         }
         let boundary =

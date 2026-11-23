@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 04 — Context menus
@@ -71,3 +71,5 @@ The press was on column 14 of the `budget` row: the menu's corner is that cell, 
 - End-to-end: right-click a space row, choose `New panel`, then `Terminal`, and find a new panel row; right-click a terminal, choose `New terminal`, and find two terminals; right-click a panel row, choose `Close`, answer `y`, and find it gone.
 
 ## Notes
+
+The highlighted item's digit is drawn in the selection colours, not `muted`, so it stays readable on the highlight (accepted in review).

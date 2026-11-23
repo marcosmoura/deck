@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+use deck_core::agents::{AgentKind, AgentSource, AgentState, AgentStatus};
 use deck_core::config::Config;
 use deck_core::model::{PanelId, ProjectId, SessionView};
 use deck_core::protocol::{ClientMsg, Modes, ServerMsg};
@@ -17,7 +18,7 @@ use crate::app::{App, Out};
 use crate::draw::{color, draw};
 use crate::mirror::tests::{frame, mockup, panel, project};
 use crate::modal::Modal;
-use crate::sidebar::Hover;
+use crate::sidebar::{Hover, Sel};
 
 fn app_at(size: (u16, u16), sidebar_width: u16, view: SessionView) -> App {
     let config = Config {
@@ -74,21 +75,21 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
     (0..width).map(|x| buf[(x, y)].symbol()).collect()
 }
 
-/// The bar row of a 24-row window: the sidebar area is 23 rows tall.
-const BAR: u16 = 22;
+/// The bar row of a 24-row window: the sidebar is as tall as the window.
+const BAR: u16 = 23;
 /// A column inside the header's `New space` chip of a 28-column sidebar (it takes 16..27).
 const CHIP: u16 = 17;
 
 #[test]
-fn the_header_reads_spaces_and_holds_the_new_space_chip_at_the_right() {
+fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right() {
     // (sidebar width, the left part as shown, the chip's glyph text)
     for (width, left, chip) in [
-        (40, " Spaces", "+ New space"),
-        (30, " Spaces", "+ New space"),
-        (28, " Spaces", "+ New space"),
-        (26, " Spaces", "+ New space"),
-        (25, " Spaces", "+"),
-        (20, " Spaces", "+"),
+        (40, " main", "+ New space"),
+        (30, " main", "+ New space"),
+        (28, " main", "+ New space"),
+        (26, " main", "+ New space"),
+        (25, " main", "+"),
+        (20, " main", "+"),
     ] {
         let a = app_at((100, 24), width, mockup());
         let buf = draw_app(&a);
@@ -130,7 +131,7 @@ fn the_bar_shows_the_chip_at_the_left_and_the_restore_chip_at_the_right() {
 }
 
 #[test]
-fn the_chip_is_muted_when_idle_and_in_the_selection_colours_under_the_pointer() {
+fn the_chip_is_muted_when_idle_and_has_the_hover_background_under_the_pointer() {
     let mut a = app();
     let idle = draw_app(&a);
     assert_eq!(idle[(2, BAR)].fg, color(a.theme.muted));
@@ -140,10 +141,8 @@ fn the_chip_is_muted_when_idle_and_in_the_selection_colours_under_the_pointer() 
     let hot = draw_app(&a);
     for x in 1..8 {
         let cell = &hot[(x, BAR)];
-        let reversed = cell.modifier.contains(Modifier::REVERSED);
-        let themed =
-            cell.bg == color(a.theme.selection_bg) && cell.fg == color(a.theme.selection_fg);
-        assert!(reversed || themed, "column {x}: {cell:?}");
+        assert_eq!(cell.bg, color(a.theme.hover), "column {x}: {cell:?}");
+        assert_eq!(cell.fg, color(a.theme.sidebar_fg), "column {x}: {cell:?}");
     }
     assert_ne!(hot[(2, BAR)], idle[(2, BAR)]);
     // The cell after the chip is untouched.
@@ -155,7 +154,7 @@ fn the_chip_is_muted_when_idle_and_in_the_selection_colours_under_the_pointer() 
 
 #[test]
 fn a_short_sidebar_has_no_bar_and_the_list_uses_the_full_height() {
-    // 8 rows: the sidebar area is 7 tall, under the minimum of 8.
+    // 7 rows: under the minimum of 8.
     let mut view = mockup();
     view.projects = vec![project(
         1,
@@ -165,7 +164,7 @@ fn a_short_sidebar_has_no_bar_and_the_list_uses_the_full_height() {
     )];
     view.active_project = Some(ProjectId(1));
     view.active_panel = Some(PanelId(1));
-    let a = app_at((100, 8), 28, view.clone());
+    let a = app_at((100, 7), 28, view.clone());
     let buf = draw_app(&a);
     assert!(!(0..7).any(|y| row_text(&buf, y, 28).contains("Restore")));
     assert!(
@@ -173,9 +172,13 @@ fn a_short_sidebar_has_no_bar_and_the_list_uses_the_full_height() {
         "{}",
         row_text(&buf, 6, 28)
     );
-    assert_eq!(a.hover_at(5, 6), None);
-    // 9 rows: area 8 tall, the bar appears and the list loses two rows.
-    let a = app_at((100, 9), 28, view);
+    // No chip there: the cell is a row of the list.
+    assert_eq!(
+        a.hover_at(5, 6),
+        Some(Hover::Row(Sel::Panel(ProjectId(1), PanelId(4))))
+    );
+    // 8 rows: the bar appears and the list loses two rows.
+    let a = app_at((100, 8), 28, view);
     let buf = draw_app(&a);
     assert!(row_text(&buf, 7, 28).contains("+ New"));
     assert!(
@@ -196,16 +199,16 @@ fn the_list_scrolls_inside_a_list_area_two_rows_shorter() {
     view.active_panel = None;
     let mut a = app_at((100, 24), 28, view);
     let buf = draw_app(&a);
-    // The list shows rows 2..=20 (19 rows); the bar stays at the bottom.
-    assert!(row_text(&buf, 20, 28).contains("proj19"));
-    assert!(!row_text(&buf, 21, 28).contains("proj"));
+    // The list shows rows 2..=21 (20 rows); the bar stays at the bottom.
+    assert!(row_text(&buf, 21, 28).contains("proj20"));
+    assert!(!row_text(&buf, 22, 28).contains("proj"));
     assert!(row_text(&buf, BAR, 28).contains("+ New"));
     for _ in 0..20 {
         a.on_event(mouse(ct::MouseEventKind::ScrollDown, 5, 5), Instant::now());
     }
-    assert_eq!(a.sidebar_offset, 30 - 19);
+    assert_eq!(a.sidebar_offset, 30 - 20);
     let buf = draw_app(&a);
-    assert!(row_text(&buf, 20, 28).contains("proj30"));
+    assert!(row_text(&buf, 21, 28).contains("proj30"));
     assert!(row_text(&buf, BAR, 28).contains("+ New"));
 }
 
@@ -257,11 +260,18 @@ fn the_chip_works_without_sidebar_focus_and_not_while_an_overlay_is_open() {
 fn a_move_that_keeps_the_hover_target_does_not_mark_the_screen_dirty() {
     let mut a = app();
     a.take_dirty();
-    // Off the chip, over the list and the blank rows: no target, no redraw.
-    for (x, y) in [(5, 3), (6, 3), (10, 15), (27, 21)] {
+    // Over the blank rows: no target, no redraw.
+    for (x, y) in [(10, 15), (27, 22), (60, 5)] {
         assert!(moved(&mut a, x, y).is_empty());
         assert!(!a.take_dirty(), "({x}, {y})");
     }
+    // A row is a target: one redraw for the row, none along it, one for the next row.
+    moved(&mut a, 5, 3);
+    assert!(a.take_dirty());
+    moved(&mut a, 6, 3);
+    assert!(!a.take_dirty());
+    moved(&mut a, 5, 4);
+    assert!(a.take_dirty());
     // Onto the chip: one redraw; further moves over it: none.
     moved(&mut a, CHIP, 0);
     assert!(a.take_dirty());
@@ -338,7 +348,7 @@ fn the_hover_is_recomputed_after_a_wheel_scroll_a_resize_and_a_view() {
     assert_eq!(a.hover, None);
     assert!(a.take_dirty());
     // A resize that moves the bar under the pointer sets it.
-    moved(&mut a, 3, 18);
+    moved(&mut a, 3, 19);
     assert_eq!(a.hover, Some(Hover::New));
     a.on_event(ct::Event::Resize(100, 24), Instant::now());
     assert_eq!(a.hover, None);
@@ -439,4 +449,224 @@ fn the_chips_are_hit_where_they_are_drawn_at_any_width() {
     assert_eq!(a.hover, Some(Hover::New));
     moved(&mut a, 4, BAR);
     assert_eq!(a.hover, None);
+}
+
+/// The default sidebar with a `[theme]` table on top.
+fn themed(theme: &str) -> App {
+    let config = Config::parse(theme).unwrap().config;
+    let mut app = App::new(&config, (100, 24), &[])
+        .with_dirs(PathBuf::from("/work/proj"), Some(PathBuf::from("/home/me")));
+    app.on_server(ServerMsg::SessionView(mockup()));
+    let mut f = frame(true, (40, 10), vec![]);
+    f.terminal = app.mirror.focused_id().unwrap();
+    app.on_server(ServerMsg::Frame(f));
+    app
+}
+
+const SELECTION: &str = "[theme]\nselection_fg = \"black\"\nselection_bg = \"yellow\"";
+
+#[test]
+fn the_active_panels_row_is_a_bold_band_across_the_width() {
+    // Default selection colours: reversed. The active panel is `editor`, row 3.
+    let a = app();
+    let buf = draw_app(&a);
+    assert_eq!(row_text(&buf, 3, 28), "   ❯  editor                ");
+    assert!(!(0..24).any(|y| row_text(&buf, y, 28).contains('▌')));
+    for x in 0..28 {
+        assert!(buf[(x, 3)].modifier.contains(Modifier::REVERSED), "{x}");
+    }
+    assert!(buf[(6, 3)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(6, 3)].fg, color(a.theme.sidebar_fg));
+    // The separator and the other rows are not part of it.
+    assert!(!buf[(28, 3)].modifier.contains(Modifier::REVERSED));
+    for y in [2, 4, 6] {
+        assert!(!buf[(5, y)].modifier.contains(Modifier::REVERSED), "{y}");
+    }
+    // Custom selection colours.
+    let a = themed(SELECTION);
+    let buf = draw_app(&a);
+    for x in [0, 3, 6, 27] {
+        let cell = &buf[(x, 3)];
+        assert_eq!(
+            (cell.fg, cell.bg),
+            (color(a.theme.selection_fg), color(a.theme.selection_bg))
+        );
+    }
+    assert!(buf[(6, 3)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(28, 3)].bg, color(a.theme.sidebar_bg));
+}
+
+#[test]
+fn in_sidebar_focus_only_the_selection_has_the_band() {
+    let mut a = themed(SELECTION);
+    a.enter_sidebar();
+    a.selection = Some(Sel::Panel(ProjectId(1), PanelId(4)));
+    let buf = draw_app(&a);
+    // The selected row has the band; the active row has none, in the accent, bold.
+    assert_eq!(buf[(20, 4)].bg, color(a.theme.selection_bg));
+    assert_eq!(buf[(20, 3)].bg, color(a.theme.sidebar_bg));
+    assert_eq!(buf[(6, 3)].fg, color(a.theme.accent));
+    assert!(buf[(6, 3)].modifier.contains(Modifier::BOLD));
+    assert!(!buf[(6, 3)].modifier.contains(Modifier::REVERSED));
+    // With default selection colours the selection is reversed and the active row is not.
+    let mut a = app();
+    a.enter_sidebar();
+    a.selection = Some(Sel::Panel(ProjectId(1), PanelId(4)));
+    let buf = draw_app(&a);
+    assert!(buf[(20, 4)].modifier.contains(Modifier::REVERSED));
+    assert!(!buf[(20, 3)].modifier.contains(Modifier::REVERSED));
+}
+
+#[test]
+fn rows_and_chips_under_the_pointer_have_the_hover_background() {
+    let mut a = app_at((100, 24), 28, with_agent(mockup(), 6, AgentStatus::Quiet));
+    // The quiet glyph is muted when idle and the sidebar text under the pointer.
+    assert_eq!(draw_app(&a)[(1, 7)].fg, color(a.theme.muted));
+    moved(&mut a, 5, 7);
+    assert_eq!(draw_app(&a)[(1, 7)].fg, color(a.theme.sidebar_fg));
+    let hover = color(a.theme.hover);
+    // A space row, with its count on `dotfiles` turned from muted to the sidebar text.
+    moved(&mut a, 5, 6);
+    assert_eq!(a.hover, Some(Hover::Row(Sel::Project(ProjectId(2)))));
+    let buf = draw_app(&a);
+    assert!((0..28).all(|x| buf[(x, 6)].bg == hover));
+    assert_eq!(buf[(28, 6)].bg, color(a.theme.sidebar_bg));
+    assert!((0..28).all(|x| buf[(x, 5)].bg != hover && buf[(x, 7)].bg != hover));
+    // The glyph is muted when idle and the sidebar text under the pointer.
+    assert_eq!(buf[(1, 6)].fg, color(a.theme.sidebar_fg));
+    assert_eq!(draw_app(&app())[(1, 6)].fg, color(a.theme.muted));
+    moved(&mut a, 5, 10);
+    let buf = draw_app(&a);
+    assert_eq!(buf[(26, 10)].symbol(), "2");
+    assert_eq!(buf[(26, 10)].fg, color(a.theme.sidebar_fg));
+    assert_eq!(buf[(26, 10)].bg, hover);
+    // A panel row.
+    moved(&mut a, 5, 7);
+    assert_eq!(
+        a.hover,
+        Some(Hover::Row(Sel::Panel(ProjectId(2), PanelId(6))))
+    );
+    let buf = draw_app(&a);
+    assert!((0..28).all(|x| buf[(x, 7)].bg == hover));
+    // The chips: their own cells only.
+    for (x, y, from, to) in [(CHIP, 0, 16, 27), (5, BAR, 1, 8), (20, BAR, 18, 27)] {
+        moved(&mut a, x, y);
+        let buf = draw_app(&a);
+        assert!((from..to).all(|c| buf[(c, y)].bg == hover), "{x}");
+        assert_eq!(buf[(from - 1, y)].bg, color(a.theme.sidebar_bg), "{x}");
+        assert_eq!(buf[(x, y)].fg, color(a.theme.sidebar_fg), "{x}");
+    }
+}
+
+#[test]
+fn no_panels_the_header_title_and_blank_rows_do_not_hover() {
+    let mut a = app();
+    for (x, y) in [(5, 9), (2, 0), (5, 1), (5, 15), (5, BAR - 1)] {
+        moved(&mut a, x, y);
+        assert_eq!(a.hover, None, "({x}, {y})");
+    }
+    let buf = draw_app(&a);
+    assert!((0..28).all(|x| buf[(x, 9)].bg == color(a.theme.sidebar_bg)));
+}
+
+#[test]
+fn the_band_wins_under_the_pointer() {
+    let mut a = themed(SELECTION);
+    moved(&mut a, 10, 3);
+    assert_eq!(
+        a.hover,
+        Some(Hover::Row(Sel::Panel(ProjectId(1), PanelId(3))))
+    );
+    let buf = draw_app(&a);
+    assert!((0..28).all(|x| buf[(x, 3)].bg == color(a.theme.selection_bg)));
+}
+
+#[test]
+fn a_click_an_overlay_and_a_wheel_scroll_settle_the_hover() {
+    let mut a = app();
+    moved(&mut a, 5, 4);
+    assert!(a.hover.is_some());
+    // A click on the row ends the hover (and focuses the panel as before).
+    let outs = click(&mut a, 5, 4);
+    assert!(!outs.is_empty());
+    assert_eq!(a.hover, None);
+    assert!(
+        a.selection
+            .is_some_and(|s| s == Sel::Panel(ProjectId(1), PanelId(4)))
+    );
+    // An overlay ends it, and the pointer over the sidebar finds no target meanwhile.
+    moved(&mut a, 5, 5);
+    assert!(a.hover.is_some());
+    a.enter_sidebar();
+    a.on_event(
+        ct::Event::Key(ct::KeyEvent::new(
+            ct::KeyCode::Char('P'),
+            ct::KeyModifiers::SHIFT,
+        )),
+        Instant::now(),
+    );
+    assert!(a.modal.is_some());
+    assert_eq!(a.hover, None);
+    // A wheel scroll recomputes it for the rows now under the pointer.
+    let mut view = mockup();
+    view.projects = vec![project(
+        1,
+        "big",
+        false,
+        (1..=30).map(|n| panel(n, &format!("p{n}"), 1)).collect(),
+    )];
+    view.active_project = Some(ProjectId(1));
+    view.active_panel = Some(PanelId(1));
+    let mut a = app_at((100, 12), 28, view);
+    moved(&mut a, 5, 3);
+    assert_eq!(
+        a.hover,
+        Some(Hover::Row(Sel::Panel(ProjectId(1), PanelId(1))))
+    );
+    a.on_event(mouse(ct::MouseEventKind::ScrollDown, 5, 3), Instant::now());
+    assert_eq!(
+        a.hover,
+        Some(Hover::Row(Sel::Panel(ProjectId(1), PanelId(4))))
+    );
+}
+
+/// `view` with an agent of `status` in the first terminal of panel `panel`.
+fn with_agent(mut view: SessionView, panel: u64, status: AgentStatus) -> SessionView {
+    for p in view.projects.iter_mut().flat_map(|p| &mut p.panels) {
+        if p.id == PanelId(panel) {
+            p.terminals[0].agent = Some(AgentState {
+                kind: AgentKind::Codex,
+                status,
+                source: AgentSource::Hooks,
+                session_id: None,
+                first_prompt: None,
+                since: std::time::Duration::ZERO,
+            });
+        }
+    }
+    view
+}
+
+#[test]
+fn glyphs_on_a_reversed_band_keep_the_text_colour() {
+    let mut view = with_agent(mockup(), 3, AgentStatus::Idle);
+    view.projects[0].panels[0].unseen = true;
+    let extra = view.projects[0].panels[1].terminals[0].clone();
+    view.projects[0].panels[0].terminals.push(extra);
+    let a = app_at((100, 24), 28, view);
+    let buf = draw_app(&a);
+    // The status glyph (column 1), the name and the terminal count (column 26).
+    assert_eq!(buf[(1, 3)].symbol(), "●");
+    assert_eq!(buf[(26, 3)].symbol(), "2");
+    let name = &buf[(6, 3)];
+    for x in [1, 26] {
+        assert_eq!(buf[(x, 3)].fg, name.fg, "column {x}");
+        assert!(
+            buf[(x, 3)].modifier.contains(Modifier::REVERSED),
+            "column {x}"
+        );
+    }
+    // The unseen mark after the name too.
+    let mark = (0..28).find(|&x| buf[(x, 3)].symbol() == "•").unwrap();
+    assert_eq!(buf[(mark, 3)].fg, name.fg);
 }

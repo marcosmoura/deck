@@ -62,9 +62,9 @@ fn prefixed(h: &mut Harness, key: &str) {
     h.send_keys(key);
 }
 
-/// The cell of the active panel row's marker, which takes the accent colour.
+/// The first cell of the session name in the sidebar header, which takes the accent colour.
 fn accent(h: &Harness) -> Color {
-    h.cell(3, 0).fg
+    h.cell(0, 1).fg
 }
 
 #[expect(clippy::panic, reason = "missing text fails the integration test")]
@@ -83,11 +83,11 @@ fn wait_accent(h: &Harness, color: Color) {
 #[test]
 fn a_new_accent_applies_without_reattaching_and_reloaded_flashes() {
     let h = running(&[]);
-    h.wait_for_text("▌  ❯  sh", TIMEOUT);
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
     assert_eq!(accent(&h), BLUE);
     write(&h, "[theme]\naccent = \"red\"\n");
     wait_accent(&h, RED);
-    assert_eq!(h.cell(23, 1).fg, RED, "the session name");
+    assert_eq!(h.cell(0, 1).fg, RED, "the session name");
     h.wait_for_text("config reloaded", TIMEOUT);
     h.capture("reloaded");
 }
@@ -108,7 +108,7 @@ fn a_rebound_detach_key_works_and_the_old_one_flashes() {
 fn a_wider_sidebar_shrinks_the_shells_columns() {
     let mut h = running(&[]);
     h.send_keys("stty size\r");
-    h.wait_for_text("23 71", TIMEOUT);
+    h.wait_for_text("24 71", TIMEOUT);
     write(&h, "sidebar_width = 40\n");
     wait_until("the wider sidebar", TIMEOUT, || {
         h.screen_text()
@@ -117,7 +117,7 @@ fn a_wider_sidebar_shrinks_the_shells_columns() {
             .is_some_and(|r| r.chars().nth(40) == Some('│'))
     });
     h.send_keys("stty size\r");
-    h.wait_for_text("23 59", TIMEOUT);
+    h.wait_for_text("24 59", TIMEOUT);
     h.capture("wider-sidebar");
 }
 
@@ -205,8 +205,8 @@ fn the_first_shell_starts_at_its_final_size() {
         .config("sidebar_width", "40")
         .config("shell_args", &format!("[\"-c\", \"{script}\"]"))
         .deck();
-    // 100 - 41 columns, 24 - 1 rows: no border, one status-bar row.
-    h.wait_for_text("23 59", TIMEOUT);
+    // 100 - 41 columns, 24 rows: no border, no status row.
+    h.wait_for_text("24 59", TIMEOUT);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(!h.screen_text().contains("RESIZED"), "{}", h.screen_text());
     h.capture("first-size");

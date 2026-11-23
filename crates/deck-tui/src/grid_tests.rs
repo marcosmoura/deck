@@ -34,14 +34,14 @@ pub(crate) fn app_with(n: u64, focus: u64) -> App {
         name: "main".into(),
         active_project: Some(ProjectId(1)),
         active_panel: Some(PanelId(3)),
-        layout_viewport: Some((SIZE.0, SIZE.1 - 1)),
+        layout_viewport: Some(SIZE),
         attached_clients: 0,
         projects: vec![project(1, "terminal-multiplexer", false, vec![p])],
     };
     let mut a = App::new(&no_sidebar(), SIZE, &[]);
     a.on_server(ServerMsg::SessionView(view));
     let rects = deck_core::layout::panel_rects(
-        deck_core::layout::Rect::new(0, 0, SIZE.0, SIZE.1 - 1),
+        deck_core::layout::Rect::new(0, 0, SIZE.0, SIZE.1),
         usize::try_from(n).unwrap(),
         &deck_core::layout::Ratios::default_for(usize::try_from(n).unwrap()),
     );
@@ -129,14 +129,7 @@ fn three_terminals_are_drawn_in_the_grid_with_borders_and_numbered_titles() {
     assert_eq!(rows[0].chars().nth(49), Some('╮'));
     assert!(rows.iter().any(|r| r.contains("╭─ 3 · sh ─")));
     assert!(rows[1].starts_with("│term 1"), "{}", rows[1]);
-    assert_eq!(rows[22].chars().next(), Some('╰'));
-    // The status bar has the panel's icon and name, not a terminal's title.
-    assert!(
-        rows[23].contains("terminal-multiplexer › ❯  tests"),
-        "{}",
-        rows[23]
-    );
-    assert!(!rows[23].contains("cargo watch"), "{}", rows[23]);
+    assert_eq!(rows[23].chars().next(), Some('╰'));
 }
 
 #[test]
@@ -184,9 +177,9 @@ fn the_cursor_is_shown_at_the_focused_terminals_cursor_only() {
     let a = app_with(3, 3);
     let mut t = Terminal::new(TestBackend::new(SIZE.0, SIZE.1)).unwrap();
     t.draw(|f| draw(f, &a)).unwrap();
-    // Terminal 3: its rect starts at (50, 11), its screen one cell in; the cursor is at
+    // Terminal 3: its rect starts at (50, 12), its screen one cell in; the cursor is at
     // column 1, row 0 of that screen.
-    t.backend_mut().assert_cursor_position((52, 12));
+    t.backend_mut().assert_cursor_position((52, 13));
 }
 
 #[test]
@@ -217,7 +210,7 @@ fn closing_a_terminal_asks_first_and_names_its_index() {
     let Some(Modal::Confirm(c)) = &a.modal else {
         panic!("a confirmation");
     };
-    assert_eq!(c.question, "Close terminal 2? (y/n)");
+    assert_eq!(c.question, "Close terminal 2?");
     assert!(run(&mut a, &[ch('n')]).is_empty());
     assert!(a.modal.is_none());
     run(&mut a, &[prefix(), ch('x')]);
@@ -331,14 +324,6 @@ fn an_exited_terminal_shows_its_code_on_a_muted_border() {
     assert_eq!(buf[(x, y)].fg, color(theme.muted));
     // A running neighbor keeps its own color.
     assert!(rows.iter().any(|r| r.contains("1 · nvim")));
-}
-
-#[test]
-fn a_single_exited_terminal_shows_its_code_in_the_status_bar() {
-    let mut a = app_with(1, 1);
-    exit_terminal(&mut a, 31, 143);
-    let (_, _, rows) = render(&a);
-    assert!(rows[0].contains("exited 143") || rows[23].contains("exited 143"));
 }
 
 #[test]

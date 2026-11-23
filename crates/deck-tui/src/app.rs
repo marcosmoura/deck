@@ -20,6 +20,7 @@ use ratatui::crossterm::event as ct;
 
 use crate::Exit;
 use crate::agent;
+use crate::context::ContextMenu;
 use crate::grid::Grid;
 use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
 use crate::menu::NewMenu;
@@ -42,7 +43,7 @@ pub fn too_small((cols, rows): (u16, u16)) -> bool {
     cols < MIN_SIZE.0 || rows < MIN_SIZE.1
 }
 
-/// How long a notice stays in the status bar, by level.
+/// How long a notice stays in the floating bar, by level.
 pub fn notice_span(level: NoticeLevel) -> Duration {
     Duration::from_secs(match level {
         NoticeLevel::Info => 2,
@@ -114,6 +115,8 @@ pub struct App {
     pub picker: Option<Picker>,
     /// The New menu, open over the sidebar.
     pub menu: Option<NewMenu>,
+    /// The context menu of a right click, open over everything but the dialogs.
+    pub context: Option<ContextMenu>,
     /// The Restore dialog.
     pub restore: Option<Restore>,
     /// How many answers come before the one of the launch the menu sent; its success ends
@@ -208,6 +211,7 @@ impl App {
             pending: VecDeque::new(),
             picker: None,
             menu: None,
+            context: None,
             restore: None,
             launch_result: None,
             requests: VecDeque::new(),
@@ -301,7 +305,7 @@ impl App {
         vec![Out::Send(ClientMsg::ReloadViewport { cols, rows })]
     }
 
-    /// A message from the daemon for the status bar: at once when nothing of the daemon's
+    /// A message from the daemon for the floating bar: at once when nothing of the daemon's
     /// is showing, else after the ones before it.
     fn push_notice(&mut self, level: NoticeLevel, text: String, now: Instant) {
         if self.flash.is_some() && self.flash_level.is_some() {
@@ -337,6 +341,7 @@ impl App {
         self.modal.is_some()
             || self.picker.is_some()
             || self.menu.is_some()
+            || self.context.is_some()
             || self.restore.is_some()
     }
 
@@ -348,6 +353,7 @@ impl App {
         self.modal = None;
         self.picker = None;
         self.menu = None;
+        self.context = None;
         self.restore = None;
         self.pending.clear();
         self.launch_result = None;
@@ -370,7 +376,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// Shows a message in the status bar for a while.
+    /// Shows a message in the floating bar for a while.
     pub(crate) fn set_flash(&mut self, text: String, now: Instant, error: bool) {
         let span = if error { ERROR_FLASH_FOR } else { FLASH_FOR };
         self.flash = Some((text, now + span));
@@ -496,7 +502,7 @@ impl App {
     /// The terminal under a cell of the outer window, its index in the grid, and the
     /// 0-based cell of its screen when the cell is on it (not on a border).
     fn terminal_at(&self, column: u16, row: u16) -> Option<Hit> {
-        let (panel_cols, panel_rows) = (self.size.0, self.size.1.saturating_sub(1));
+        let (panel_cols, panel_rows) = self.size;
         let x = column.checked_sub(self.sidebar_cols())?;
         if too_small(self.size) || column >= panel_cols || row >= panel_rows {
             return None;
@@ -510,6 +516,17 @@ impl App {
             && row - inner.y < inner.height;
         let cell = on_screen.then(|| (x - inner.x, row - inner.y));
         Some(Hit { i, grid, cell })
+    }
+
+    /// Whether the right button on a terminal is deck's: its program has no mouse reporting,
+    /// Option/Alt is held, or scroll mode is on.
+    fn deck_has_right(&self, terminal: TerminalId, mods: ct::KeyModifiers) -> bool {
+        self.scroll_mode.is_some()
+            || mods.contains(ct::KeyModifiers::ALT)
+            || !self
+                .mirror
+                .terminal(terminal)
+                .is_some_and(|t| mouse::reporting(t.modes))
     }
 
     fn on_mouse(&mut self, event: ct::MouseEvent, now: Instant) -> Vec<Out> {
@@ -542,7 +559,12 @@ impl App {
             self.end_sidebar_drag();
             return self.restore_mouse(event);
         }
-        // The New menu has the mouse before the sidebar.
+        // The context menu and the New menu have the mouse before the sidebar.
+        if self.context.is_some() && !too_small(self.size) {
+            self.drag = None;
+            self.end_sidebar_drag();
+            return self.context_mouse(event);
+        }
         if self.menu.is_some() && !too_small(self.size) {
             self.drag = None;
             self.end_sidebar_drag();
@@ -586,6 +608,14 @@ impl App {
                     }
                     Vec::new()
                 }
+                ct::MouseEventKind::Down(ct::MouseButton::Right) => {
+                    self.dirty = true;
+                    self.hover = None;
+                    if let Some(Hover::Row(sel)) = self.hover_at(event.column, event.row) {
+                        self.open_row_menu(sel, (event.column, event.row));
+                    }
+                    Vec::new()
+                }
                 kind => {
                     self.dirty = true;
                     let outs = self.sidebar_mouse(event);
@@ -603,6 +633,14 @@ impl App {
         }
         // Anything over the panel area ends the hover.
         self.set_hover(None);
+        // The floating bar's cells belong to no program: presses, motion and the wheel there
+        // reach nothing. A release goes on as it would without the bar, so a program that
+        // took the press gets its button-up.
+        if !matches!(event.kind, ct::MouseEventKind::Up(_))
+            && self.bar_covers(event.column, event.row)
+        {
+            return Vec::new();
+        }
         let Some(Hit { i, grid, cell }) = self.terminal_at(event.column, event.row) else {
             return Vec::new();
         };
@@ -621,7 +659,15 @@ impl App {
             // A click in an unfocused terminal focuses it and is not forwarded.
             if matches!(event.kind, ct::MouseEventKind::Down(_)) {
                 self.swallow_release = true;
-                return vec![self.act(Act::FocusTerminal { terminal }, None)];
+                let outs = vec![self.act(Act::FocusTerminal { terminal }, None)];
+                // The menu opens on the terminal when deck has the right button there.
+                if event.kind == ct::MouseEventKind::Down(ct::MouseButton::Right)
+                    && cell.is_some()
+                    && self.deck_has_right(terminal, event.modifiers)
+                {
+                    self.open_terminal_menu(terminal, (event.column, event.row));
+                }
+                return outs;
             }
             return Vec::new();
         }
@@ -633,6 +679,12 @@ impl App {
         };
         let modes = term.modes;
         let history = term.history;
+        if event.kind == ct::MouseEventKind::Down(ct::MouseButton::Right)
+            && self.deck_has_right(terminal, event.modifiers)
+        {
+            self.open_terminal_menu(terminal, (event.column, event.row));
+            return Vec::new();
+        }
         // A left press selects text unless the program asked for the mouse; Option/Alt
         // takes it back from the program, and scroll mode never gives it one.
         if event.kind == ct::MouseEventKind::Down(ct::MouseButton::Left)
@@ -925,6 +977,9 @@ impl App {
         if self.picker.is_some() {
             return self.picker_key(key);
         }
+        if self.context.is_some() {
+            return self.context_key(key);
+        }
         if self.menu.is_some() {
             return self.menu_key(key);
         }
@@ -1017,7 +1072,13 @@ impl App {
                     Vec::new()
                 }
             }
-            Action::CloseTerminal => self.confirm_close_terminal(now),
+            Action::CloseTerminal => match self.mirror.focused_id() {
+                Some(terminal) => self.confirm_close_terminal(terminal, now),
+                None => {
+                    self.set_flash("no terminal to close".into(), now, false);
+                    Vec::new()
+                }
+            },
             Action::FocusTerminal(dir) => {
                 if active_panel.is_some() {
                     vec![self.act(Act::FocusDirection { dir }, None)]
@@ -1140,7 +1201,7 @@ impl App {
             self.restore_settle(true, None);
             return Vec::new();
         }
-        if self.menu.is_some() {
+        if self.menu.is_some() || self.context.is_some() {
             return Vec::new();
         }
         // Scroll mode and the sidebar keep keys and pastes from the terminal.
@@ -1288,6 +1349,7 @@ impl App {
                 self.check_scroll_target();
                 self.check_modal_target(Instant::now());
                 self.check_menu_target(Instant::now());
+                self.check_context_target(Instant::now());
                 self.normalize_selection();
                 // A wheel-scrolled list stays where it is unless the active panel moved.
                 let after = self
@@ -1501,7 +1563,7 @@ mod tests {
             a.on_event(ct::Event::Resize(100, 30), now),
             [Out::Send(ClientMsg::Viewport {
                 cols: 100,
-                rows: 29
+                rows: 30
             })]
         );
         assert!(a.on_event(ct::Event::Resize(19, 30), now).is_empty());
@@ -1510,7 +1572,7 @@ mod tests {
         assert!(!too_small((20, 5)));
         assert_eq!(
             a.on_event(ct::Event::Resize(20, 5), now),
-            [Out::Send(ClientMsg::Viewport { cols: 20, rows: 4 })]
+            [Out::Send(ClientMsg::Viewport { cols: 20, rows: 5 })]
         );
     }
 
@@ -1872,8 +1934,8 @@ mod tests {
         let now = Instant::now();
         let mut a = app();
         show(&mut a, SGR_CLICK | Modes::MOUSE_MOTION, 0, 50);
-        // The panel area is the window less the status bar: columns 0 to 79, rows 0 to 22; the
-        // terminal fills 78x21 of it.
+        // The panel area is the whole window: columns 0 to 79, rows 0 to 23; the terminal fills
+        // 78x21 of it.
         for (column, row) in [(78, 3), (5, 21), (5, 22), (5, 23), (79, 3), (200, 200)] {
             for kind in [
                 ct::MouseEventKind::Down(Left),
@@ -1896,12 +1958,12 @@ mod tests {
             [input(b"\x1b[<0;78;21M")]
         );
 
-        // A terminal larger than the window (another client sized it): the status-bar row and
-        // the columns past the window still send nothing.
+        // A terminal larger than the window (another client sized it): the rows and the columns
+        // past the window send nothing.
         let mut f = frame(true, (100, 30), vec![]);
         f.modes = Modes(SGR_CLICK | Modes::MOUSE_MOTION);
         a.on_server(ServerMsg::Frame(f));
-        for (column, row) in [(5, 23), (79, 23), (80, 3), (5, 24)] {
+        for (column, row) in [(5, 24), (79, 24), (80, 3), (200, 23)] {
             assert!(
                 a.on_event(mouse0(ct::MouseEventKind::Down(Left), column, row), now)
                     .is_empty(),
@@ -1909,8 +1971,8 @@ mod tests {
             );
         }
         assert_eq!(
-            a.on_event(mouse0(ct::MouseEventKind::Down(Left), 79, 22), now),
-            [input(b"\x1b[<0;80;23M")]
+            a.on_event(mouse0(ct::MouseEventKind::Down(Left), 79, 23), now),
+            [input(b"\x1b[<0;80;24M")]
         );
     }
 

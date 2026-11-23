@@ -57,12 +57,10 @@ fn is_palette(color: Color) -> bool {
 #[test]
 fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     let mut h = themed(THEMED, &[]);
-    h.wait_for_text("▌  ❯  sh", TIMEOUT);
-    // The active panel row and the session name.
-    assert_eq!(h.cell(3, 0).ch, '▌');
-    assert_eq!(h.cell(3, 0).fg, ACCENT);
-    assert_eq!(h.cell(3, 3).fg, ACCENT);
-    assert_eq!(h.cell(23, 1).fg, ACCENT, "the session name");
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
+    // The active panel row is a bold band; the session name is in the accent.
+    assert!(h.cell(3, 3).bold() && h.cell(3, 3).inverse());
+    assert_eq!(h.cell(0, 1).fg, ACCENT, "the session name");
     assert_eq!(h.cell(0, 3).fg, ACCENT, "the sidebar header");
     // The sidebar's background, on empty cells of its rows.
     for row in [1, 8, 15] {
@@ -85,9 +83,8 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
 #[test]
 fn without_truecolor_the_theme_and_the_programs_use_the_palette() {
     let mut h = themed(THEMED, &[("COLORTERM", None)]);
-    h.wait_for_text("▌  ❯  sh", TIMEOUT);
-    assert!(is_palette(h.cell(3, 0).fg), "{:?}", h.cell(3, 0).fg);
-    assert!(is_palette(h.cell(23, 1).fg));
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
+    assert!(is_palette(h.cell(0, 1).fg));
     assert_eq!(h.cell(1, 20).bg, Color::Indexed(236));
 
     h.send_keys("printf '\\033[38;2;203;166;247mQ\\033[0m\\n'\r");
@@ -148,11 +145,8 @@ fn a_double_border_style_reaches_the_help_overlay_and_the_session_picker() {
 
 #[test]
 fn glyphs_follow_the_theme() {
-    let mut h = themed(
-        r#"{ glyphs = { expanded = "v", collapsed = ">", active = "|" } }"#,
-        &[],
-    );
-    h.wait_for_text("|  ❯  sh", TIMEOUT);
+    let mut h = themed(r#"{ glyphs = { expanded = "v", collapsed = ">" } }"#, &[]);
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
     assert!(rows(&h)[2].starts_with(" v dk"), "{}", rows(&h)[2]);
     h.capture("glyphs");
     prefixed(&mut h, "\t");

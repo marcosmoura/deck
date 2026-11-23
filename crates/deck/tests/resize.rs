@@ -11,7 +11,7 @@ mod support;
 use std::thread::sleep;
 use std::time::Duration;
 
-use support::{Harness, TIMEOUT, wait_until};
+use support::{ACCENT, Harness, TIMEOUT, wait_until};
 
 const SIZE: (u16, u16) = (100, 24);
 const LEFT: &str = "\x1b[D";
@@ -48,8 +48,13 @@ fn wait_corner(h: &Harness, n: usize, at: (usize, usize)) {
     });
 }
 
+/// The window's last row, where the floating bar shows.
 fn status(h: &Harness) -> String {
-    rows(h).pop().unwrap_or_default()
+    h.screen_text()
+        .split('\n')
+        .next_back()
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Adds terminals until the panel has `n`.
@@ -64,9 +69,9 @@ fn grow(h: &mut Harness, n: usize) {
 
 /// Moves focus to terminal `n` of three (the layout of the spec's mockup).
 fn focus_of_three(h: &mut Harness, n: usize) {
-    let accent = |h: &Harness| h.cell(rows(h).len() - 1, 1).fg;
+    let accent = |_: &Harness| ACCENT;
     let focused = |h: &Harness| {
-        [(0, 0), (0, 50), (11, 50)]
+        [(0, 0), (0, 50), (12, 50)]
             .iter()
             .position(|&(r, c)| h.cell(r, c).fg == accent(h) && h.cell(r, c).ch == '╭')
     };
@@ -111,10 +116,10 @@ fn a_resize_key_grows_the_terminal_and_the_next_one_repeats_without_the_prefix()
     wait_corner(&h, 2, (0, 55));
     wait_until("the resize badge", TIMEOUT, || {
         let status = status(&h);
-        status.starts_with(" RESIZE ") && status.trim_end().ends_with("H J K L resize  = reset")
+        status.contains(" RESIZE ") && status.contains("H J K L resize  = reset")
     });
     assert!(
-        status(&h).trim_end().ends_with("H J K L resize  = reset"),
+        status(&h).contains("H J K L resize  = reset"),
         "{}",
         status(&h)
     );
@@ -131,7 +136,7 @@ fn a_resize_key_grows_the_terminal_and_the_next_one_repeats_without_the_prefix()
     assert_eq!(corner(&h, 2), Some((0, 60)));
     assert_eq!(
         size_of(&mut h, "R1"),
-        (21, 58),
+        (22, 58),
         "60% of 100, less the border"
     );
     h.capture("resized");
@@ -143,24 +148,24 @@ fn the_key_moves_the_boundary_on_the_side_it_points_to() {
     grow(&mut h, 3);
     focus_of_three(&mut h, 2);
     // J on terminal 2 moves the border between 2 and 3 down.
-    assert_eq!(corner(&h, 3), Some((11, 50)));
+    assert_eq!(corner(&h, 3), Some((12, 50)));
     prefixed(&mut h, "J");
-    wait_corner(&h, 3, (12, 50));
+    wait_corner(&h, 3, (13, 50));
     // L on terminal 2: its left edge is the main border, which moves right (2 shrinks).
     prefixed(&mut h, "L");
     wait_corner(&h, 2, (0, 55));
-    wait_corner(&h, 3, (12, 55));
+    wait_corner(&h, 3, (13, 55));
     // J on terminal 3: the row border moves down (3 shrinks).
     focus_of_three_by_keys(&mut h);
     prefixed(&mut h, "J");
-    wait_corner(&h, 3, (13, 55));
+    wait_corner(&h, 3, (14, 55));
     h.capture("moved");
 }
 
 fn focus_of_three_by_keys(h: &mut Harness) {
     prefixed(h, DOWN);
     wait_until("focus on 3", TIMEOUT, || {
-        let accent = h.cell(rows(h).len() - 1, 1).fg;
+        let accent = ACCENT;
         let (r, c) = corner(h, 3).unwrap();
         h.cell(r, c).fg == accent
     });
@@ -172,7 +177,7 @@ fn resizing_stops_at_the_minimum_without_errors_and_keys_never_leak_to_the_termi
     grow(&mut h, 2);
     prefixed(&mut h, LEFT);
     wait_until("focus on 1", TIMEOUT, || {
-        let accent = h.cell(rows(&h).len() - 1, 1).fg;
+        let accent = ACCENT;
         h.cell(0, 0).fg == accent
     });
     prefixed(&mut h, "L");
@@ -189,7 +194,7 @@ fn resizing_stops_at_the_minimum_without_errors_and_keys_never_leak_to_the_termi
     wait_until("the repeat to end", TIMEOUT, || {
         !status(&h).contains("RESIZE")
     });
-    assert_eq!(size_of(&mut h, "M1"), (21, 86));
+    assert_eq!(size_of(&mut h, "M1"), (22, 86));
     assert!(!h.screen_text().contains("LL"), "{}", h.screen_text());
 }
 
@@ -220,7 +225,7 @@ fn the_reset_restores_the_default_split() {
     wait_corner(&h, 2, (0, 60));
     prefixed(&mut h, "=");
     wait_corner(&h, 2, (0, 50));
-    assert_eq!(size_of(&mut h, "D1"), (21, 48));
+    assert_eq!(size_of(&mut h, "D1"), (22, 48));
     h.capture("reset");
 }
 
@@ -261,7 +266,7 @@ fn the_border_in_motion_is_drawn_in_the_accent() {
     let mut h = attached(SIZE);
     grow(&mut h, 3);
     focus_of_three(&mut h, 2);
-    let accent = h.cell(23, 1).fg;
+    let accent = ACCENT;
     // Terminal 1 is not focused: its border is not the accent until it is dragged.
     assert_ne!(h.cell(5, 49).fg, accent);
     h.send_keys("\x1b[<0;50;6M");
@@ -286,7 +291,7 @@ fn custom_sizes_survive_adding_and_closing_terminals() {
     h.capture("added");
     // Closing it returns to 60/40.
     prefixed(&mut h, "x");
-    h.wait_for_text("Close terminal 3? (y/n)", TIMEOUT);
+    h.wait_for_text("Close terminal 3?", TIMEOUT);
     h.send_keys("y");
     wait_until("two boxes", TIMEOUT, || corner(&h, 3).is_none());
     wait_corner(&h, 2, (0, 60));
@@ -323,10 +328,10 @@ fn a_narrow_window_draws_a_clamped_copy_and_the_exact_sizes_come_back() {
     });
     prefixed(&mut h, RIGHT);
     wait_until("focus on 2", TIMEOUT, || {
-        let accent = h.cell(rows(&h).len() - 1, 1).fg;
+        let accent = ACCENT;
         h.cell(0, 180).fg == accent
     });
-    assert_eq!(size_of(&mut h, "N1"), (21, 18));
+    assert_eq!(size_of(&mut h, "N1"), (22, 18));
 
     h.resize(40, 24);
     wait_until("the narrow layout", TIMEOUT, || {
@@ -340,5 +345,5 @@ fn a_narrow_window_draws_a_clamped_copy_and_the_exact_sizes_come_back() {
 
     h.resize(200, 24);
     wait_corner(&h, 2, (0, 180));
-    assert_eq!(size_of(&mut h, "N3"), (21, 18));
+    assert_eq!(size_of(&mut h, "N3"), (22, 18));
 }

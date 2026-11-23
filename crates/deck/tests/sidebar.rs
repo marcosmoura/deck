@@ -32,13 +32,14 @@ fn attached_with(size: (u16, u16), config: &[(&str, &str)]) -> Harness {
 /// `deck` whose first panel is named `1` by hand, so panels can be told apart by number.
 fn numbered() -> Harness {
     let mut h = attached();
-    h.wait_for_text("▌  ❯  sh", TIMEOUT);
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
     prefixed(&mut h, ",");
-    h.wait_for_text("Rename panel: sh", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
+    h.wait_for_text("│ sh█", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("1");
     h.send_keys(ENTER);
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
     h
 }
 
@@ -56,16 +57,32 @@ fn rows(h: &Harness) -> Vec<String> {
 /// tests can tell the panels apart.
 fn new_panel(h: &mut Harness, name: &str) {
     prefixed(h, "c");
-    wait_for_row(h, "▌  ❯  sh");
+    wait_for_active_row(h, "   ❯  sh");
     prefixed(h, ",");
-    h.wait_for_text("Rename panel: sh", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
+    h.wait_for_text("│ sh█", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys(name);
     h.send_keys(ENTER);
-    wait_for_row(h, &format!("▌  ❯  {name}"));
+    wait_for_active_row(h, &format!("   ❯  {name}"));
 }
 
 /// Waits until some screen row starts with `prefix`.
+/// The rows that have the selection band.
+fn active_rows(h: &Harness) -> Vec<String> {
+    rows(h)
+        .into_iter()
+        .enumerate()
+        .filter(|(y, _)| h.is_active_row(*y))
+        .map(|(_, r)| r)
+        .collect()
+}
+
+/// Waits until the active panel's row starts with `prefix`.
+fn wait_for_active_row(h: &Harness, prefix: &str) {
+    h.wait_for_active_row(prefix, TIMEOUT);
+}
+
 fn wait_for_row(h: &Harness, prefix: &str) {
     wait_until(&format!("a row starting {prefix:?}"), TIMEOUT, || {
         rows(h).iter().any(|r| r.starts_with(prefix))
@@ -110,13 +127,14 @@ fn hint_prefix() -> &'static str {
 #[test]
 fn the_sidebar_shows_the_session_project_and_first_panel() {
     let mut h = attached();
-    h.wait_for_text("▌  ❯  sh", TIMEOUT);
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
     let path = h.capture("sidebar");
     assert!(path.is_file());
     let rows = rows(&h);
-    assert!(rows[0].starts_with(" Spaces "), "{}", rows[0]);
+    assert!(rows[0].starts_with(" main "), "{}", rows[0]);
     assert!(rows[2].starts_with(" ▾ dk"), "{}", rows[2]);
-    assert!(rows[3].starts_with("▌  ❯  sh"), "{}", rows[3]);
+    assert!(rows[3].starts_with("   ❯  sh"), "{}", rows[3]);
+    assert!(h.is_active_row(3));
     assert_eq!(rows[0].chars().nth(28), Some('│'));
     // The terminal starts right after the separator: no border, no title.
     assert!(
@@ -128,11 +146,10 @@ fn the_sidebar_shows_the_session_project_and_first_panel() {
         "{}",
         rows[0]
     );
-    assert!(rows[23].starts_with(" main  dk"), "{}", rows[23]);
-    assert!(rows[23].contains("› ❯  sh"), "{}", rows[23]);
-    assert!(rows[23].ends_with(&format!("{} ? help  d detach", hint_prefix())));
+    // No status row: the last row is the sidebar's bottom bar and the terminal's own.
+    assert!(rows[23].contains("+ New"), "{}", rows[23]);
     // The panel area is the window less the sidebar and its separator: 71 columns.
-    assert_eq!(stty(&mut h), "23 71");
+    assert_eq!(stty(&mut h), "24 71");
 }
 
 #[test]
@@ -141,20 +158,20 @@ fn a_new_panel_is_added_focused_and_switching_shows_the_right_shell() {
     h.send_keys("echo ONE\r");
     h.wait_for_text("│ONE", TIMEOUT);
     new_panel(&mut h, "2");
-    h.wait_for_text("› ❯  2", TIMEOUT);
+    wait_for_active_row(&h, "   ❯  2");
     wait_gone(&h, "│ONE");
     h.send_keys("echo TWO\r");
     h.wait_for_text("│TWO", TIMEOUT);
     // `p` goes back, `n` forward, `1` and `2` by number.
     prefixed(&mut h, "p");
     h.wait_for_text("│ONE", TIMEOUT);
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
     assert!(!h.screen_text().contains("│TWO"));
     prefixed(&mut h, "n");
     h.wait_for_text("│TWO", TIMEOUT);
     prefixed(&mut h, "1");
     h.wait_for_text("│ONE", TIMEOUT);
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
     prefixed(&mut h, "2");
     h.wait_for_text("│TWO", TIMEOUT);
     h.capture("two-panels");
@@ -164,16 +181,23 @@ fn a_new_panel_is_added_focused_and_switching_shows_the_right_shell() {
 fn renaming_a_panel_and_an_empty_name_shows_the_error_and_reopens_the_prompt() {
     let mut h = attached();
     prefixed(&mut h, ",");
-    h.wait_for_text("Rename panel: sh", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
+    h.wait_for_text("│ sh█", TIMEOUT);
+    h.capture("rename-dialog");
+    // A dialog, not the floating bar: the last row has no prompt.
+    let screen = h.screen_text();
+    assert!(
+        !screen.lines().last().unwrap_or("").contains("Rename"),
+        "{screen}"
+    );
     h.send_keys(CTRL_U);
     h.send_keys(ENTER);
     h.wait_for_text("name must not be empty", TIMEOUT);
-    h.wait_for_text("Rename panel:", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
     h.capture("rename-error");
     h.send_keys("work");
     h.send_keys(ENTER);
-    wait_for_row(&h, "▌  ❯  work");
-    h.wait_for_text("› ❯  work", TIMEOUT);
+    wait_for_active_row(&h, "   ❯  work");
     assert!(!h.screen_text().contains("Rename panel"));
 }
 
@@ -183,15 +207,16 @@ fn a_new_project_takes_a_directory_and_a_name() {
     let home = std::env::var("HOME").expect("HOME");
     let home = std::fs::canonicalize(home).expect("the home directory");
     prefixed(&mut h, "P");
-    h.wait_for_text("Directory:", TIMEOUT);
+    h.wait_for_text("Directory", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("~");
     h.send_keys(ENTER);
     // The home directory proposes `~`.
-    h.wait_for_text("Space name: ~", TIMEOUT);
+    h.wait_for_text("Space name", TIMEOUT);
+    h.wait_for_text("│ ~█", TIMEOUT);
     h.send_keys(ENTER);
     wait_for_row(&h, " ▾ ~");
-    h.wait_for_text("› ❯  sh", TIMEOUT);
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
     wait_until("the new shell", TIMEOUT, || {
         rows(&h).iter().any(|r| r.contains("│$"))
     });
@@ -200,14 +225,17 @@ fn a_new_project_takes_a_directory_and_a_name() {
 
     // A second project in a typed name; a duplicate shows the error and reopens the prompt.
     prefixed(&mut h, "P");
-    h.wait_for_text("Directory:", TIMEOUT);
+    h.wait_for_text("Directory", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("~");
     h.send_keys(ENTER);
-    h.wait_for_text("Space name: ~", TIMEOUT);
+    h.wait_for_text("Space name", TIMEOUT);
+    h.wait_for_text("│ ~█", TIMEOUT);
     h.send_keys(ENTER);
     h.wait_for_text("a space named \"~\" already exists", TIMEOUT);
-    h.wait_for_text("Space name: ~", TIMEOUT);
+    h.capture("duplicate-space");
+    h.wait_for_text("Space name", TIMEOUT);
+    h.wait_for_text("│ ~█", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("other");
     h.send_keys(ENTER);
@@ -224,12 +252,13 @@ fn a_new_project_takes_a_directory_and_a_name() {
 fn a_relative_directory_resolves_against_the_start_directory() {
     let mut h = attached();
     prefixed(&mut h, "P");
-    h.wait_for_text("Directory:", TIMEOUT);
+    h.wait_for_text("Directory", TIMEOUT);
     h.send_keys(CTRL_U);
     // The harness starts deck in /tmp/dk…; `..` is /tmp.
     h.send_keys("..");
     h.send_keys(ENTER);
-    h.wait_for_text("Space name: tmp", TIMEOUT);
+    h.wait_for_text("Space name", TIMEOUT);
+    h.wait_for_text("│ tmp█", TIMEOUT);
     h.send_keys(ENTER);
     wait_for_row(&h, " ▾ tmp");
     wait_until("the new shell", TIMEOUT, || {
@@ -245,15 +274,15 @@ fn closing_a_panel_asks_first_and_focus_moves_on() {
     let mut h = numbered();
     new_panel(&mut h, "2");
     prefixed(&mut h, "X");
-    h.wait_for_text("Close panel \"2\" and its terminal? (y/n)", TIMEOUT);
+    h.wait_for_text("Close panel \"2\" and its terminal?", TIMEOUT);
     h.capture("confirm-close");
     h.send_keys("n");
     wait_gone(&h, "Close panel");
-    assert!(rows(&h).iter().any(|r| r.starts_with("▌  ❯  2")));
+    assert!(active_rows(&h).iter().any(|r| r.starts_with("   ❯  2")));
     prefixed(&mut h, "X");
-    h.wait_for_text("(y/n)", TIMEOUT);
+    h.wait_for_text("y yes  n no", TIMEOUT);
     h.send_keys("y");
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
     wait_gone(&h, "   ❯  2");
 }
 
@@ -261,7 +290,7 @@ fn closing_a_panel_asks_first_and_focus_moves_on() {
 fn closing_the_last_panel_shows_the_empty_state_and_a_new_panel_recovers() {
     let mut h = attached();
     prefixed(&mut h, "X");
-    h.wait_for_text("(y/n)", TIMEOUT);
+    h.wait_for_text("y yes  n no", TIMEOUT);
     h.send_keys("y");
     h.wait_for_text("No panels in dk", TIMEOUT);
     h.wait_for_text(&format!("{} c to create one", hint_prefix()), TIMEOUT);
@@ -271,7 +300,7 @@ fn closing_the_last_panel_shows_the_empty_state_and_a_new_panel_recovers() {
     // Typing goes nowhere.
     h.send_keys("echo lost\r");
     prefixed(&mut h, "c");
-    wait_for_row(&h, "▌  ❯  sh");
+    wait_for_active_row(&h, "   ❯  sh");
     h.wait_for_text("│$", TIMEOUT);
     assert!(!h.screen_text().contains("lost"), "{}", h.screen_text());
 }
@@ -283,14 +312,14 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
     h.send_keys("echo TWO\r");
     h.wait_for_text("│TWO", TIMEOUT);
     prefixed(&mut h, "1");
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
     prefixed(&mut h, TAB);
     h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("j");
     h.wait_for_text("↑↓ move", TIMEOUT);
     h.capture("sidebar-focus-selected");
     h.send_keys(ENTER);
-    wait_for_row(&h, "▌  ❯  2");
+    wait_for_active_row(&h, "   ❯  2");
     h.wait_for_text("│TWO", TIMEOUT);
     wait_gone(&h, "SIDEBAR");
     // Collapse: the panels go. The project row keeps its panel count.
@@ -302,7 +331,7 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
             .iter()
             .any(|r| r.starts_with(" ▸ dk") && r.contains("2 │"))
     });
-    assert!(!rows(&h).iter().any(|r| r.starts_with("▌  ❯  2")));
+    assert!(!active_rows(&h).iter().any(|r| r.starts_with("   ❯  2")));
     h.capture("sidebar-focus");
     h.send_keys(ESC);
     // Esc must be handled before the next prefix, or the two merge into one key.
@@ -315,7 +344,8 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
     prefixed(&mut h, TAB);
     h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("l");
-    wait_for_row(&h, "▌  ❯  2");
+    // The panels are back; the band is on the selected project row, not on the active panel.
+    wait_for_row(&h, "   ❯  2");
     // Esc hands the keyboard back to the shell.
     h.send_keys(ESC);
     wait_gone(&h, "SIDEBAR");
@@ -329,7 +359,7 @@ fn the_mouse_focuses_panels_and_folds_projects() {
     new_panel(&mut h, "2");
     // Panel 1 is on row 4 (1-based), the project on row 3.
     h.send_keys("\x1b[<0;6;4M\x1b[<0;6;4m");
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
     h.send_keys("\x1b[<0;6;3M\x1b[<0;6;3m");
     wait_until("the collapsed project", TIMEOUT, || {
         rows(&h).iter().any(|r| r.starts_with(" ▸ dk"))
@@ -343,13 +373,13 @@ fn the_mouse_focuses_panels_and_folds_projects() {
 #[test]
 fn toggling_the_sidebar_resizes_the_shell_by_its_width_and_separator() {
     let mut h = attached();
-    assert_eq!(stty(&mut h), "23 71");
+    assert_eq!(stty(&mut h), "24 71");
     prefixed(&mut h, "b");
     wait_gone(&h, "▾");
-    wait_until("the wider shell", TIMEOUT, || stty(&mut h) == "23 100");
+    wait_until("the wider shell", TIMEOUT, || stty(&mut h) == "24 100");
     prefixed(&mut h, "b");
     h.wait_for_text("▾", TIMEOUT);
-    wait_until("the narrower shell", TIMEOUT, || stty(&mut h) == "23 71");
+    wait_until("the narrower shell", TIMEOUT, || stty(&mut h) == "24 71");
 }
 
 #[test]
@@ -414,11 +444,11 @@ fn thirty_panels_scroll_the_sidebar_to_the_active_one() {
     for n in 2..=30 {
         new_panel(&mut h, &n.to_string());
     }
-    wait_for_row(&h, "▌  ❯  30");
+    wait_for_active_row(&h, "   ❯  30");
     h.capture("sidebar-scrolled");
     assert!(!rows(&h).iter().any(|r| r.starts_with("   ❯  1 ")));
     prefixed(&mut h, "1");
-    wait_for_row(&h, "▌  ❯  1");
+    wait_for_active_row(&h, "   ❯  1");
 }
 
 #[test]
@@ -437,10 +467,12 @@ fn detach_works_in_sidebar_focus_scroll_mode_and_the_prefix_is_text_in_a_prompt(
 
     let mut h = attached();
     prefixed(&mut h, ",");
-    h.wait_for_text("Rename panel: sh", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
+    h.wait_for_text("│ sh█", TIMEOUT);
     h.send_bytes(PREFIX);
     h.send_keys("Z");
-    h.wait_for_text("Rename panel: shZ", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
+    h.wait_for_text("│ shZ█", TIMEOUT);
     let screen = h.screen_text();
     assert!(
         !screen.contains("PREFIX") && !screen.contains("no binding"),
@@ -453,23 +485,24 @@ fn two_clients_share_the_active_panel_but_not_focus_prompts_or_overlays() {
     let mut a = numbered();
     new_panel(&mut a, "2");
     let mut b = second_client(&a, SIZE);
-    wait_for_row(&b, "▌  ❯  2");
+    wait_for_active_row(&b, "   ❯  2");
     // `n` in A moves the active panel in both.
     prefixed(&mut a, "n");
-    wait_for_row(&a, "▌  ❯  1");
-    wait_for_row(&b, "▌  ❯  1");
+    wait_for_active_row(&a, "   ❯  1");
+    wait_for_active_row(&b, "   ❯  1");
     // Sidebar focus and prompts are local.
     prefixed(&mut a, TAB);
     a.wait_for_text("SIDEBAR", TIMEOUT);
     prefixed(&mut b, ",");
-    b.wait_for_text("Rename panel: 1", TIMEOUT);
+    b.wait_for_text("Rename panel", TIMEOUT);
+    b.wait_for_text("│ 1█", TIMEOUT);
     assert!(!b.screen_text().contains("SIDEBAR"));
     assert!(!a.screen_text().contains("Rename panel"));
     // A closes the panel B is renaming: B's prompt closes with the flash.
     a.send_keys(ESC);
     wait_gone(&a, "SIDEBAR");
     prefixed(&mut a, "X");
-    a.wait_for_text("(y/n)", TIMEOUT);
+    a.wait_for_text("y yes  n no", TIMEOUT);
     a.send_keys("y");
     b.wait_for_text("panel \"1\" was closed", TIMEOUT);
     assert!(!b.screen_text().contains("Rename panel"));

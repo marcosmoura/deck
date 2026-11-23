@@ -82,9 +82,6 @@ impl Action {
     }
 }
 
-/// The actions that show in the status bar's hints, in order, with their label.
-const HINTED: &[(Action, &str)] = &[(Action::Help, "help"), (Action::Detach, "detach")];
-
 /// One line of the help overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelpRow {
@@ -142,8 +139,15 @@ impl Bindings {
         ))
     }
 
-    /// The hints while the resize repeat is on, e.g. `H J K L resize  = reset`.
-    pub fn resize_hints(&self) -> String {
+    /// The first key of an action, without the prefix, e.g. `?` for `help`.
+    pub fn first_key(&self, action: Action) -> Option<String> {
+        let keys = &self.actions.iter().find(|(a, _)| *a == action)?.1;
+        Some(spec_label(keys.first()?))
+    }
+
+    /// The hints while the resize repeat is on as key and label pairs, e.g. `H J K L resize`
+    /// and `= reset`.
+    pub fn resize_hints(&self) -> Vec<(String, String)> {
         let first = |action| {
             let keys = &self.actions.iter().find(|(a, _)| *a == action)?.1;
             Some(spec_label(keys.first()?))
@@ -159,31 +163,12 @@ impl Bindings {
         .collect();
         let mut parts = Vec::new();
         if !moves.is_empty() {
-            parts.push(format!("{} resize", moves.join(" ")));
+            parts.push((moves.join(" "), "resize".to_string()));
         }
         if let Some(reset) = first(Action::ResetLayout) {
-            parts.push(format!("{reset} reset"));
+            parts.push((reset, "reset".to_string()));
         }
-        parts.join("  ")
-    }
-
-    /// The hint text of the status bar, e.g. `⌥Space ? help  d detach`, with the jump to the
-    /// next waiting agent first when `attention`.
-    pub fn hints(&self, attention: bool) -> String {
-        let jump = [(Action::NextAttention, "next")];
-        let items: Vec<String> = jump
-            .iter()
-            .filter(|_| attention)
-            .chain(HINTED.iter())
-            .filter_map(|(action, label)| {
-                let keys = &self.actions.iter().find(|(a, _)| a == action)?.1;
-                Some(format!("{} {label}", spec_label(keys.first()?)))
-            })
-            .collect();
-        if items.is_empty() {
-            return String::new();
-        }
-        format!("{} {}", self.prefix_label(), items.join("  "))
+        parts
     }
 
     /// Every action with its keys, in the order of the binding table, for the help overlay.
@@ -261,7 +246,7 @@ impl Bindings {
     }
 }
 
-/// A key for the status bar: `⌥Space` on macOS, `M-Space` elsewhere.
+/// A key for the UI: `⌥Space` on macOS, `M-Space` elsewhere.
 fn spec_label(spec: &KeySpec) -> String {
     spec.label(cfg!(target_os = "macos"))
 }
@@ -436,12 +421,6 @@ mod tests {
         assert_eq!(b.lookup(&d), Some(Action::Detach));
         let bracket = KeyEvent::new(KeyCode::Char('['), Modifiers::NONE);
         assert_eq!(b.lookup(&bracket), Some(Action::Scroll));
-        let prefix = if cfg!(target_os = "macos") {
-            "⌥Space"
-        } else {
-            "M-Space"
-        };
-        assert_eq!(b.hints(false), format!("{prefix} ? help  d detach"));
     }
 
     #[test]

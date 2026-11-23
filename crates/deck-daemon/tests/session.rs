@@ -111,7 +111,7 @@ async fn the_pty_follows_the_client_that_was_active_last() {
         &daemon.paths.socket,
         Attach {
             cols: 60,
-            rows: 19,
+            rows: 18,
             ..Attach::default()
         },
     )

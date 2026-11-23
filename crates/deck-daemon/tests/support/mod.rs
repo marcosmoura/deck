@@ -37,7 +37,7 @@ pub fn config() -> Config {
     Config {
         shell: Some("/bin/sh".into()),
         shell_args: Vec::new(),
-        // Without the sidebar the panel area is the window minus the status-bar row.
+        // Without the sidebar the panel area is the whole window.
         sidebar: false,
         ..Config::default()
     }
@@ -220,7 +220,7 @@ pub fn hello_env() -> Vec<(OsString, OsString)> {
 pub struct Attach {
     pub session: Option<String>,
     pub create: bool,
-    /// The outer window; the daemon takes the status-bar row off for the panel area.
+    /// The outer window; the panel area is the window less the sidebar.
     pub cols: u16,
     pub rows: u16,
     pub cwd: PathBuf,
@@ -234,7 +234,7 @@ impl Default for Attach {
             session: None,
             create: true,
             cols: 80,
-            rows: 25,
+            rows: 24,
             cwd: std::env::temp_dir(),
             env: hello_env(),
             colors: None,

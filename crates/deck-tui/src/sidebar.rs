@@ -28,9 +28,17 @@ pub(crate) const BAR_MIN_HEIGHT: u16 = 8;
 const BAR_WIDE: u16 = 26;
 /// Rows the wheel scrolls per notch.
 const WHEEL_ROWS: usize = 3;
-/// What the status bar shows while the sidebar has the keyboard.
-pub const SIDEBAR_HINTS: &str =
-    "↑↓ move  ⏎ open  ←→ fold  c new  n menu  r rename  x close  esc back";
+/// What the floating bar shows while the sidebar has the keyboard, as key and label pairs.
+pub const SIDEBAR_HINTS: &[(&str, &str)] = &[
+    ("↑↓", "move"),
+    ("⏎", "open"),
+    ("←→", "fold"),
+    ("c", "new"),
+    ("n", "menu"),
+    ("r", "rename"),
+    ("x", "close"),
+    ("esc", "back"),
+];
 
 /// The row the sidebar selection is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +50,8 @@ pub enum Sel {
 /// What the pointer is over in the sidebar. Client-local: never sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
+    /// A space or panel row of the list.
+    Row(Sel),
     /// The `+ New space` chip of the header.
     NewProject,
     /// The `+ New` chip of the bottom bar.
@@ -49,8 +59,6 @@ pub enum Hover {
     Restore,
 }
 
-/// The sidebar's title, on the header row.
-const HEADER_TITLE: &str = "Spaces";
 /// Cells an icon takes: a text icon and a blank, or a logo.
 pub const ICON_CELLS: u16 = 2;
 /// The column the icon of a panel row starts in, and the one its name starts in with icons.
@@ -164,14 +172,14 @@ impl App {
 
     /// Rows of the list that fit under the header.
     fn list_height(&self) -> usize {
-        let height = self.size.1.saturating_sub(1);
+        let height = self.size.1;
         usize::from(height.saturating_sub(HEADER_ROWS + bar_rows(height)))
     }
 
-    /// What the cell is over: the `New space` chip of the header, or the chips of the bottom
-    /// bar when it is drawn.
+    /// What the cell is over: a row of the list, the `New space` chip of the header, or the
+    /// chips of the bottom bar when it is drawn.
     pub(crate) fn hover_at(&self, column: u16, row: u16) -> Option<Hover> {
-        let height = self.size.1.saturating_sub(1);
+        let height = self.size.1;
         let w = self.sidebar_width;
         if column >= w.min(self.sidebar_cols()) {
             return None;
@@ -182,7 +190,15 @@ impl App {
                 .then_some(Hover::NewProject);
         }
         if bar_rows(height) == 0 || row != height - 1 {
-            return None;
+            let line = usize::from(row.checked_sub(HEADER_ROWS)?);
+            if line >= self.list_height() {
+                return None;
+            }
+            let rows = self.sidebar_rows();
+            return rows
+                .get(self.sidebar_offset + line)
+                .and_then(|r| r.sel())
+                .map(Hover::Row);
         }
         if new_span(w).contains(&column) {
             Some(Hover::New)
@@ -413,7 +429,7 @@ impl App {
             }
             ct::MouseEventKind::Down(ct::MouseButton::Left) => {
                 let target = self.hover_at(event.column, event.row);
-                if target.is_some() {
+                if matches!(target, Some(h) if !matches!(h, Hover::Row(_))) {
                     self.chip_down = target;
                     return Vec::new();
                 }
@@ -493,24 +509,22 @@ pub fn base_style(theme: &Theme) -> Style {
 }
 
 /// The style of a panel row's name and icon (before the unseen mark makes it bold).
-pub fn panel_style(theme: &Theme, base: Style, is_selected: bool, active: bool) -> Style {
-    let row_style = if is_selected {
+///
+/// `band` is whether the row has the selection band: the selected row in sidebar focus, else
+/// the active panel's row. An active row without the band is drawn in the accent colour.
+pub fn panel_style(theme: &Theme, base: Style, band: bool, active: bool) -> Style {
+    let style = if band {
         selection(theme, base)
+    } else if active {
+        base.fg(color(theme.accent))
     } else {
         base
     };
-    if !active {
-        return row_style;
-    }
-    // The accent must not replace a custom selection colour.
-    let accent = base.fg(color(theme.accent));
-    let style = row_style.patch(accent);
-    let style = if is_selected && theme.selection_fg != Default::default() {
-        style.fg(color(theme.selection_fg))
+    if active {
+        style.add_modifier(Modifier::BOLD)
     } else {
         style
-    };
-    style.add_modifier(Modifier::BOLD)
+    }
 }
 
 /// Draws the sidebar in `area` (its columns, without the separator) and the separator
@@ -537,22 +551,29 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     }
     let muted = base.fg(color(theme.muted));
     let accent = base.fg(color(theme.accent));
+    // Foreground-only patches for the cells of a row, which keep the row's background.
+    let fg = |c| Style::new().fg(color(c));
+    let accent_fg = fg(theme.accent);
+    let hover_bg = color(theme.hover);
     let w = area.width;
     let put = |buf: &mut Buffer, y: u16, x: u16, text: &str, style: Style| {
         buf.set_stringn(area.x + x, y, text, usize::from(w.saturating_sub(x)), style);
     };
 
-    // The chips: the selection colours under the pointer.
+    // The chips: the hover background under the pointer.
     let style_of = |hover| {
         if app.hover == Some(hover) {
-            selection(theme, base)
+            base.bg(hover_bg).fg(color(theme.sidebar_fg))
         } else {
             muted
         }
     };
     // The title, cut before the `New space` chip, which it gives way to.
     let span = new_project_span(w);
-    let header = truncate(HEADER_TITLE, span.start.saturating_sub(2));
+    let header = truncate(
+        app.mirror.session_name().unwrap_or(""),
+        span.start.saturating_sub(2),
+    );
     put(buf, area.y, 1, &header, accent.add_modifier(Modifier::BOLD));
     let style = style_of(Hover::NewProject);
     buf.set_style(
@@ -566,6 +587,8 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         area.height
             .saturating_sub(HEADER_ROWS + bar_rows(area.height)),
     );
+    // The row a context menu belongs to keeps the hover background.
+    let menu_row = app.context.as_ref().and_then(|menu| menu.row(app));
     let selected = if app.sidebar_focus {
         app.selection
     } else {
@@ -580,16 +603,34 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         let y = area.y + HEADER_ROWS + u16::try_from(line).unwrap_or(0);
         let mut row_style = base;
         let is_selected = row.sel().is_some() && row.sel() == selected;
+        let active = matches!(*row, Row::Panel(_, id) if view.active_panel == Some(id));
+        // The selection in sidebar focus, else the active panel, has the band.
+        let band = is_selected || (active && !app.sidebar_focus);
+        let hovered = !band
+            && row.sel().is_some()
+            && (app.hover == row.sel().map(Hover::Row) || menu_row == row.sel());
+        let muted = if hovered {
+            fg(theme.sidebar_fg)
+        } else {
+            fg(theme.muted)
+        };
         // The accent and muted patches must not replace a custom selection colour.
         let keep = |style: Style| {
-            if is_selected && theme.selection_fg != Default::default() {
+            let none = Default::default();
+            if band && theme.selection_fg != none {
                 style.fg(color(theme.selection_fg))
+            } else if band && theme.selection_bg == none {
+                // Reversed: a colour would show as a block, so the text colour stays.
+                style.fg(color(theme.sidebar_fg))
             } else {
                 style
             }
         };
-        if is_selected {
+        if band {
             row_style = selection(theme, row_style);
+            buf.set_style(Rect::new(area.x, y, w, 1), row_style);
+        } else if hovered {
+            row_style = row_style.bg(hover_bg);
             buf.set_style(Rect::new(area.x, y, w, 1), row_style);
         }
         // The right-aligned count, if any, takes its room off the name.
@@ -656,21 +697,20 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 let Some((_, p)) = app.mirror.find_panel(id) else {
                     continue;
                 };
-                let active = view.active_panel == Some(id);
-                let mut style = panel_style(theme, base, is_selected, active);
-                if active {
-                    put(
-                        buf,
-                        y,
-                        0,
-                        &theme.glyphs.active,
-                        keep(row_style.patch(accent)),
-                    );
+                let mut style = panel_style(theme, base, band, active);
+                if hovered {
+                    style = style.bg(hover_bg);
                 }
                 // The status column: the panel's most urgent agent.
                 if let Some((text, glyph_style)) =
                     agent::glyph(agent::panel_status(p), app.spin, theme)
                 {
+                    // The muted `quiet` glyph turns to the sidebar text under the pointer.
+                    let glyph_style = if hovered && glyph_style.fg == Some(color(theme.muted)) {
+                        fg(theme.sidebar_fg)
+                    } else {
+                        glyph_style
+                    };
                     put(buf, y, 1, &text, keep(row_style.patch(glyph_style)));
                 }
                 let (count, count_w) = if p.terminals.len() > 1 {
@@ -700,15 +740,31 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 if let Some((icon, icon_style)) = icon {
                     put(buf, y, ICON_X, &icon, icon_style);
                 }
-                let name = truncate(&p.name, room);
+                // A kept terminal that exited and is alone in its panel: ` · exited <code>`
+                // after the name, which is cut first.
+                let exited = match p.terminals.as_slice() {
+                    [t] => t.exit_status.map(|code| format!(" · exited {code}")),
+                    _ => None,
+                }
+                .unwrap_or_default();
+                let name = truncate(&p.name, room.saturating_sub(width(&exited)));
                 put(buf, y, name_x, &name, style);
+                let exited = truncate(&exited, room.saturating_sub(width(&name)));
+                put(
+                    buf,
+                    y,
+                    name_x + width(&name),
+                    &exited,
+                    keep(row_style.patch(muted)),
+                );
+                let name_end = width(&name) + width(&exited);
                 if p.unseen {
                     put(
                         buf,
                         y,
-                        name_x + 1 + width(&name),
+                        name_x + 1 + name_end,
                         &theme.glyphs.unseen,
-                        keep(row_style.patch(accent)),
+                        keep(row_style.patch(accent_fg)),
                     );
                 }
                 if count_w > 0 {

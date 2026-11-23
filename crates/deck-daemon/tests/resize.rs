@@ -117,7 +117,7 @@ fn ratios(main: Option<u16>, cols: &[u16], rows: &[u16]) -> Ratios {
 #[tokio::test(flavor = "multi_thread")]
 async fn set_ratios_stores_them_and_resizes_the_ptys() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 3).await;
     let want = ratios(Some(700), &[1000], &[400, 600]);
     set(&mut c, want.clone()).await.unwrap();
@@ -132,7 +132,7 @@ async fn set_ratios_stores_them_and_resizes_the_ptys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_wrong_length_or_a_stale_count_is_refused() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 3).await;
     let id = panel(&c).id;
     let before = panel(&c).ratios;
@@ -182,7 +182,7 @@ async fn a_wrong_length_or_a_stale_count_is_refused() {
 #[tokio::test(flavor = "multi_thread")]
 async fn custom_ratios_survive_count_changes() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 2).await;
     set(&mut c, ratios(None, &[600, 400], &[1000]))
         .await
@@ -205,7 +205,7 @@ async fn custom_ratios_survive_count_changes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn untouched_defaults_follow_the_shape_rule() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 4).await;
     assert_eq!(panel(&c).ratios, Ratios::default_for(4));
     grow(&mut c, 5).await;
@@ -217,7 +217,7 @@ async fn untouched_defaults_follow_the_shape_rule() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_narrow_window_gets_a_clamped_copy_and_the_exact_sizes_return() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 200, 25).await;
+    let mut c = attach(&daemon, 200, 24).await;
     grow(&mut c, 2).await;
     let lopsided = ratios(None, &[900, 100], &[1000]);
     set(&mut c, lopsided.clone()).await.unwrap();

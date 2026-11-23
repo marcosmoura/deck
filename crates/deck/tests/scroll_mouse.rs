@@ -21,10 +21,10 @@ fn prefixed(h: &mut Harness, key: &str) {
 }
 
 fn rows(h: &Harness) -> Vec<String> {
-    h.screen_text().lines().map(str::to_string).collect()
+    h.screen_text().split('\n').map(str::to_string).collect()
 }
 
-/// `(offset, history)` of the `[offset/history]` in the status bar.
+/// `(offset, history)` of the `[offset/history]` in the floating bar.
 fn indicator(h: &Harness) -> Option<(u32, u32)> {
     let bar = rows(h).pop()?;
     let inner = &bar[bar.find('[')? + 1..];
@@ -33,6 +33,7 @@ fn indicator(h: &Harness) -> Option<(u32, u32)> {
     Some((offset.parse().ok()?, history.parse().ok()?))
 }
 
+/// The window's last row, where the floating bar shows.
 fn status(h: &Harness) -> String {
     rows(h).pop().unwrap_or_default()
 }
@@ -62,7 +63,7 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
     h.send_keys(PAGE_UP);
     wait_until("the indicator", TIMEOUT, || indicator(&h).is_some());
     let (offset, history) = indicator(&h).unwrap();
-    assert_eq!(offset, 23, "one page of the 23-row terminal");
+    assert_eq!(offset, 24, "one page of the 24-row terminal");
     assert!(history > 450, "{history}");
     h.capture("scrolled");
     let screen = rows(&h);
@@ -73,9 +74,9 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
         "{}",
         h.screen_text()
     );
-    assert!(status(&h).starts_with(" SCROLL "), "{}", status(&h));
+    assert!(status(&h).contains(" SCROLL "), "{}", status(&h));
     assert!(
-        status(&h).ends_with("q exit  g top  G bottom"),
+        status(&h).contains("q exit  g top  G bottom"),
         "{}",
         status(&h)
     );
@@ -89,7 +90,7 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
     h.send_keys("G");
     wait_until("the bottom", TIMEOUT, || indicator(&h).is_none());
     h.wait_for_row_start("500", TIMEOUT);
-    assert!(status(&h).starts_with(" SCROLL "), "{}", status(&h));
+    assert!(status(&h).contains(" SCROLL "), "{}", status(&h));
     h.capture("bottom");
 
     // g goes to the top; keys do not reach the shell.
@@ -104,7 +105,6 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
     });
     h.wait_for_row_start("500", TIMEOUT);
     assert!(indicator(&h).is_none());
-    assert!(status(&h).starts_with(" main "), "{}", status(&h));
     // What was typed in scroll mode never reached the shell.
     h.send_keys("echo done\r");
     h.wait_for_row_start("done", TIMEOUT);
@@ -126,15 +126,15 @@ fn the_prefix_still_detaches_inside_scroll_mode() {
 fn the_wheel_scrolls_a_shell_with_history_and_typing_returns_to_the_bottom() {
     let mut h = with_history();
     wheel(&mut h, true);
-    wait_until("the indicator", TIMEOUT, || indicator(&h).is_some());
-    assert_eq!(indicator(&h).unwrap().0, 3);
-    // The wheel does not enter scroll mode.
+    // Three lines back: the last output line and the prompt are off the screen.
+    wait_until("the screen to scroll", TIMEOUT, || {
+        !rows(&h).iter().any(|r| r.starts_with("500"))
+    });
+    // The wheel does not enter scroll mode, so no bar shows.
     assert!(!status(&h).contains("SCROLL"), "{}", status(&h));
-    assert!(status(&h).starts_with(" main "), "{}", status(&h));
     h.capture("wheel");
 
     h.send_keys("Q");
-    wait_until("the bottom", TIMEOUT, || indicator(&h).is_none());
     h.wait_for_text("$ Q", TIMEOUT);
 }
 
@@ -161,7 +161,7 @@ fn background_output_grows_the_history_while_scrolled_back() {
     wait_until("the history to grow", TIMEOUT, || {
         indicator(&h).is_some_and(|(offset, history)| offset > 0 && history >= before + 20)
     });
-    assert!(status(&h).starts_with(" SCROLL "), "{}", status(&h));
+    assert!(status(&h).contains(" SCROLL "), "{}", status(&h));
     h.capture("history-grew");
 }
 

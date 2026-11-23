@@ -220,7 +220,7 @@ impl App {
             return;
         };
         let question = format!(
-            "Close panel \"{}\" and its {}? (y/n)",
+            "Close panel \"{}\" and its {}?",
             p.name,
             if p.terminals.len() == 1 {
                 "terminal".to_string()
@@ -232,15 +232,17 @@ impl App {
         self.modal = Some(Modal::Confirm(Confirm { target, question }));
     }
 
-    /// Asks before closing the focused terminal of the active panel; a kept terminal whose
-    /// process already ended closes at once.
-    pub(crate) fn confirm_close_terminal(&mut self, now: Instant) -> Vec<Out> {
-        let found = self.mirror.active_panel().and_then(|panel| {
-            let focused = panel.focused_terminal?;
-            let index = panel.terminals.iter().position(|t| t.id == focused)?;
-            let exited = panel.terminals.get(index)?.exit_status.is_some();
-            Some((focused, index, exited))
-        });
+    /// Asks before closing a terminal; a kept terminal whose process already ended closes at
+    /// once.
+    pub(crate) fn confirm_close_terminal(
+        &mut self,
+        terminal: TerminalId,
+        now: Instant,
+    ) -> Vec<Out> {
+        let found = self
+            .mirror
+            .find_terminal(terminal)
+            .map(|(_, index, t)| (terminal, index, t.exit_status.is_some()));
         let Some((focused, index, exited)) = found else {
             self.set_flash("no terminal to close".into(), now, false);
             return Vec::new();
@@ -248,7 +250,7 @@ impl App {
         if exited {
             return vec![self.act(Act::CloseTerminal { terminal: focused }, None)];
         }
-        let question = format!("Close terminal {}? (y/n)", index + 1);
+        let question = format!("Close terminal {}?", index + 1);
         let target = Target::Terminal(focused, index + 1);
         self.modal = Some(Modal::Confirm(Confirm { target, question }));
         Vec::new()
@@ -260,7 +262,7 @@ impl App {
         };
         let terminals: usize = p.panels.iter().map(|x| x.terminals.len()).sum();
         let question = format!(
-            "Close space \"{}\" and its {}? (y/n)",
+            "Close space \"{}\" and its {}?",
             p.name,
             plural(terminals, "terminal", "terminals")
         );

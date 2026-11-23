@@ -788,7 +788,6 @@ mod tests {
         for name in [
             "expanded",
             "collapsed",
-            "active",
             "spinner",
             "waiting",
             "idle",

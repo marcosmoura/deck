@@ -11,13 +11,6 @@ use support::{Harness, TIMEOUT, TtyMode, wait_until};
 
 const SIZE: (u16, u16) = (80, 24);
 const DECK: &str = env!("CARGO_BIN_EXE_deck");
-/// The status bar's hint for the default prefix and `detach`.
-const HINT: &str = if cfg!(target_os = "macos") {
-    "⌥Space ? help  d detach"
-} else {
-    "M-Space ? help  d detach"
-};
-
 /// `deck` in an 80×24 terminal, once its first prompt is inside the frame.
 fn attached() -> Harness {
     let h = Harness::deck(SIZE);
@@ -32,7 +25,7 @@ fn prefixed(h: &mut Harness, key: &str) {
 }
 
 fn rows(h: &Harness) -> Vec<String> {
-    h.screen_text().lines().map(str::to_string).collect()
+    h.screen_text().split('\n').map(str::to_string).collect()
 }
 
 #[expect(clippy::panic, reason = "a missing row fails the integration test")]
@@ -50,17 +43,40 @@ fn second_client(first: &Harness, size: (u16, u16)) -> Harness {
 }
 
 #[test]
-fn the_frame_and_status_bar_appear() {
+fn the_frame_has_no_status_row() {
     let h = attached();
-    h.wait_for_text(HINT, TIMEOUT);
     let path = h.capture("attached");
     let rows = rows(&h);
-    // A single terminal fills the panel area: no border, no title.
+    // A single terminal fills the window: no border, no title, no bar while idle.
     assert!(rows[0].starts_with('$'), "{}", rows[0]);
     assert!(!h.screen_text().contains('╭'), "{}", h.screen_text());
-    assert!(rows[23].starts_with(" main "), "{}", rows[23]);
-    assert!(rows[23].ends_with(HINT), "{}", rows[23]);
+    assert!(!h.screen_text().contains("PREFIX"), "{}", h.screen_text());
     assert!(path.is_file());
+}
+
+#[test]
+fn the_prefix_bar_floats_over_the_last_row_and_esc_brings_the_terminal_back() {
+    let mut h = attached();
+    // Fill the screen so the last row has the terminal's own text.
+    h.send_keys("clear; for i in $(seq 1 30); do echo line$i; done\r");
+    h.wait_for_text("line30", TIMEOUT);
+    wait_until("the last row to hold the shell's text", TIMEOUT, || {
+        rows(&h).get(23).is_some_and(|r| r.contains('$'))
+    });
+    h.send_bytes(b"\x1b ");
+    wait_until("the bar", TIMEOUT, || {
+        rows(&h)
+            .get(23)
+            .is_some_and(|r| r.contains("PREFIX") && r.contains("? help"))
+    });
+    h.capture("prefix-bar");
+    h.send_bytes(b"\x1b");
+    wait_until("the terminal's text back on the last row", TIMEOUT, || {
+        rows(&h)
+            .get(23)
+            .is_some_and(|r| !r.contains("PREFIX") && r.contains('$'))
+    });
+    h.capture("prefix-bar-gone");
 }
 
 #[test]
@@ -93,31 +109,27 @@ fn detaching_keeps_the_shell_and_deck_comes_back_to_it() {
     let again = second_client(&h, SIZE);
     again.wait_for_row_start("hello", TIMEOUT);
     again.capture("reattached");
-    assert!(again.screen_text().contains(HINT));
 }
 
 #[test]
 fn the_shell_follows_the_window_size() {
     let mut h = attached();
     h.send_keys("stty size\r");
-    h.wait_for_text("23 80", TIMEOUT);
+    h.wait_for_text("24 80", TIMEOUT);
     h.resize(100, 30);
-    wait_until("the status bar at the new size", TIMEOUT, || {
-        rows(&h).get(29).is_some_and(|r| r.starts_with(" main "))
-    });
+    wait_until("the new size", TIMEOUT, || rows(&h).len() == 30);
     // The shell follows once the daemon has resized it.
     let deadline = std::time::Instant::now() + TIMEOUT;
     loop {
         h.send_keys("clear; stty size\r");
         std::thread::sleep(Duration::from_millis(200));
-        if h.screen_text().contains("29 100") {
+        if h.screen_text().contains("30 100") {
             break;
         }
         assert!(std::time::Instant::now() < deadline, "{}", h.screen_text());
     }
     let rows = rows(&h);
     assert_eq!(rows.len(), 30);
-    assert!(rows[29].starts_with(" main "), "{}", rows[29]);
 }
 
 #[test]
@@ -215,8 +227,10 @@ fn the_prefix_badge_shows_until_the_next_key() {
         !h.screen_text().contains("PREFIX")
     });
     h.wait_for_text("no binding for z", TIMEOUT);
-    // The message goes after two seconds and the hints return.
-    h.wait_for_text(HINT, Duration::from_secs(6));
+    // The message goes after two seconds.
+    wait_until("the message to go", Duration::from_secs(6), || {
+        !h.screen_text().contains("no binding for z")
+    });
 }
 
 #[test]
@@ -269,7 +283,7 @@ fn sigterm_restores_the_outer_terminal() {
 fn a_tiny_window_shows_only_a_message_and_the_shell_keeps_its_size() {
     let mut h = attached();
     h.send_keys("stty size\r");
-    h.wait_for_text("23 80", TIMEOUT);
+    h.wait_for_text("24 80", TIMEOUT);
     h.resize(15, 4);
     h.wait_for_text("too small", TIMEOUT);
     let text = h.screen_text();
@@ -285,12 +299,12 @@ fn a_tiny_window_shows_only_a_message_and_the_shell_keeps_its_size() {
     wait_until("the size file", TIMEOUT, || {
         fs::read_to_string(&file).is_ok_and(|t| !t.trim().is_empty())
     });
-    assert_eq!(fs::read_to_string(&file).unwrap().trim(), "23 80");
+    assert_eq!(fs::read_to_string(&file).unwrap().trim(), "24 80");
     h.resize(80, 24);
-    h.wait_for_text(HINT, TIMEOUT);
+    h.wait_for_text("$", TIMEOUT);
     h.send_keys("clear; stty size\r");
     wait_until("the size back", TIMEOUT, || {
-        rows(&h).iter().any(|r| r.starts_with("23 80"))
+        rows(&h).iter().any(|r| r.starts_with("24 80"))
     });
     prefixed(&mut h, "d");
     assert!(h.wait_for_exit(TIMEOUT).success());
@@ -460,15 +474,14 @@ fn a_smaller_client_draws_the_larger_layout_cropped() {
     let mut big = attached();
     let small = second_client(&big, (40, 12));
     small.wait_for_text("$", TIMEOUT);
-    // The big client types, so its size is the one the shell has: 23 rows of 80 columns,
+    // The big client types, so its size is the one the shell has: 24 rows of 80 columns,
     // drawn cropped in the 40x12 window.
     big.send_keys("echo cropped; stty size\r");
-    small.wait_for_row_start("23 80", TIMEOUT);
+    small.wait_for_row_start("24 80", TIMEOUT);
     small.capture("cropped");
     let small_rows = rows(&small);
     assert_eq!(small_rows.len(), 12);
-    assert!(small_rows[11].starts_with(" main "), "{}", small_rows[11]);
     // The big client still has its own, full layout.
-    big.wait_for_row_start("23 80", TIMEOUT);
+    big.wait_for_row_start("24 80", TIMEOUT);
     assert_eq!(rows(&big).len(), 24);
 }

@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -274,7 +274,7 @@ pub enum ServerMsg {
     ActionResult(Result<(), ActionError>),
     /// The daemon reloaded its config.
     Config(Box<Config>),
-    /// A message for the user, shown in the status bar.
+    /// A message for the user, shown in the floating bar.
     Notice {
         level: NoticeLevel,
         text: String,

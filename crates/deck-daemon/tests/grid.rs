@@ -106,7 +106,7 @@ async fn assert_sizes(c: &mut Client, viewport: (u16, u16), tag: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_pty_changed_behind_the_daemon_returns_to_the_layout_size_at_the_next_pass() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     // Past the rechecks that follow the sizing at attach.
     tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
     let id = ids(&c)[0];
@@ -141,7 +141,7 @@ async fn a_pty_changed_behind_the_daemon_returns_to_the_layout_size_at_the_next_
 #[tokio::test(flavor = "multi_thread")]
 async fn a_pty_changed_just_after_a_resize_is_put_back_by_the_rechecks() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     let id = ids(&c)[0];
     c.send(&ClientMsg::Input {
         terminal: id,
@@ -160,7 +160,7 @@ async fn a_pty_changed_just_after_a_resize_is_put_back_by_the_rechecks() {
 #[tokio::test(flavor = "multi_thread")]
 async fn adding_terminals_sizes_every_pty_from_its_rect() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     assert_eq!(panel(&c).ratios, Ratios::default_for(1));
     assert_sizes(&mut c, (100, 24), "A").await;
 
@@ -220,7 +220,7 @@ async fn a_new_terminal_starts_in_the_projects_root() {
 #[tokio::test(flavor = "multi_thread")]
 async fn focus_moves_by_direction_and_typing_reaches_only_the_focused_terminal() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 3).await;
     let t = ids(&c);
     let focus = |c: &Client| panel(c).focused_terminal.unwrap();
@@ -264,7 +264,7 @@ async fn focus_moves_by_direction_and_typing_reaches_only_the_focused_terminal()
 #[tokio::test(flavor = "multi_thread")]
 async fn closing_a_terminal_reflows_the_rest_and_moves_focus() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 3).await;
     let t = ids(&c);
     c.action(Action::FocusTerminal { terminal: t[1] })
@@ -304,7 +304,7 @@ async fn closing_a_terminal_reflows_the_rest_and_moves_focus() {
 #[tokio::test(flavor = "multi_thread")]
 async fn exit_in_one_of_three_reflows_to_two_side_by_side() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 3).await;
     let t = ids(&c);
     c.send(&ClientMsg::Input {
@@ -338,7 +338,7 @@ async fn a_window_too_small_for_another_terminal_refuses_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_clamped_copy_follows_the_window_and_the_stored_ratios_stay() {
     let daemon = TestDaemon::start().await;
-    let mut c = attach(&daemon, 100, 25).await;
+    let mut c = attach(&daemon, 100, 24).await;
     grow(&mut c, 5).await;
     let stored = panel(&c).ratios;
     assert_eq!(stored, Ratios::default_for(5));
@@ -384,7 +384,7 @@ fn expected_default(cols: u16) -> Vec<(u16, u16)> {
 #[tokio::test(flavor = "multi_thread")]
 async fn two_clients_share_focus_and_a_smaller_one_leaves_the_sizes_alone_until_it_types() {
     let daemon = TestDaemon::start().await;
-    let mut a = attach(&daemon, 100, 25).await;
+    let mut a = attach(&daemon, 100, 24).await;
     grow(&mut a, 3).await;
     let mut b = Client::attach(
         &daemon.paths.socket,
@@ -392,7 +392,7 @@ async fn two_clients_share_focus_and_a_smaller_one_leaves_the_sizes_alone_until_
             session: None,
             create: false,
             cols: 60,
-            rows: 15,
+            rows: 14,
             ..Attach::default()
         },
     )

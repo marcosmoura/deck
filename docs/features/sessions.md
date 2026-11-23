@@ -10,7 +10,7 @@ A session is a set of terminals that lives in the deck daemon, with or without a
 - The first `deck` command starts the daemon when it is not running.
 - Attaching is refused inside deck (`DECK` is set) and when stdin or stdout is not a terminal.
 - The shell is the `shell` of the config, else `$SHELL`, else `/bin/sh`, started with `shell_args` (default `["-l"]`, a login shell). It gets the environment of the `deck` that created the session.
-- The shell's size follows the window: the terminal fills the screen minus the sidebar and the bottom status-bar row, with no border. The status bar shows `space › <icon> <panel>` after the session name, muted, and cut with `…` when it does not fit beside the hints; a panel you named by hand also shows ` · <title>` (the terminal's OSC title) when it differs from the name; both are left out when the panel area is empty (see [sidebar](sidebar.md#the-sidebar)). When the window is smaller than 20 columns or 5 rows, deck shows only `deck: window too small` and keeps the shell's last size.
+- The shell's size follows the window: the terminal fills the screen minus the sidebar, every row of the window, with no border; the [floating bar](keys.md#the-floating-bar) covers its last row only while it shows. The session's name is in the sidebar header (see [sidebar](sidebar.md#the-sidebar)). When the window is smaller than 20 columns or 5 rows, deck shows only `deck: window too small` and keeps the shell's last size.
 - Several clients can attach to one session. The shell follows the client that typed or resized last; the others draw its layout cropped or padded to their window.
 
 ## Switching sessions
@@ -30,8 +30,8 @@ A session is a set of terminals that lives in the deck daemon, with or without a
 
 - It lists every session, most recently attached first, with its space and terminal counts and `attached` when another client is attached. `●` marks the session you are in. The overlay is 60% of the width (at least 40 columns) and at most 70% of the height; the list scrolls.
 - Typing filters by name (substring, case-insensitive). `Up`/`Down` or `Ctrl+p`/`Ctrl+n` move the selection, `Enter` switches, `Esc` closes. These keys are fixed, not under `[keys]`.
-- `Ctrl+o` creates a session named like the filter (with an empty filter it asks `New session:`; empty answers use the default name) whose space is the directory deck was started in, and switches to it. `Ctrl+r` renames the selected session and `Ctrl+x` kills it after `Kill session "<name>" and its N terminals? (y/n)`. A refused name shows the daemon's message and reopens the prompt.
-- `Option+Space $` asks `Rename session:` for the session you are in; the status bar follows at once.
+- `Ctrl+o` creates a session named like the filter (with an empty filter it asks `New session`; empty answers use the default name) whose space is the directory deck was started in, and switches to it. `Ctrl+r` renames the selected session and `Ctrl+x` kills it after `Kill session "<name>" and its N terminals?`, a dialog over the picker with `y yes  n no`. The prompts are centered dialogs too. A refused name shows the daemon's message in the dialog and reopens the prompt.
+- `Option+Space $` opens the `Rename session` dialog for the session you are in; the sidebar header follows at once.
 
 Switching keeps the same `deck` process and your terminal's screen: it leaves the old session and attaches to the new one without restoring the main screen. The sidebar's visibility and width carry over; the sidebar selection and open dialogs do not. When the session you are in is killed, from the picker or by `deck kill-session`, deck switches to the session attached most recently; when there is none it exits with `[session <name> ended]`.
 

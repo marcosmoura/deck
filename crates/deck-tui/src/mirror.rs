@@ -95,16 +95,6 @@ impl Mirror {
         self.view.as_ref().map(|v| v.name.as_str())
     }
 
-    /// The name of the active project.
-    pub fn project_name(&self) -> Option<&str> {
-        let view = self.view.as_ref()?;
-        let id = view.active_project?;
-        view.projects
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| p.name.as_str())
-    }
-
     pub fn find_project(&self, id: ProjectId) -> Option<&ProjectView> {
         self.view.as_ref()?.projects.iter().find(|p| p.id == id)
     }
@@ -115,6 +105,16 @@ impl Mirror {
             .projects
             .iter()
             .find_map(|p| Some((p, p.panels.iter().find(|x| x.id == id)?)))
+    }
+
+    /// The panel a terminal is in, the terminal's 0-based index in it and its view.
+    pub fn find_terminal(&self, id: TerminalId) -> Option<(&PanelView, usize, &TerminalView)> {
+        self.view.as_ref()?.projects.iter().find_map(|project| {
+            project.panels.iter().find_map(|panel| {
+                let i = panel.terminals.iter().position(|t| t.id == id)?;
+                Some((panel, i, panel.terminals.get(i)?))
+            })
+        })
     }
 
     pub fn active_project(&self) -> Option<&ProjectView> {
@@ -233,7 +233,7 @@ pub(crate) mod tests {
             name: "main".into(),
             active_project: Some(ProjectId(1)),
             active_panel: Some(PanelId(3)),
-            layout_viewport: Some((71, 23)),
+            layout_viewport: Some((71, 24)),
             attached_clients: 0,
             projects: vec![
                 project(
@@ -264,7 +264,7 @@ pub(crate) mod tests {
             name: "main".into(),
             active_project: Some(ProjectId(2)),
             active_panel: Some(PanelId(3)),
-            layout_viewport: Some((80, 23)),
+            layout_viewport: Some((80, 24)),
             attached_clients: 0,
             projects: vec![ProjectView {
                 id: ProjectId(2),
@@ -343,7 +343,6 @@ pub(crate) mod tests {
         assert_eq!(m.focused_id(), None);
         m.set_view(view(Some("vim")));
         assert_eq!(m.session_name(), Some("main"));
-        assert_eq!(m.project_name(), Some("proj"));
         assert_eq!(m.focused_id(), Some(TerminalId(4)));
         assert_eq!(m.focused().unwrap().title.as_deref(), Some("vim"));
     }

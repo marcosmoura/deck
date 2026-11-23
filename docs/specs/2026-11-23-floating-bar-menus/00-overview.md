@@ -76,10 +76,10 @@ Asked on 23 Nov 2026:
 
 | Sub-spec                  | Type      | Crate                                                  | Summary                                                                                                | Depends | Status |
 | ------------------------- | --------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | ------- | ------ |
-| [01](01-dialogs.md)       | shippable | deck-tui, deck (tests)                                 | Prompts and confirmations become centered dialogs; the status bar stays                                | —       | todo   |
-| [02](02-floating-bar.md)  | shippable | deck-core, deck-tui, deck-daemon (tests), deck (tests) | Status bar removed, full-height layout, floating bar for modes and flashes, session name in the header | 01      | todo   |
-| [03](03-sidebar-hover.md) | shippable | deck-core, deck-tui, deck (tests)                      | Active row and selection as a background, `hover` role, hover on rows and chips                        | 02      | todo   |
-| [04](04-context-menus.md) | shippable | deck-tui, deck (tests)                                 | Right-click menus on terminals, panel rows and space rows; the New menu at the click                   | 03      | todo   |
+| [01](01-dialogs.md)       | shippable | deck-tui, deck (tests)                                 | Prompts and confirmations become centered dialogs; the status bar stays                                | —       | done   |
+| [02](02-floating-bar.md)  | shippable | deck-core, deck-tui, deck-daemon (tests), deck (tests) | Status bar removed, full-height layout, floating bar for modes and flashes, session name in the header | 01      | done   |
+| [03](03-sidebar-hover.md) | shippable | deck-core, deck-tui, deck (tests)                      | Active row and selection as a background, `hover` role, hover on rows and chips                        | 02      | done   |
+| [04](04-context-menus.md) | shippable | deck-tui, deck (tests)                                 | Right-click menus on terminals, panel rows and space rows; the New menu at the click                   | 03      | done   |
 
 All four change `deck-tui`'s drawing and mouse handling, so they run in order.
 

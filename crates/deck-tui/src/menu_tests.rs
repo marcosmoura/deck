@@ -108,8 +108,8 @@ fn text(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
     (from..to).map(|x| buf[(x, y)].symbol()).collect()
 }
 
-/// The bottom bar of the 24-row window is on row 22; its `+ New` chip is on columns 1..8.
-const BAR: u16 = 22;
+/// The bottom bar of the 24-row window is on row 23; its `+ New` chip is on columns 1..8.
+const BAR: u16 = 23;
 const NEW_CHIP: u16 = 3;
 
 /// The menu of `budget` (project 2), opened by selecting it in sidebar focus and clicking
@@ -141,7 +141,7 @@ fn project_rows_have_no_button_and_keep_their_counts_under_the_pointer() {
     let mut a = app_with(&config(), (100, 24), view);
     assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-multiplexer   1 │");
     moved(&mut a, 10, 2);
-    assert_eq!(a.hover, None);
+    assert_eq!(a.hover, Some(Hover::Row(Sel::Project(ProjectId(1)))));
     assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-multiplexer   1 │");
     // Selecting it in sidebar focus does not add a button either.
     prefix(&mut a);
@@ -153,7 +153,7 @@ fn project_rows_have_no_button_and_keep_their_counts_under_the_pointer() {
 }
 
 #[test]
-fn the_new_chip_is_selection_coloured_under_the_pointer_and_muted_otherwise() {
+fn the_new_chip_has_the_hover_background_under_the_pointer_and_is_muted_otherwise() {
     let mut a = app();
     let buf = buffer(&a);
     assert_eq!(text(&buf, BAR, 0, 29), "  + New            Restore  │");
@@ -162,9 +162,8 @@ fn the_new_chip_is_selection_coloured_under_the_pointer_and_muted_otherwise() {
     assert_eq!(a.hover, Some(Hover::New));
     let buf = buffer(&a);
     let cell = &buf[(NEW_CHIP, BAR)];
-    let reversed = cell.modifier.contains(Modifier::REVERSED);
-    let themed = cell.bg == color(a.theme.selection_bg) && cell.fg == color(a.theme.selection_fg);
-    assert!(reversed || themed, "{cell:?}");
+    assert_eq!(cell.bg, color(a.theme.hover));
+    assert_eq!(cell.fg, color(a.theme.sidebar_fg));
     // Moving along the chip does not redraw; leaving it does.
     assert!(a.take_dirty());
     moved(&mut a, NEW_CHIP + 1, BAR);
@@ -216,7 +215,7 @@ fn without_a_project_the_new_chip_flashes_no_project() {
 fn the_menu_sits_above_the_bottom_bar_with_its_icons_and_no_gutter() {
     let a = open_by_click();
     let buf = buffer(&a);
-    let rows: Vec<String> = (15..23).map(|y| text(&buf, y, 0, 22)).collect();
+    let rows: Vec<String> = (16..24).map(|y| text(&buf, y, 0, 22)).collect();
     assert_eq!(
         rows,
         [
@@ -236,15 +235,15 @@ fn the_menu_sits_above_the_bottom_bar_with_its_icons_and_no_gutter() {
 fn the_highlighted_row_uses_the_selection_colours_and_the_hint_is_muted() {
     let a = open_by_click();
     let buf = buffer(&a);
-    let on = &buf[(10, 16)];
+    let on = &buf[(10, 17)];
     let reversed = on.modifier.contains(Modifier::REVERSED);
     let themed = on.bg == color(a.theme.selection_bg) && on.fg == color(a.theme.selection_fg);
     assert!(reversed || themed);
     // The highlight covers the icon.
-    assert_eq!(buf[(2, 16)].modifier, on.modifier);
-    assert_eq!(buf[(10, 20)].fg, color(a.theme.muted));
-    assert_eq!(buf[(10, 15)].fg, color(a.theme.border));
-    assert_eq!(buf[(0, 17)].fg, color(a.theme.border));
+    assert_eq!(buf[(2, 17)].modifier, on.modifier);
+    assert_eq!(buf[(10, 21)].fg, color(a.theme.muted));
+    assert_eq!(buf[(10, 16)].fg, color(a.theme.border));
+    assert_eq!(buf[(0, 18)].fg, color(a.theme.border));
 }
 
 #[test]
@@ -281,11 +280,11 @@ fn the_menu_sits_right_above_the_bottom_bar_whatever_the_window_height() {
     let mut a = app_with(&config(), (100, 16), mockup());
     a.open_new_menu(ProjectId(1));
     let rect = a.menu_rect().unwrap();
-    // 15 rows above the status bar: the bar is row 14, the menu's last row is 13.
-    assert_eq!((rect.x, rect.y, rect.y + rect.height - 1), (0, 7, 13));
+    // 16 rows: the sidebar's bar is row 15, the menu's last row is 14.
+    assert_eq!((rect.x, rect.y, rect.y + rect.height - 1), (0, 8, 14));
     let buf = buffer(&a);
-    assert!(text(&buf, 13, 0, 5).starts_with('╰'));
-    assert!(text(&buf, 7, 0, 5).starts_with('╭'));
+    assert!(text(&buf, 14, 0, 5).starts_with('╰'));
+    assert!(text(&buf, 8, 0, 5).starts_with('╭'));
 }
 
 #[test]
@@ -301,7 +300,7 @@ fn the_menu_stays_inside_a_small_window_and_over_a_narrow_sidebar() {
             a.open_new_menu(ProjectId(project));
             let rect = a.menu_rect().unwrap();
             assert!(rect.x + rect.width <= size.0, "{size:?} {rect:?}");
-            assert!(rect.y + rect.height < size.1, "{size:?} {rect:?}");
+            assert!(rect.y + rect.height <= size.1, "{size:?} {rect:?}");
             buffer(&a);
         }
     }
@@ -313,7 +312,7 @@ fn the_menu_stays_inside_a_small_window_and_over_a_narrow_sidebar() {
     let mut a = app_with(&config, (100, 24), mockup());
     a.open_new_menu(ProjectId(2));
     let rect = a.menu_rect().unwrap();
-    assert_eq!((rect.x, rect.y, rect.width), (0, 15, 22));
+    assert_eq!((rect.x, rect.y, rect.width), (0, 16, 22));
 }
 
 #[test]
@@ -371,12 +370,8 @@ fn the_sidebar_hints_list_the_menu() {
     press(&mut a, ct::KeyCode::Tab);
     let buf = buffer(&a);
     let bar = text(&buf, 23, 0, 100);
-    assert!(
-        bar.trim_end()
-            .ends_with("↑↓ move  ⏎ open  ←→ fold  c new  n menu  r rename  x close  esc back"),
-        "{bar}"
-    );
-    assert!(SIDEBAR_HINTS.contains("n menu"));
+    assert!(bar.contains("SIDEBAR"), "{bar}");
+    assert!(SIDEBAR_HINTS.contains(&("n", "menu")));
 }
 
 #[test]
@@ -500,17 +495,17 @@ fn choosing_on_a_folded_project_also_unfolds_it() {
 #[test]
 fn hover_moves_the_highlight_and_a_click_on_an_item_chooses_it() {
     let mut a = open_by_click();
-    moved(&mut a, 12, 19);
-    assert_eq!(a.menu.as_ref().unwrap().selected, 3);
-    assert!(a.take_dirty());
-    moved(&mut a, 13, 19);
-    assert!(!a.take_dirty());
-    // The border and the hint row are not items.
-    moved(&mut a, 12, 15);
     moved(&mut a, 12, 20);
     assert_eq!(a.menu.as_ref().unwrap().selected, 3);
+    assert!(a.take_dirty());
+    moved(&mut a, 13, 20);
+    assert!(!a.take_dirty());
+    // The border and the hint row are not items.
+    moved(&mut a, 12, 16);
+    moved(&mut a, 12, 22);
+    assert_eq!(a.menu.as_ref().unwrap().selected, 3);
     assert_eq!(
-        down(&mut a, 12, 18),
+        down(&mut a, 12, 19),
         [act(Act::NewPanelWith {
             project: ProjectId(2),
             launch: PanelLaunch::Agent(AgentKind::OpenCode)
@@ -550,8 +545,8 @@ fn a_click_outside_closes_the_menu_and_is_not_passed_on() {
     assert!(a.menu.is_none());
     // A click on its border or hint row keeps it.
     let mut a = open_by_click();
-    assert!(click(&mut a, 12, 21).is_empty());
-    assert!(click(&mut a, 6, 20).is_empty());
+    assert!(click(&mut a, 12, 22).is_empty());
+    assert!(click(&mut a, 6, 21).is_empty());
     assert!(a.menu.is_some());
 }
 
@@ -655,13 +650,13 @@ fn logo_at(buf: &Buffer, x: u16, y: u16) -> Option<u32> {
 fn with_images_the_menu_items_draw_logos_sent_before_the_frame() {
     let mut a = menu_with_images();
     // Not sent yet: text icons.
-    assert_eq!(text(&buffer(&a), 17, 2, 4), "✻ ");
+    assert_eq!(text(&buffer(&a), 18, 2, 4), "✻ ");
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
     let buf = buffer(&a);
     // Terminal keeps its glyph; the three agents have logos at columns 2 and 3.
-    assert_eq!(text(&buf, 16, 2, 4), "❯ ");
-    let ids: Vec<u32> = (17..20)
+    assert_eq!(text(&buf, 17, 2, 4), "❯ ");
+    let ids: Vec<u32> = (18..21)
         .map(|y| logo_at(&buf, 2, y).unwrap_or_else(|| panic!("no logo on row {y}")))
         .collect();
     assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
@@ -670,8 +665,8 @@ fn with_images_the_menu_items_draw_logos_sent_before_the_frame() {
         assert!(images.order.iter().any(|(i, _)| i == id), "{id:x}");
     }
     // Labels and digits sit where they did.
-    assert_eq!(text(&buf, 17, 5, 11), "Claude");
-    assert_eq!(text(&buf, 17, 19, 20), "2");
+    assert_eq!(text(&buf, 18, 5, 11), "Claude");
+    assert_eq!(text(&buf, 18, 19, 20), "2");
 }
 
 #[test]
@@ -681,7 +676,7 @@ fn the_highlighted_logo_is_sent_in_the_selection_colour() {
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
     let buf = buffer(&a);
-    let id = logo_at(&buf, 2, 17).expect("logo on the highlighted row");
+    let id = logo_at(&buf, 2, 18).expect("logo on the highlighted row");
     let (_, pair) = *a
         .images
         .as_ref()
@@ -699,7 +694,7 @@ fn the_highlighted_logo_is_sent_in_the_selection_colour() {
         .0;
     assert_eq!(pair.rgb, shown);
     // An unselected logo is sent in another colour.
-    let other = logo_at(&buf, 2, 18).unwrap();
+    let other = logo_at(&buf, 2, 19).unwrap();
     let (_, other_pair) = *a
         .images
         .as_ref()
@@ -717,6 +712,6 @@ fn icons_none_menu_has_no_icon_column() {
     let mut a = app_with(&config, (100, 24), mockup());
     a.open_new_menu(ProjectId(2));
     let buf = buffer(&a);
-    assert_eq!(text(&buf, 16, 0, 22), "│ Terminal         1 │");
-    assert_eq!(text(&buf, 17, 0, 22), "│ Claude           2 │");
+    assert_eq!(text(&buf, 17, 0, 22), "│ Terminal         1 │");
+    assert_eq!(text(&buf, 18, 0, 22), "│ Claude           2 │");
 }

@@ -271,7 +271,7 @@ fn placeholder_cell(buf: &Buffer, x: u16, y: u16) -> Option<u32> {
 }
 
 #[test]
-fn agent_rows_and_the_status_bar_draw_placeholders() {
+fn agent_rows_draw_placeholders() {
     let mut a = ghostty("");
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
@@ -289,17 +289,10 @@ fn agent_rows_and_the_status_bar_draw_placeholders() {
     assert_eq!(buf[(3, 4)].symbol(), "✎");
     assert_eq!(buf[(3, 7)].symbol(), "±");
     // The names did not move.
-    assert!(rows[3].starts_with("▌⠋ "), "{}", rows[3]);
+    assert!(rows[3].starts_with(" ⠋ "), "{}", rows[3]);
     assert_eq!(buf[(6, 3)].symbol(), "F");
-    // The status bar: ` main  terminal-multiplexer › ⠋ <icon> Fix login bug`.
-    let at = (0..buf.area.width)
-        .find(|&x| placeholder_cell(&buf, x, 23).is_some())
-        .expect("placeholder in the status bar");
-    assert_eq!(buf[(at + 3, 23)].symbol(), "F");
-    let bar = placeholder_cell(&buf, at, 23).unwrap();
-    assert_ne!(bar, active);
     // Every id drawn was sent.
-    for id in [active, inactive, bar] {
+    for id in [active, inactive] {
         assert!((0xDEC001..0xDEC001 + 6).contains(&id), "{id:x}");
         assert!(
             a.images
@@ -318,7 +311,7 @@ fn a_pair_not_sent_is_drawn_as_text() {
     // `send_images` was not called: the draw never shows an image the terminal lacks.
     let a = ghostty("");
     let (_, rows) = render(&a);
-    assert!(rows[3].starts_with("▌⠋ ✻  "), "{}", rows[3]);
+    assert!(rows[3].starts_with(" ⠋ ✻  "), "{}", rows[3]);
 }
 
 #[test]
@@ -361,9 +354,9 @@ fn images_are_sent_once_before_the_frame_and_follow_a_reload() {
     let mut a = ghostty("");
     let mut out = Vec::new();
     a.send_images(&mut out).unwrap();
-    // Active Claude (accent), second Claude (sidebar_fg), Codex (sidebar_fg), status bar (muted).
+    // Active Claude (accent), second Claude (sidebar_fg), Codex (sidebar_fg).
     let first = a.images.as_ref().unwrap().order.len();
-    assert_eq!(first, 4);
+    assert_eq!(first, 3);
     assert!(out.starts_with(b"\x1b_Ga=T,U=1,f=32,s=64,v=64,c=2,r=1,i=14598145,q=2,m=1;"));
     let len = out.len();
     for _ in 0..3 {
@@ -386,8 +379,7 @@ fn images_are_sent_once_before_the_frame_and_follow_a_reload() {
     a.send_images(&mut out).unwrap();
     assert_eq!(out.len(), sent);
     let (_, rows) = render(&a);
-    assert!(rows[3].starts_with("▌⠋ ✻  "), "{}", rows[3]);
-    assert!(rows[23].contains("⠋ ✻  Fix"), "{}", rows[23]);
+    assert!(rows[3].starts_with(" ⠋ ✻  "), "{}", rows[3]);
 
     // On exit, one delete per id sent.
     let mut gone = Vec::new();
@@ -429,28 +421,6 @@ fn a_selected_row_draws_its_visible_colours_without_reverse() {
 }
 
 #[test]
-fn the_status_bar_never_shows_half_an_image() {
-    for cols in 20..=100u16 {
-        let mut a = ghostty("");
-        a.size = (cols, 24);
-        let mut sink = Vec::new();
-        a.send_images(&mut sink).unwrap();
-        let (buf, _) = render(&a);
-        let placeholders: Vec<u16> = (0..cols)
-            .filter(|&x| buf[(x, 23)].symbol().starts_with('\u{10EEEE}'))
-            .collect();
-        assert!(
-            placeholders.is_empty() || placeholders.len() == 2,
-            "{cols} columns: {placeholders:?}"
-        );
-        if let [x, y] = placeholders[..] {
-            assert_eq!(y, x + 1);
-            assert!(placeholder_cell(&buf, x, 23).is_some());
-        }
-    }
-}
-
-#[test]
 fn names_start_at_the_same_column_with_logos_and_with_text_icons() {
     let name_column = |rows: &[String]| {
         // Panel rows of the first project: Claude, nvim, Codex, shell, git.
@@ -473,10 +443,4 @@ fn names_start_at_the_same_column_with_logos_and_with_text_icons() {
     for (y, first) in [(3, "F"), (4, "n"), (5, "R"), (7, "a")] {
         assert_eq!(buf[(6, y)].symbol(), first, "row {y}");
     }
-    // The status bar: the icon takes two cells, then a space, then the name.
-    let at = (0..buf.area.width)
-        .find(|&x| placeholder_cell(&buf, x, 23).is_some())
-        .unwrap();
-    assert_eq!(buf[(at + 2, 23)].symbol(), " ");
-    assert_eq!(buf[(at + 3, 23)].symbol(), "F");
 }

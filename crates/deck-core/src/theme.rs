@@ -10,7 +10,7 @@ use crate::icons::IconKind;
 use crate::protocol::Color;
 
 /// The colour roles, in the order of [`Theme::colors`].
-pub const ROLES: [&str; 15] = [
+pub const ROLES: [&str; 16] = [
     "accent",
     "muted",
     "ok",
@@ -26,6 +26,7 @@ pub const ROLES: [&str; 15] = [
     "selection_fg",
     "selection_bg",
     "overlay_bg",
+    "hover",
 ];
 
 const ANSI_NAMES: [&str; 16] = [
@@ -121,7 +122,6 @@ impl BorderStyle {
 pub struct Glyphs {
     pub expanded: String,
     pub collapsed: String,
-    pub active: String,
     /// The frames of the spinner of a working agent, one cell wide each.
     pub spinner: Vec<String>,
     /// An agent that needs the user.
@@ -142,7 +142,6 @@ impl Default for Glyphs {
         Self {
             expanded: "▾".into(),
             collapsed: "▸".into(),
-            active: "▌".into(),
             spinner: SPINNER.iter().map(ToString::to_string).collect(),
             waiting: "!".into(),
             idle: "●".into(),
@@ -336,6 +335,7 @@ pub struct Theme {
     pub selection_fg: Color,
     pub selection_bg: Color,
     pub overlay_bg: Color,
+    pub hover: Color,
     pub border_style: BorderStyle,
     pub glyphs: Glyphs,
     pub icons: IconPreset,
@@ -344,7 +344,7 @@ pub struct Theme {
 }
 
 /// The default of each role, in the order of [`ROLES`].
-const DEFAULTS: [ThemeColor; 15] = [
+const DEFAULTS: [ThemeColor; 16] = [
     ThemeColor::Indexed(4),
     ThemeColor::Indexed(8),
     ThemeColor::Indexed(2),
@@ -360,11 +360,12 @@ const DEFAULTS: [ThemeColor; 15] = [
     ThemeColor::Default,
     ThemeColor::Default,
     ThemeColor::Default,
+    ThemeColor::Indexed(8),
 ];
 
 /// Follows role references until a colour; a loop is an error naming the keys in it.
-fn resolve(raw: &[ThemeColor; 15]) -> Result<[Color; 15], ThemeError> {
-    let mut out = [Color::Default; 15];
+fn resolve(raw: &[ThemeColor; 16]) -> Result<[Color; 16], ThemeError> {
+    let mut out = [Color::Default; 16];
     let roles = ROLES.iter().copied().zip(raw.iter().copied());
     for ((start, mut current), slot) in roles.clone().zip(&mut out) {
         let mut chain = vec![start];
@@ -398,7 +399,7 @@ fn resolve(raw: &[ThemeColor; 15]) -> Result<[Color; 15], ThemeError> {
 
 impl Theme {
     fn from_parts(
-        c: [Color; 15],
+        c: [Color; 16],
         border_style: BorderStyle,
         glyphs: Glyphs,
         icons: IconPreset,
@@ -421,6 +422,7 @@ impl Theme {
             selection_fg,
             selection_bg,
             overlay_bg,
+            hover,
         ] = c;
         Self {
             accent,
@@ -438,6 +440,7 @@ impl Theme {
             selection_fg,
             selection_bg,
             overlay_bg,
+            hover,
             border_style,
             glyphs,
             icons,
@@ -487,7 +490,6 @@ impl Theme {
                         let slot = match name.as_str() {
                             "expanded" => &mut glyphs.expanded,
                             "collapsed" => &mut glyphs.collapsed,
-                            "active" => &mut glyphs.active,
                             "waiting" => &mut glyphs.waiting,
                             "idle" => &mut glyphs.idle,
                             "quiet" => &mut glyphs.quiet,
@@ -622,6 +624,27 @@ mod tests {
     }
 
     #[test]
+    fn hover_defaults_to_bright_black_and_takes_a_role() {
+        assert_eq!(parse("").unwrap().hover, Color::Indexed(8));
+        assert_eq!(
+            parse("hover = \"#102030\"").unwrap().hover,
+            Color::Rgb(16, 32, 48)
+        );
+        let t = parse("accent = 5\nhover = \"accent\"").unwrap();
+        assert_eq!(t.hover, Color::Indexed(5));
+    }
+
+    #[test]
+    fn the_removed_active_glyph_warns() {
+        let table: Table = "[glyphs]\nactive = \"|\"".parse().unwrap();
+        let mut warnings = Vec::new();
+        let t = Theme::parse(&table, &mut warnings).unwrap();
+        assert_eq!(t, Theme::default());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].key, "theme.glyphs.active");
+    }
+
+    #[test]
     fn the_default_follows_the_accent() {
         let t = parse("accent = \"#102030\"").unwrap();
         assert_eq!(t.border_focused, Color::Rgb(0x10, 0x20, 0x30));
@@ -642,7 +665,7 @@ mod tests {
             ("border_style = \"dotted\"", "theme.border_style"),
             ("border_style = 1", "theme.border_style"),
             ("[glyphs]\ncollapsed = \"日\"", "theme.glyphs.collapsed"),
-            ("[glyphs]\nactive = \"\"", "theme.glyphs.active"),
+            ("[glyphs]\nexpanded = \"\"", "theme.glyphs.expanded"),
             ("[glyphs]\nexpanded = \"ab\"", "theme.glyphs.expanded"),
             ("glyphs = 1", "theme.glyphs"),
             ("icons = \"emoji\"", "theme.icons"),

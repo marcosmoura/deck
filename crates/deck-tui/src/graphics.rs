@@ -21,7 +21,6 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::app::App;
 use crate::colors::{Palette, Rgb};
 use crate::convert::{self, Resolved};
-use crate::draw::color;
 use crate::sidebar::{self, Row};
 
 /// The placeholder character of the kitty protocol's Unicode placeholders.
@@ -319,7 +318,7 @@ impl App {
     }
 
     /// The images the next frame draws, as the drawing picks them: every panel row of the
-    /// sidebar in its row colour, and the status bar's icon in the muted colour.
+    /// sidebar in its row colour.
     fn wanted_pairs(&self) -> Vec<Pair> {
         let (Some(images), Some(view)) = (self.logos(), self.mirror.view()) else {
             return Vec::new();
@@ -342,11 +341,9 @@ impl App {
             };
             let is_selected = row.sel().is_some() && row.sel() == selected;
             let active = view.active_panel == Some(id);
-            let style = sidebar::panel_style(theme, base, is_selected, active);
+            let band = is_selected || (active && !self.sidebar_focus);
+            let style = sidebar::panel_style(theme, base, band, active);
             out.extend(pair(panel, style));
-        }
-        if let Some(panel) = self.mirror.active_panel() {
-            out.extend(pair(panel, Style::new().fg(color(theme.muted))));
         }
         // The menu's items and the restore dialog's headings, as they are drawn.
         let kind_pair = |kind: IconKind, style: Style| {

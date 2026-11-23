@@ -114,7 +114,7 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
 
 ## Kept terminals
 
-`new-terminal --keep` leaves the terminal in place when its program exits. In a grid its title reads `<title> · exited <code>` and its border and title are drawn muted; a terminal alone in its panel adds ` · exited <code>` to the panel in the status bar (not muted), and input to it is dropped. `Option+Space x` closes an exited terminal at once; a running one still asks. A panel stays while a kept terminal is in it.
+`new-terminal --keep` leaves the terminal in place when its program exits. In a grid its title reads `<title> · exited <code>` and its border and title are drawn muted; a terminal alone in its panel adds ` · exited <code>` (muted) to the panel's row in the sidebar, and input to it is dropped. `Option+Space x` closes an exited terminal at once; a running one still asks. A panel stays while a kept terminal is in it.
 
 `keep` is saved in `state.json`. After a daemon restart a kept terminal that had exited is gone, and one that was still running is started again with `keep` set.
 

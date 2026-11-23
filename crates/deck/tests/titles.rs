@@ -165,7 +165,7 @@ fn an_agent_that_only_has_a_prompt_gets_its_first_line() {
     let terminal = terminal_id(&h);
     prompt_event(&h, terminal, "Review the API changes\nthen the docs");
     wait_name(&h, "Review the API changes");
-    h.wait_for_text("Review the API changes", TIMEOUT);
+    h.wait_for_text("Review the API chang", TIMEOUT);
     h.capture("agent-prompt");
 }
 
@@ -182,7 +182,7 @@ fn a_program_without_a_title_names_the_panel_until_it_exits() {
     h.wait_for_text("nvim-ready", TIMEOUT);
     wait_name(&h, "nvim");
     assert_eq!(panel(&h)["terminals"][0]["program"], "nvim");
-    h.wait_for_row_start("▌  \u{270e}  nvim", TIMEOUT);
+    h.wait_for_active_row("   \u{270e}  nvim", TIMEOUT);
     h.capture("program-name");
 
     // It exits: the panel is named after the shell again.
@@ -198,7 +198,7 @@ fn a_manual_name_is_locked_until_rename_panel_auto() {
     let mut h = attached(&bin);
     h.send_bytes(PREFIX);
     h.send_keys(",");
-    h.wait_for_text("Rename panel:", TIMEOUT);
+    h.wait_for_text("Rename panel", TIMEOUT);
     h.send_keys("\x15api\r");
     wait_name(&h, "api");
     assert_eq!(panel(&h)["name_source"], "manual");
@@ -246,9 +246,7 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
         "printf '\\033]2;\u{2733} Fix login bug\\007'\necho agent-ready\nread line",
     );
     let mut h = attached(&bin);
-    wait_row(&h, 3, "the shell icon", |r| {
-        r.starts_with("\u{258c}  \u{276f} ")
-    });
+    wait_row(&h, 3, "the shell icon", |r| r.starts_with("   \u{276f} "));
     h.send_keys("claude\r");
     h.wait_for_text("agent-ready", TIMEOUT);
     wait_row(&h, 3, "the agent icon", |r| {
@@ -257,9 +255,7 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
     // A second panel with a shell: its row starts with the terminal icon.
     h.send_bytes(PREFIX);
     h.send_keys("c");
-    wait_row(&h, 4, "the second panel", |r| {
-        r.starts_with("\u{258c}  \u{276f} ")
-    });
+    wait_row(&h, 4, "the second panel", |r| r.starts_with("   \u{276f} "));
     let first = rows(&h)[3].clone();
     // Names start at the same column whatever the icon.
     assert_eq!(first.chars().nth(6), Some('F'), "{first}");
@@ -268,9 +264,6 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
         first.starts_with("   \u{273b} ") || first.contains(" \u{273b} "),
         "{first}"
     );
-    // The status bar shows the icon of the active panel.
-    let bar = rows(&h)[23].clone();
-    assert!(bar.contains(" \u{203a} \u{276f} "), "{bar}");
     h.capture("icons");
 }
 
@@ -278,17 +271,15 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
 fn a_program_switches_the_icon_and_the_shell_brings_it_back() {
     let bin = fake("nvim", "echo nvim-ready\nread line");
     let mut h = attached(&bin);
-    wait_row(&h, 3, "the shell icon", |r| {
-        r.starts_with("\u{258c}  \u{276f} ")
-    });
+    wait_row(&h, 3, "the shell icon", |r| r.starts_with("   \u{276f} "));
     h.send_keys("nvim\r");
     h.wait_for_text("nvim-ready", TIMEOUT);
     wait_row(&h, 3, "the editor icon", |r| {
-        r.starts_with("\u{258c}  \u{270e}  nvim")
+        r.starts_with("   \u{270e}  nvim")
     });
     h.send_keys("\r");
     wait_row(&h, 3, "the shell icon again", |r| {
-        r.starts_with("\u{258c}  \u{276f} ")
+        r.starts_with("   \u{276f} ")
     });
 }
 
@@ -314,12 +305,10 @@ fn ghostty_shows_the_agent_logo_and_tmux_keeps_the_text_icon() {
     let image = "\u{10EEEE}";
     let h = claude_panel(&[("TERM_PROGRAM", "ghostty")]);
     let row = rows(&h)[3].clone();
-    assert!(row.starts_with("\u{258c}"), "{row}");
+    assert!(h.is_active_row(3), "{row}");
     // The logo is two cells wide.
     assert_eq!(row.matches(image).count(), 2, "{row}");
     assert!(!row.contains('\u{273b}'), "{row}");
-    // The status bar has the image as well.
-    assert!(rows(&h)[23].contains(image), "{}", rows(&h)[23]);
     // The name starts at column 6, as it does after a text icon.
     assert_eq!(h.cell(3, 6).ch, 'F');
     h.capture("logos");

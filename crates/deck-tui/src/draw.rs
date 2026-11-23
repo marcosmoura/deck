@@ -1,9 +1,8 @@
-//! Drawing: the terminal's frame and contents, the status bar and the too-small message.
+//! Drawing: the terminal's frame and contents, the overlays and the too-small message.
 //! Every colour and glyph of deck's own UI comes from the [`Theme`].
 
 use deck_core::config::HelpGroup;
-use deck_core::model::{NameSource, TerminalId, TerminalView};
-use deck_core::naming::source_terminal_view;
+use deck_core::model::{TerminalId, TerminalView};
 use deck_core::protocol::{CursorShape, NoticeLevel};
 use deck_core::theme::{BorderStyle, Theme};
 use ratatui::Frame;
@@ -20,11 +19,9 @@ use crate::grid::Grid;
 use crate::input::Action;
 use crate::mirror::TermMirror;
 use crate::modal::{Modal, Prompt};
-use crate::sidebar::{self, SIDEBAR_HINTS};
+use crate::sidebar;
 
 pub const TOO_SMALL: &str = "deck: window too small";
-/// The status-bar hints while scroll mode is on.
-pub const SCROLL_HINTS: &str = "q exit  g top  G bottom";
 
 pub(crate) fn width(text: &str) -> u16 {
     u16::try_from(Span::raw(text).width()).unwrap_or(u16::MAX)
@@ -61,44 +58,36 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if side > 0 {
         sidebar::draw(
             frame.buffer_mut(),
-            Rect::new(0, 0, side - 1, area.height - 1),
+            Rect::new(0, 0, side - 1, area.height),
             app,
             theme,
         );
     }
-    let panel = Rect::new(side, 0, area.width - side, area.height - 1);
+    let panel = Rect::new(side, 0, area.width - side, area.height);
     let cursor = if app.panel_area_empty() {
         draw_empty(frame.buffer_mut(), panel, app, theme);
         None
     } else {
         draw_panel(frame.buffer_mut(), panel, app)
     };
-    let bar = Rect::new(0, area.height - 1, area.width, 1);
-    draw_status(frame.buffer_mut(), bar, app, theme);
     if matches!(app.modal, Some(Modal::Help)) {
-        draw_help(
-            frame.buffer_mut(),
-            Rect::new(0, 0, area.width, area.height - 1),
-            app,
-            theme,
-        );
+        draw_help(frame.buffer_mut(), area, app, theme);
     }
     if let Some(picker) = &app.picker {
-        crate::picker::draw(
-            frame.buffer_mut(),
-            Rect::new(0, 0, area.width, area.height - 1),
-            app,
-            picker,
-            theme,
-        );
+        crate::picker::draw(frame.buffer_mut(), area, app, picker, theme);
     }
     crate::menu::draw(frame.buffer_mut(), app, theme);
+    crate::context::draw(frame.buffer_mut(), app, theme);
     crate::restore::draw(frame.buffer_mut(), app, theme);
+    draw_dialog(frame.buffer_mut(), area, app, theme);
+    crate::bar::draw(frame.buffer_mut(), app, theme);
     if !app.truecolor {
         downsample(frame.buffer_mut());
     }
+    // The cursor stays hidden on a cell the floating bar covers.
     if !app.overlay_open()
         && let Some(pos) = cursor
+        && !app.bar_covers(pos.x, pos.y)
     {
         frame.set_cursor_position(pos);
     }
@@ -177,7 +166,7 @@ pub(crate) fn help_lines(app: &App, theme: &Theme, room: usize) -> Vec<(String, 
 
 /// Rows of the help list that fit in the overlay, and the lines of its content.
 pub(crate) fn help_room(app: &App) -> (usize, usize) {
-    let room = usize::from(app.size.1.saturating_sub(1)).saturating_sub(2);
+    let room = usize::from(app.size.1).saturating_sub(2);
     (room, help_lines(app, &app.theme, room).len())
 }
 
@@ -297,8 +286,8 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
     (x < cw && y < ch).then_some(Position::new(panel.x + x, panel.y + y))
 }
 
-/// What a terminal is called on its border or in the status bar: its title, else its
-/// program, then `exited <code>` once a kept terminal's process ended.
+/// What a terminal is called on its border: its title, else its program, then
+/// `exited <code>` once a kept terminal's process ended.
 fn terminal_label(view: &TerminalView) -> String {
     let name = view
         .title
@@ -441,330 +430,133 @@ fn draw_selection(buf: &mut Buffer, area: Rect, app: &App, id: TerminalId) {
     }
 }
 
-fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
-    let base = Style::new()
-        .fg(color(theme.status_fg))
-        .bg(color(theme.status_bg));
-    buf.set_style(bar, base);
-
-    let flash_color = match app.flash_level {
+/// The colour of the flash message.
+pub(crate) fn flash_color(app: &App, theme: &Theme) -> deck_core::protocol::Color {
+    match app.flash_level {
         Some(NoticeLevel::Info) => theme.muted,
         Some(NoticeLevel::Warning) => theme.warning,
         Some(NoticeLevel::Error) => theme.error,
         None if app.flash_error => theme.error,
         None => theme.warning,
-    };
-    let flash_style = Style::new().fg(color(flash_color));
-    let flash = app.flash.as_ref().map(|(text, _)| text.clone());
-    match &app.modal {
-        Some(Modal::Prompt(prompt)) => {
-            draw_prompt(
-                buf,
-                bar,
-                prompt,
-                flash.map(|t| (t, flash_style)),
-                base,
-                theme,
-            );
-            return;
-        }
-        Some(Modal::Confirm(confirm)) => {
-            let text = format!(" {}", confirm.question);
-            buf.set_stringn(
-                bar.x,
-                bar.y,
-                &text,
-                usize::from(bar.width),
-                base.fg(color(theme.warning)),
-            );
-            if let Some(text) = flash {
-                let w = width(&text);
-                let used = width(&confirm.question) + 2;
-                if used + w < bar.width {
-                    buf.set_stringn(
-                        bar.x + bar.width - w,
-                        bar.y,
-                        &text,
-                        usize::from(w),
-                        base.patch(flash_style),
-                    );
-                }
-            }
-            return;
-        }
-        _ => {}
-    }
-
-    let name = app.mirror.session_name().unwrap_or("");
-    let resizing = app.resize_until.is_some();
-    let dragging_sidebar = app.sidebar_drag.is_some();
-    let (badge, badge_style) = if app.armed
-        || app.scroll_mode.is_some()
-        || app.sidebar_focus
-        || resizing
-        || dragging_sidebar
-    {
-        let label = if dragging_sidebar {
-            format!(" SIDEBAR {} ", app.sidebar_width)
-        } else if app.armed {
-            " PREFIX ".to_string()
-        } else if resizing && app.scroll_mode.is_none() && !app.sidebar_focus {
-            " RESIZE ".to_string()
-        } else if app.scroll_mode.is_some() {
-            " SCROLL ".to_string()
-        } else {
-            " SIDEBAR ".to_string()
-        };
-        (
-            label,
-            Style::new()
-                .fg(color(theme.warning))
-                .add_modifier(Modifier::REVERSED),
-        )
-    } else {
-        (
-            format!(" {name} "),
-            Style::new()
-                .fg(color(theme.accent))
-                .add_modifier(Modifier::BOLD),
-        )
-    };
-    let project = app.mirror.project_name().unwrap_or("");
-    // `project › <status> <icon> <name>` like the sidebar row (the status only with an
-    // agent; coloured after the text is drawn); a manually named panel keeps its name, so
-    // its source terminal's title follows it when it says something else.
-    let mut mark = None;
-    let mut icon_mark = None;
-    let location = match app.mirror.active_panel() {
-        Some(panel) => {
-            let cell = sidebar::panel_icon_cell(app, panel, theme, base.fg(color(theme.muted)));
-            let image_style = cell
-                .as_ref()
-                .filter(|(text, _)| text.starts_with(crate::graphics::PLACEHOLDER))
-                .map(|(_, style)| *style);
-            let icon = cell.map_or_else(String::new, |(i, _)| format!("{i} "));
-            let before = format!("{project} › ");
-            let status = agent::glyph(agent::panel_status(panel), app.spin, theme).map_or_else(
-                String::new,
-                |(glyph, style)| {
-                    let text = format!("{glyph} ");
-                    mark = Some((width(&before), glyph, style));
-                    text
-                },
-            );
-            if let Some(style) = image_style {
-                icon_mark = Some((width(&before) + width(&status), style));
-            }
-            let mut text = format!("{before}{status}{icon}{}", panel.name);
-            let title = source_terminal_view(panel)
-                .and_then(|t| t.title.as_deref())
-                .filter(|t| !t.is_empty() && *t != panel.name);
-            if panel.name_source == NameSource::Manual
-                && !app.panel_area_empty()
-                && let Some(title) = title
-            {
-                text.push_str(" · ");
-                text.push_str(title);
-            }
-            // A kept terminal whose process ended says so.
-            if let Some(code) = app.mirror.focused().and_then(|t| t.exit_status) {
-                text.push_str(&format!(" · exited {code}"));
-            }
-            text
-        }
-        None => project.to_string(),
-    };
-    // "[offset/history]" while the focused terminal is scrolled back.
-    let indicator = app
-        .mirror
-        .focused_id()
-        .and_then(|id| app.mirror.terminal(id))
-        .filter(|t| t.display_offset > 0)
-        .map(|t| format!(" [{}/{}]", t.display_offset, t.history))
-        .unwrap_or_default();
-    let waiting = app.mirror.view().map_or(0, agent::waiting_terminals);
-    let (right, right_style) = match &app.flash {
-        // A long message (a config error with its location) is cut to the bar.
-        Some((text, _)) => (truncate(text, bar.width), flash_style),
-        None if app.restore.is_some() => (
-            crate::restore::hints(app).to_string(),
-            Style::new().fg(color(theme.muted)),
-        ),
-        None if app.scroll_mode.is_some() => (
-            SCROLL_HINTS.to_string(),
-            Style::new().fg(color(theme.muted)),
-        ),
-        None if app.sidebar_focus && app.scroll_mode.is_none() => (
-            SIDEBAR_HINTS.to_string(),
-            Style::new().fg(color(theme.muted)),
-        ),
-        None if resizing => (
-            app.bindings.resize_hints(),
-            Style::new().fg(color(theme.muted)),
-        ),
-        // The hints wait for the session, like the name and the project.
-        None if app.mirror.view().is_none() => (String::new(), Style::new()),
-        None => (
-            app.bindings.hints(waiting > 0),
-            Style::new().fg(color(theme.muted)),
-        ),
-    };
-    // `n waiting` to the left of the right-hand text, unless a message takes its place.
-    let waiting_text = (waiting > 0 && app.flash.is_none()).then(|| format!("{waiting} waiting"));
-    let waiting_w = waiting_text
-        .as_deref()
-        .map_or(0, |t| width(t) + if right.is_empty() { 0 } else { 2 });
-
-    let right_w = width(&right);
-    let (x, _) = buf.set_stringn(
-        bar.x,
-        bar.y,
-        &badge,
-        usize::from(bar.width),
-        base.patch(badge_style),
-    );
-    let indicator_w = width(&indicator).min(bar.width.saturating_sub(x - bar.x));
-    buf.set_stringn(
-        x,
-        bar.y,
-        &indicator,
-        usize::from(indicator_w),
-        base.fg(color(theme.warning)),
-    );
-    let x = x + indicator_w;
-    let room = bar
-        .width
-        .saturating_sub(right_w + waiting_w + 1)
-        .saturating_sub(x - bar.x);
-    if room > 1 && !location.is_empty() {
-        let text = format!(" {}", truncate(&location, room - 1));
-        buf.set_stringn(
-            x,
-            bar.y,
-            &text,
-            usize::from(room),
-            base.fg(color(theme.muted)),
-        );
-        // One column for the space before the text.
-        if let Some((col, glyph, glyph_style)) = mark {
-            let at = x + 1 + col;
-            if at < x + room
-                && buf
-                    .cell((at, bar.y))
-                    .is_some_and(|cell| cell.symbol() == glyph)
-            {
-                buf.set_stringn(at, bar.y, &glyph, 1, base.patch(glyph_style));
-            }
-        }
-        // An image is two placeholder cells with its id as colour. When the text was cut
-        // inside it, the half that is left is blanked: it would show half a logo.
-        if let Some((col, icon_style)) = icon_mark {
-            let at = x + 1 + col;
-            let is_image = |buf: &Buffer, x: u16| {
-                buf.cell((x, bar.y))
-                    .is_some_and(|c| c.symbol().starts_with(crate::graphics::PLACEHOLDER))
-            };
-            if at + 1 < x + room && is_image(buf, at) && is_image(buf, at + 1) {
-                for dx in 0..2 {
-                    if let Some(cell) = buf.cell_mut((at + dx, bar.y)) {
-                        cell.set_style(icon_style);
-                    }
-                }
-            } else if is_image(buf, at)
-                && let Some(cell) = buf.cell_mut((at, bar.y))
-            {
-                cell.set_symbol(" ");
-            }
-        }
-    }
-    if let Some(text) = waiting_text
-        && right_w + waiting_w <= bar.width
-    {
-        buf.set_stringn(
-            bar.x + bar.width - right_w - waiting_w,
-            bar.y,
-            &text,
-            usize::from(waiting_w),
-            base.fg(color(theme.warning)),
-        );
-    }
-    if right_w <= bar.width {
-        buf.set_stringn(
-            bar.x + bar.width - right_w,
-            bar.y,
-            &right,
-            usize::from(right_w),
-            base.patch(right_style),
-        );
     }
 }
 
-/// The one-line editor of a prompt; a flash, when there is one, takes the hints' place.
-fn draw_prompt(
+/// Rows of a dialog, borders included.
+const DIALOG_ROWS: u16 = 5;
+/// The least columns of a dialog.
+const DIALOG_MIN_COLS: u16 = 40;
+
+/// The prompt or confirmation dialog, centered in `area`; nothing when there is none or the
+/// window is too small for it.
+pub(crate) fn draw_dialog(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+    let (title, hint) = match &app.modal {
+        Some(Modal::Prompt(p)) => (Some(p.label().trim_end_matches(':')), "⏎ save  esc cancel"),
+        Some(Modal::Confirm(_)) => (None, "y yes  n no"),
+        _ => return,
+    };
+    let question = match &app.modal {
+        Some(Modal::Confirm(c)) => c.question.as_str(),
+        _ => "",
+    };
+    if area.height < DIALOG_ROWS || area.width < 3 {
+        return;
+    }
+    let flash = app.flash.as_ref().map_or(0, |(text, _)| width(text));
+    let content = width(title.unwrap_or(question)).max(width(hint)).max(flash);
+    let w = (content.saturating_add(4))
+        .max(DIALOG_MIN_COLS)
+        .min(area.width.saturating_sub(2).max(1));
+    let rect = Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - DIALOG_ROWS) / 2,
+        w,
+        DIALOG_ROWS,
+    );
+    Clear.render(rect, buf);
+    let base = Style::new().bg(color(theme.overlay_bg));
+    buf.set_style(rect, base);
+    let border = base.fg(color(theme.border));
+    Block::bordered()
+        .border_type(border_type(theme.border_style))
+        .border_style(border)
+        .render(rect, buf);
+    let inner_w = w.saturating_sub(4);
+    let x = rect.x + 2;
+    if let Some(title) = title {
+        let text = format!(" {} ", truncate(title, w.saturating_sub(4)));
+        buf.set_stringn(
+            rect.x + 1,
+            rect.y,
+            &text,
+            usize::from(w.saturating_sub(2)),
+            base.fg(color(theme.accent)).add_modifier(Modifier::BOLD),
+        );
+    }
+    match &app.modal {
+        Some(Modal::Prompt(prompt)) => {
+            draw_editor(buf, x, rect.y + 1, inner_w, prompt, base, theme)
+        }
+        _ => {
+            buf.set_stringn(
+                x,
+                rect.y + 1,
+                truncate(question, inner_w),
+                usize::from(inner_w),
+                base.fg(color(theme.warning)),
+            );
+        }
+    }
+    let (text, style) = match &app.flash {
+        Some((text, _)) => (
+            text.as_str(),
+            Style::new().fg(color(flash_color(app, theme))),
+        ),
+        None => (hint, Style::new().fg(color(theme.muted))),
+    };
+    buf.set_stringn(
+        x,
+        rect.y + 3,
+        truncate(text, inner_w),
+        usize::from(inner_w),
+        base.patch(style),
+    );
+}
+
+/// The one-line editor of a prompt in `avail` columns from `x`.
+fn draw_editor(
     buf: &mut Buffer,
-    bar: Rect,
+    x: u16,
+    y: u16,
+    avail: u16,
     prompt: &Prompt,
-    flash: Option<(String, Style)>,
     base: Style,
     theme: &Theme,
 ) {
-    let (right, right_style) = flash.unwrap_or_else(|| {
-        (
-            "⏎ save  esc cancel".to_string(),
-            Style::new().fg(color(theme.muted)),
-        )
-    });
-    let right_w = width(&right).min(bar.width);
-    let label = format!(" {} ", prompt.label());
-    let (x, _) = buf.set_stringn(
-        bar.x,
-        bar.y,
-        &label,
-        usize::from(bar.width),
-        base.fg(color(theme.accent)).add_modifier(Modifier::BOLD),
-    );
     let (before, after) = prompt.editor.split();
-    let avail = bar.width.saturating_sub(right_w + 1 + (x - bar.x));
     // The text keeps the cursor in sight: the start is cut when it does not fit.
     let mut before: Vec<char> = before.chars().collect();
     while width(&before.iter().collect::<String>()) + 1 > avail && !before.is_empty() {
         before.remove(0);
     }
     let before: String = before.into_iter().collect();
-    let (x, _) = buf.set_stringn(x, bar.y, &before, usize::from(avail), base);
+    let (x, _) = buf.set_stringn(x, y, &before, usize::from(avail), base);
     let left = avail.saturating_sub(width(&before));
     let mut rest = after.chars();
-    let cursor_cell = rest.next();
-    match cursor_cell {
+    match rest.next() {
         None => {
-            buf.set_stringn(
-                x,
-                bar.y,
-                "█",
-                usize::from(left),
-                base.fg(color(theme.accent)),
-            );
+            buf.set_stringn(x, y, "█", usize::from(left), base.fg(color(theme.accent)));
         }
         Some(c) => {
             let (cx, _) = buf.set_stringn(
                 x,
-                bar.y,
+                y,
                 c.to_string(),
                 usize::from(left),
                 base.add_modifier(Modifier::REVERSED),
             );
             let left = left.saturating_sub(cx - x);
-            buf.set_stringn(cx, bar.y, rest.as_str(), usize::from(left), base);
+            buf.set_stringn(cx, y, rest.as_str(), usize::from(left), base);
         }
-    }
-    if right_w > 0 && width(&label) + width(&before) + right_w < bar.width {
-        buf.set_stringn(
-            bar.x + bar.width - right_w,
-            bar.y,
-            &right,
-            usize::from(right_w),
-            base.patch(right_style),
-        );
     }
 }
 
@@ -783,35 +575,15 @@ pub fn cursor_style(shape: CursorShape) -> ratatui::crossterm::cursor::SetCursor
 mod tests {
     use super::*;
     use crate::mirror::tests::{frame, line, no_sidebar, view};
-    use deck_core::model::TerminalId;
     use deck_core::protocol::{self, Cursor, Line, Run, ServerMsg};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
-    use std::time::{Duration, Instant};
-
-    fn prefix_hint() -> &'static str {
-        if cfg!(target_os = "macos") {
-            "⌥Space"
-        } else {
-            "M-Space"
-        }
-    }
 
     fn app(size: (u16, u16), vp: Option<(u16, u16)>, title: Option<&str>) -> App {
         let mut app = App::new(&no_sidebar(), size, &[]);
         let mut v = view(title);
         v.layout_viewport = vp;
-        app.on_server(ServerMsg::SessionView(v));
-        app
-    }
-
-    /// The app of `app()` whose panel `p` was renamed by hand.
-    fn manual_app(size: (u16, u16), vp: (u16, u16), title: Option<&str>) -> App {
-        let mut app = App::new(&no_sidebar(), size, &[]);
-        let mut v = view(title);
-        v.layout_viewport = Some(vp);
-        v.projects[0].panels[0].name_source = NameSource::Manual;
         app.on_server(ServerMsg::SessionView(v));
         app
     }
@@ -840,10 +612,10 @@ mod tests {
 
     #[test]
     fn the_mockup() {
-        let mut a = app((80, 24), Some((80, 23)), None);
+        let mut a = app((80, 24), Some((80, 24)), None);
         put(
             &mut a,
-            (80, 23),
+            (80, 24),
             vec![
                 (0, line("$ echo hello")),
                 (1, line("hello")),
@@ -851,151 +623,18 @@ mod tests {
             ],
         );
         let (mut t, text) = render(&a);
-        // The terminal fills the panel area: no border, no title.
+        // The terminal fills the whole window: no border, no title, no status row.
         assert_eq!(text[0], format!("$ echo hello{}", " ".repeat(68)));
         assert_eq!(text[1], format!("hello{}", " ".repeat(75)));
         assert!(!text.iter().any(|r| r.contains('╭') || r.contains('│')));
-        assert_eq!(
-            text[23],
-            format!(
-                " main  proj › ❯  p{}{} ? help  d detach",
-                " ".repeat(80 - 18 - 17 - prefix_hint().chars().count()),
-                prefix_hint()
-            )
-        );
-        // The hints are muted, the session name is bold.
-        let buf = t.backend().buffer();
-        assert_eq!(buf[(1, 23)].fg, Color::Blue);
-        assert!(buf[(1, 23)].modifier.contains(Modifier::BOLD));
-        assert_eq!(buf[(79, 23)].fg, Color::DarkGray);
-        assert_eq!(buf[(7, 23)].fg, Color::DarkGray);
+        assert_eq!(text[23].trim(), "");
         // The cursor frame has it at row 0, col 1.
         assert_eq!(t.get_cursor_position().unwrap(), Position::new(1, 0));
     }
 
     #[test]
-    fn the_status_bar_shows_the_osc_title_cut_with_an_ellipsis_beside_the_hints() {
-        let a = manual_app((80, 24), (80, 23), Some("vim: a title"));
-        let (_, text) = render(&a);
-        assert!(
-            text[23].starts_with(" main  proj › ❯  p · vim: a title "),
-            "{}",
-            text[23]
-        );
-
-        let a = manual_app((50, 10), (50, 9), Some("vim: a very long title indeed"));
-        let (_, text) = render(&a);
-        let bar = &text[9];
-        assert!(bar.starts_with(" main  proj › ❯  p · vim"), "{bar}");
-        assert!(bar.contains("… "), "{bar}");
-        assert!(bar.ends_with("d detach"), "{bar}");
-        assert_eq!(width(bar), 50);
-
-        // A panel named after what runs in it has no title suffix, and neither has a manual
-        // one whose title is its name.
-        let a = app((80, 24), Some((80, 23)), Some("vim: a title"));
-        let (_, text) = render(&a);
-        assert!(!text[23].contains('·'), "{}", text[23]);
-        let a = manual_app((80, 24), (80, 23), Some("p"));
-        let (_, text) = render(&a);
-        assert!(text[23].starts_with(" main  proj › ❯  p  "), "{}", text[23]);
-
-        // No title when the panel area is empty.
-        let mut v = view(Some("t"));
-        v.projects[0].panels.clear();
-        v.projects[0].active_panel = None;
-        v.active_panel = None;
-        let mut a = App::new(&no_sidebar(), (80, 24), &[]);
-        a.on_server(ServerMsg::SessionView(v));
-        let (_, text) = render(&a);
-        assert!(!text[23].contains('·'), "{}", text[23]);
-    }
-
-    #[test]
-    fn the_prefix_badge_replaces_the_session_name() {
-        let mut a = app((80, 24), Some((80, 23)), None);
-        a.armed = true;
-        let (t, text) = render(&a);
-        assert!(text[23].starts_with(" PREFIX  proj"), "{}", text[23]);
-        let cell = &t.backend().buffer()[(1, 23)];
-        assert_eq!(cell.fg, Color::Yellow);
-        assert!(cell.modifier.contains(Modifier::REVERSED));
-    }
-
-    #[test]
-    fn the_scroll_indicator_and_badge() {
-        let mut a = app((80, 24), Some((80, 23)), None);
-        let mut f = frame(true, (80, 23), vec![(0, line("line 3880"))]);
-        f.display_offset = 120;
-        f.history = 4096;
-        a.on_server(ServerMsg::Frame(f));
-        a.scroll_mode = Some(TerminalId(4));
-        let (t, text) = render(&a);
-        assert!(text[0].starts_with("line 3880"));
-        assert_eq!(
-            text[23],
-            format!(
-                " SCROLL  [120/4096] proj › ❯  p{}q exit  g top  G bottom",
-                " ".repeat(80 - 31 - 23)
-            )
-        );
-        let buf = t.backend().buffer();
-        // The indicator is the warning colour, the badge has the PREFIX style.
-        assert_eq!(buf[(10, 23)].fg, Color::Yellow);
-        assert_eq!(buf[(1, 23)].fg, Color::Yellow);
-        assert!(buf[(1, 23)].modifier.contains(Modifier::REVERSED));
-
-        // The wheel alone shows the indicator and neither the badge nor the scroll hints.
-        a.scroll_mode = None;
-        let (_, text) = render(&a);
-        assert!(
-            text[23].starts_with(" main  [120/4096] proj"),
-            "{}",
-            text[23]
-        );
-        assert!(
-            text[23].ends_with(&format!("{} ? help  d detach", prefix_hint())),
-            "{}",
-            text[23]
-        );
-
-        // Back at the bottom there is no indicator.
-        a.on_server(ServerMsg::Frame(frame(true, (80, 23), vec![])));
-        let (_, text) = render(&a);
-        assert!(!text[23].contains('['), "{}", text[23]);
-    }
-
-    #[test]
-    fn the_prefix_badge_wins_over_the_scroll_badge() {
-        let mut a = app((80, 24), Some((80, 23)), None);
-        a.scroll_mode = Some(TerminalId(4));
-        a.armed = true;
-        let (_, text) = render(&a);
-        assert!(text[23].starts_with(" PREFIX "), "{}", text[23]);
-    }
-
-    #[test]
-    fn the_status_bar_has_no_hints_before_the_first_session_view() {
-        let a = App::new(&no_sidebar(), (80, 24), &[]);
-        let (_, text) = render(&a);
-        assert!(!text[23].contains("detach"), "{}", text[23]);
-    }
-
-    #[test]
-    fn a_flash_message_replaces_the_hints() {
-        let mut a = app((80, 24), Some((80, 23)), None);
-        a.flash = Some((
-            "no binding for x".into(),
-            Instant::now() + Duration::from_secs(2),
-        ));
-        let (_, text) = render(&a);
-        assert!(text[23].ends_with("no binding for x"), "{}", text[23]);
-        assert!(!text[23].contains("detach"));
-    }
-
-    #[test]
     fn too_small_shows_only_the_message() {
-        let a = app((40, 4), Some((40, 3)), None);
+        let a = app((40, 4), Some((40, 4)), None);
         let (mut t, text) = render(&a);
         assert!(text.iter().any(|r| r.trim() == TOO_SMALL), "{text:?}");
         assert!(!text.iter().any(|r| r.contains('╭') || r.contains("main")));
@@ -1012,7 +651,7 @@ mod tests {
 
     #[test]
     fn wide_and_combining_characters_keep_their_columns() {
-        let mut a = app((20, 6), Some((20, 5)), None);
+        let mut a = app((20, 6), Some((20, 6)), None);
         let run = |col: u16, text: &str| Run {
             col,
             text: text.into(),
@@ -1021,7 +660,7 @@ mod tests {
         let l = Line {
             runs: vec![run(0, "日本"), run(5, "🙂"), run(8, "e\u{301}x")],
         };
-        put(&mut a, (20, 5), vec![(0, l)]);
+        put(&mut a, (20, 6), vec![(0, l)]);
         let (t, _) = render(&a);
         let buf = t.backend().buffer();
         assert_eq!(buf[(0, 0)].symbol(), "日");
@@ -1033,7 +672,7 @@ mod tests {
 
     #[test]
     fn colours_and_attributes_are_kept() {
-        let mut a = app((20, 6), Some((20, 5)), None);
+        let mut a = app((20, 6), Some((20, 6)), None);
         let l = Line {
             runs: vec![Run {
                 col: 0,
@@ -1047,7 +686,7 @@ mod tests {
                 },
             }],
         };
-        put(&mut a, (20, 5), vec![(0, l)]);
+        put(&mut a, (20, 6), vec![(0, l)]);
         let (t, _) = render(&a);
         let cell = &t.backend().buffer()[(0, 0)];
         assert_eq!(cell.fg, Color::Red);
@@ -1065,7 +704,6 @@ mod tests {
         let (mut t, text) = render(&a);
         assert_eq!(text[0].chars().count(), 30);
         assert!(text[0].starts_with("0123456789"));
-        assert!(text[7].starts_with(" main"));
         // The cursor is in the visible part.
         assert!(t.get_cursor_position().is_ok());
     }
@@ -1097,7 +735,7 @@ mod tests {
 
     #[test]
     fn a_hidden_cursor_is_not_shown() {
-        let mut a = app((20, 6), Some((20, 5)), None);
+        let mut a = app((20, 6), Some((20, 6)), None);
         let mut f = frame(true, (18, 3), vec![]);
         f.cursor = Cursor {
             visible: false,

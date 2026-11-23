@@ -80,7 +80,7 @@ help = "?" # This help
 # "#rrggbb", or the name of another role. Without truecolor, "#rrggbb" is drawn as the
 # nearest palette colour.
 [theme]
-accent = "blue" # focused border and title, active panel row, session name
+accent = "blue" # focused border and title, active panel row, session name in the sidebar header
 muted = "bright-black" # hints, space names, empty states, exited terminals
 ok = "green" # success states
 warning = "yellow" # PREFIX, SCROLL and RESIZE badges, scroll indicator
@@ -90,11 +90,12 @@ border_focused = "accent" # the focused terminal's border
 title = "default" # unfocused terminal titles
 sidebar_fg = "default" # sidebar text
 sidebar_bg = "default" # sidebar background
-status_fg = "default" # status bar text
-status_bg = "default" # status bar background
+status_fg = "default" # floating bar text and hint keys
+status_bg = "default" # floating bar background
 selection_fg = "default" # selected row text (reversed while both selection roles are default)
 selection_bg = "default" # selected row background
 overlay_bg = "default" # help and picker overlays
+hover = "bright-black" # background of the sidebar row or chip under the pointer
 # rounded, plain, thick or double: borders of terminals and overlays.
 border_style = "rounded"
 # unicode, nerd or none: the icon in front of each panel's name, chosen by what runs in it
@@ -110,7 +111,6 @@ icon_images = "auto"
 [theme.glyphs]
 expanded = "▾" # a space that shows its panels
 collapsed = "▸" # a space that hides its panels
-active = "▌" # the active panel's marker
 spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] # a working agent: frames, 100 ms each
 waiting = "!" # an agent that needs you (warning colour, bold)
 idle = "●" # an agent that finished its turn (ok colour)

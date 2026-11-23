@@ -127,18 +127,18 @@ fn switch_to(h: &mut Harness, name: &str) {
     h.wait_for_text("Sessions", TIMEOUT);
     h.send_keys(name);
     h.send_keys(ENTER);
-    // The status bar starts with the session name (the sidebar may be hidden).
+    // The client is attached to the session (the sidebar may be hidden).
     wait_until(&format!("the session {name}"), TIMEOUT, || {
-        rows(h)
-            .last()
-            .is_some_and(|r| r.trim_start().starts_with(name))
+        let ls = String::from_utf8_lossy(&h.run_deck(&["ls"]).stdout).into_owned();
+        ls.lines()
+            .any(|l| l.starts_with(name) && l.contains("(attached)"))
     });
 }
 
 #[test]
 fn dragging_the_separator_resizes_the_shell_and_back() {
     let mut h = attached();
-    assert_eq!(stty(&mut h), "23 71");
+    assert_eq!(stty(&mut h), "24 71");
     press(&mut h, 28);
     sleep(Duration::from_millis(50));
     motion(&mut h, 40);
@@ -150,28 +150,28 @@ fn dragging_the_separator_resizes_the_shell_and_back() {
     h.capture("sidebar-dragged");
     release(&mut h, 40);
     wait_gone(&h, "SIDEBAR 40");
-    wait_stty(&mut h, "23 59");
+    wait_stty(&mut h, "24 59");
     assert_eq!(h.cell(5, 40).ch, '│');
     assert_ne!(h.cell(5, 40).fg, accent);
 
     drag(&mut h, 40, 28);
-    wait_stty(&mut h, "23 71");
+    wait_stty(&mut h, "24 71");
 }
 
 #[test]
 fn the_width_stops_at_the_limits() {
     let mut h = attached();
     drag(&mut h, 28, 80);
-    wait_stty(&mut h, "23 39");
+    wait_stty(&mut h, "24 39");
     drag(&mut h, 60, 3);
-    wait_stty(&mut h, "23 79");
+    wait_stty(&mut h, "24 79");
 }
 
 #[test]
 fn the_panel_area_keeps_twenty_columns_in_a_narrow_window() {
     let mut h = attached_with((60, 24), &[]);
     drag(&mut h, 28, 58);
-    wait_stty(&mut h, "23 20");
+    wait_stty(&mut h, "24 20");
 }
 
 #[test]
@@ -180,14 +180,14 @@ fn a_switch_keeps_the_dragged_width_and_a_hidden_sidebar() {
     let out = h.run_deck(&["new", "other", "-d"]);
     assert!(out.status.success());
     drag(&mut h, 28, 40);
-    wait_stty(&mut h, "23 59");
+    wait_stty(&mut h, "24 59");
     switch_to(&mut h, "other");
-    wait_stty(&mut h, "23 59");
+    wait_stty(&mut h, "24 59");
     // Hidden before the switch: the other session's shell has the full width.
     prefixed(&mut h, "b");
-    wait_stty(&mut h, "23 100");
+    wait_stty(&mut h, "24 100");
     switch_to(&mut h, "main");
-    wait_stty(&mut h, "23 100");
+    wait_stty(&mut h, "24 100");
 }
 
 #[test]
@@ -201,9 +201,9 @@ fn a_shrinking_window_shrinks_a_wide_sidebar_and_a_growing_one_does_not_widen_it
             .and_then(|r| r.chars().position(|c| c == '│'))
     };
     wait_until("the sidebar at 59", TIMEOUT, || separator(&h) == Some(59));
-    wait_stty(&mut h, "23 20");
+    wait_stty(&mut h, "24 20");
     h.resize(100, 24);
-    wait_stty(&mut h, "23 40");
+    wait_stty(&mut h, "24 40");
     assert_eq!(separator(&h), Some(59));
 }
 
@@ -228,33 +228,33 @@ fn the_drag_never_reaches_a_program_that_asked_for_the_mouse() {
 fn the_dragged_width_survives_hiding_and_showing_the_sidebar() {
     let mut h = attached();
     drag(&mut h, 28, 40);
-    wait_stty(&mut h, "23 59");
+    wait_stty(&mut h, "24 59");
     prefixed(&mut h, "b");
-    wait_stty(&mut h, "23 100");
+    wait_stty(&mut h, "24 100");
     prefixed(&mut h, "b");
-    wait_stty(&mut h, "23 59");
+    wait_stty(&mut h, "24 59");
 }
 
 #[test]
 fn a_press_on_the_separator_with_the_sidebar_hidden_does_nothing() {
     let mut h = attached();
     prefixed(&mut h, "b");
-    wait_stty(&mut h, "23 100");
+    wait_stty(&mut h, "24 100");
     drag(&mut h, 28, 40);
     sleep(Duration::from_millis(200));
     assert!(!h.screen_text().contains("SIDEBAR"));
     prefixed(&mut h, "b");
-    wait_stty(&mut h, "23 71");
+    wait_stty(&mut h, "24 71");
 }
 
 #[test]
 fn a_press_on_a_sidebar_row_still_focuses_it() {
     let mut h = attached();
-    h.wait_for_text("▌  ❯  sh", TIMEOUT);
+    h.wait_for_active_row("   ❯  sh", TIMEOUT);
     // The project row (row 3, 1-based 3): folding it hides its panel.
     h.send_keys("\x1b[<0;5;3M");
     h.send_keys("\x1b[<0;5;3m");
-    wait_gone(&h, "▌  ❯  sh");
+    wait_gone(&h, "   ❯  sh");
 }
 
 #[test]
@@ -308,14 +308,14 @@ fn a_resize_during_typing_is_never_lost() {
         h.resize(if i % 2 == 0 { 90 } else { 100 }, 24);
     }
     h.resize(100, 24);
-    wait_stty(&mut h, "23 71");
+    wait_stty(&mut h, "24 71");
     h.resize(90, 24);
     h.send_keys("echo hi\r");
-    wait_stty(&mut h, "23 61");
+    wait_stty(&mut h, "24 61");
 }
 
-/// The bar row of the 24-row window: 0-based row 22.
-const BAR_ROW: usize = 22;
+/// The bar row of the 24-row window: 0-based row 23.
+const BAR_ROW: usize = 23;
 
 /// Pointer motion with no button held, at the 0-based `column` and `row`.
 fn hover_at(h: &mut Harness, column: u16, row: u16) {
@@ -331,6 +331,32 @@ fn wait_bar(h: &Harness) {
 }
 
 #[test]
+fn a_panel_row_under_the_pointer_has_the_hover_background_and_a_click_moves_the_band() {
+    let mut h = attached();
+    prefixed(&mut h, "c");
+    wait_until("two panels, the second active", TIMEOUT, || {
+        panels_in_sidebar(&h) == 2 && h.is_active_row(4)
+    });
+    // The pointer over the inactive first panel's row: the hover background across it.
+    hover_at(&mut h, 10, 3);
+    wait_until("the hover background", TIMEOUT, || {
+        h.cell(3, 10).bg != h.cell(5, 10).bg
+    });
+    let hover = h.cell(3, 10).bg;
+    assert!((0..28).all(|x| h.cell(3, x).bg == hover));
+    assert!(!h.is_active_row(3));
+    h.capture("sidebar-hover");
+    // A click focuses it: the band moves there and the hover is gone.
+    click_at(&mut h, 10, 3);
+    wait_until("the band on the first panel", TIMEOUT, || {
+        h.is_active_row(3) && !h.is_active_row(4)
+    });
+    assert!((0..28).all(|x| h.cell(3, x).inverse()));
+    assert_eq!(h.cell(3, 10).bg, h.cell(5, 10).bg);
+    h.capture("sidebar-band");
+}
+
+#[test]
 fn the_bottom_bar_shows_the_new_chip_and_the_restore_chip_at_the_right() {
     let h = attached();
     wait_bar(&h);
@@ -343,12 +369,12 @@ fn the_bottom_bar_shows_the_new_chip_and_the_restore_chip_at_the_right() {
 }
 
 #[test]
-fn the_header_reads_spaces_and_holds_the_new_space_chip() {
+fn the_header_reads_the_session_name_and_holds_the_new_space_chip() {
     let h = attached();
     wait_bar(&h);
     let header = rows(&h)[0].clone();
     let sidebar: String = header.chars().take(28).collect();
-    assert!(sidebar.starts_with(" Spaces "), "{header:?}");
+    assert!(sidebar.starts_with(" main "), "{header:?}");
     assert!(sidebar.trim_end().ends_with("+ New space"), "{header:?}");
     h.capture("header");
 }
@@ -359,10 +385,10 @@ fn clicking_the_header_chip_adds_a_project_like_the_prefix_flow() {
     wait_bar(&h);
     h.send_keys("\x1b[<0;18;1M");
     h.send_keys("\x1b[<0;18;1m");
-    h.wait_for_text("Directory:", TIMEOUT);
+    h.wait_for_text("Directory", TIMEOUT);
     h.send_keys("\x15/tmp");
     h.send_keys(ENTER);
-    h.wait_for_text("Space name:", TIMEOUT);
+    h.wait_for_text("Space name", TIMEOUT);
     h.send_keys("\x15barchip");
     h.send_keys(ENTER);
     h.wait_for_text("barchip", TIMEOUT);
@@ -374,13 +400,13 @@ fn clicking_the_header_chip_with_a_prompt_open_does_nothing() {
     let mut h = attached();
     wait_bar(&h);
     prefixed(&mut h, "P");
-    h.wait_for_text("Directory:", TIMEOUT);
+    h.wait_for_text("Directory", TIMEOUT);
     h.send_keys("\x1b[<0;18;1M");
     h.send_keys("\x1b[<0;18;1m");
     sleep(Duration::from_millis(300));
     let screen = h.screen_text();
-    assert_eq!(screen.matches("Directory:").count(), 1, "{screen}");
-    assert!(!screen.contains("Space name:"), "{screen}");
+    assert_eq!(screen.matches("Directory").count(), 1, "{screen}");
+    assert!(!screen.contains("Space name"), "{screen}");
 }
 
 #[test]
@@ -388,7 +414,7 @@ fn the_chip_is_drawn_in_the_selection_colours_under_the_pointer() {
     let mut h = attached();
     wait_bar(&h);
     let idle = h.cell(BAR_ROW, 3);
-    hover_at(&mut h, 5, 22);
+    hover_at(&mut h, 5, 23);
     wait_until("the chip to highlight", TIMEOUT, || {
         let c = h.cell(BAR_ROW, 3);
         c.fg != idle.fg || c.bg != idle.bg || c.flags != idle.flags
@@ -406,7 +432,7 @@ fn motion_that_keeps_the_hover_target_draws_nothing() {
     let mut h = attached();
     wait_bar(&h);
     let idle = h.cell(BAR_ROW, 3);
-    hover_at(&mut h, 3, 22);
+    hover_at(&mut h, 3, 23);
     wait_until("the chip to highlight", TIMEOUT, || {
         let c = h.cell(BAR_ROW, 3);
         c.fg != idle.fg || c.bg != idle.bg || c.flags != idle.flags
@@ -414,7 +440,7 @@ fn motion_that_keeps_the_hover_target_draws_nothing() {
     sleep(Duration::from_millis(300));
     let settled = h.raw_output().len();
     for i in 1..100u16 {
-        hover_at(&mut h, 1 + i % 7, 22);
+        hover_at(&mut h, 1 + i % 7, 23);
     }
     sleep(Duration::from_millis(500));
     assert_eq!(h.raw_output().len(), settled, "the screen was redrawn");
@@ -430,7 +456,7 @@ fn motion_over_the_sidebar_never_reaches_a_program() {
     );
     h.wait_for_text("READY", TIMEOUT);
     hover_at(&mut h, 5, 4);
-    hover_at(&mut h, 3, 22);
+    hover_at(&mut h, 3, 23);
     sleep(Duration::from_millis(300));
     assert!(!h.screen_text().contains("GOT:1b"), "{}", h.screen_text());
     // Motion over its terminal (cell 4,3 at column 33, row 4) is delivered: `ESC [ < 3 5 ; 5 ; 4`, the first nine bytes.
@@ -440,7 +466,7 @@ fn motion_over_the_sidebar_never_reaches_a_program() {
 
 #[test]
 fn a_seven_row_window_has_no_bar() {
-    let h = attached_with((100, 8), &[]);
+    let h = attached_with((100, 7), &[]);
     sleep(Duration::from_millis(300));
     assert!(!h.screen_text().contains("Restore"), "{}", h.screen_text());
 }
@@ -509,19 +535,18 @@ fn click_at(h: &mut Harness, column: u16, row: u16) {
 
 /// Clicks the `+ New` chip of the bottom bar: the menu opens for the active project.
 fn open_menu(h: &mut Harness) {
-    click_at(h, 3, 22);
+    click_at(h, 3, 23);
     h.wait_for_text("New in", TIMEOUT);
 }
 
 /// Clicks the menu item `index` of a menu opened above the bar of a 24-row window: the menu's
-/// top border is on row 15, the items follow.
+/// top border is on row 16, the items follow.
 fn pick(h: &mut Harness, index: u16) {
-    click_at(h, 12, 16 + index);
+    click_at(h, 12, 17 + index);
 }
 
 fn panels_in_sidebar(h: &Harness) -> usize {
     let side = side(h);
-    // Not the status bar, which names the active panel too.
     side.iter()
         .rev()
         .skip(1)
@@ -552,19 +577,19 @@ fn a_click_on_new_opens_the_menu_above_the_bar_and_a_click_on_the_name_folds() {
     open_menu(&mut h);
     let items: Vec<&str> = ["Terminal", "Claude", "OpenCode", "Codex"].into();
     for (i, item) in items.iter().enumerate() {
-        let row = rows(&h)[16 + i].clone();
+        let row = rows(&h)[17 + i].clone();
         assert!(row.starts_with("│ "), "{row:?}");
         assert!(row.contains(item), "{row:?}");
         assert!(row.contains(&format!("{} ", i + 1)), "{row:?}");
     }
-    assert!(rows(&h)[15].contains("╭─ New in"));
-    assert!(rows(&h)[21].starts_with('╰'));
+    assert!(rows(&h)[16].contains("╭─ New in"));
+    assert!(rows(&h)[22].starts_with('╰'));
     h.capture("new-menu");
     h.send_keys("\x1b");
     wait_gone(&h, "New in");
     // The name of the project still folds it.
     click_at(&mut h, 6, 2);
-    wait_gone(&h, "▌  ❯  sh");
+    wait_gone(&h, "   ❯  sh");
 }
 
 #[test]
@@ -576,7 +601,7 @@ fn the_terminal_item_adds_a_panel_with_a_shell_in_the_project_root() {
     let side = side(&h);
     // The old panel keeps one terminal (no count), the new one is active.
     assert!(side[3].ends_with("sh"), "{side:?}");
-    assert!(side[4].starts_with('▌'), "{side:?}");
+    assert!(h.is_active_row(4), "{side:?}");
     wait_until("the new shell", TIMEOUT, || h.screen_text().contains("│$"));
     h.send_keys("echo cwd=$(basename $PWD)\r");
     h.wait_for_text(&format!("cwd={}", home_name(&h)), TIMEOUT);
@@ -586,12 +611,11 @@ fn the_terminal_item_adds_a_panel_with_a_shell_in_the_project_root() {
 fn choosing_on_a_folded_project_unfolds_it_and_shows_the_active_new_panel() {
     let mut h = attached();
     click_at(&mut h, 6, 2);
-    wait_gone(&h, "▌  ❯  sh");
+    wait_gone(&h, "   ❯  sh");
     open_menu(&mut h);
     pick(&mut h, 0);
     wait_until("two panels, the new one active", TIMEOUT, || {
-        let side = side(&h);
-        panels_in_sidebar(&h) == 2 && side.get(4).is_some_and(|r| r.starts_with('▌'))
+        panels_in_sidebar(&h) == 2 && h.is_active_row(4)
     });
 }
 
@@ -659,7 +683,8 @@ fn the_keyboard_reaches_the_menu() {
 
 #[test]
 fn the_sidebar_hints_list_the_menu() {
-    let mut h = attached();
+    // Wide enough for the whole bar: it cuts what does not fit.
+    let mut h = attached_with((130, 24), &[]);
     prefixed(&mut h, "\t");
     h.wait_for_text(
         "↑↓ move  ⏎ open  ←→ fold  c new  n menu  r rename  x close  esc back",
@@ -681,13 +706,13 @@ fn a_click_outside_closes_the_menu_without_folding_the_row_under_it() {
 #[test]
 fn the_menu_sits_right_above_the_bar_in_a_short_window() {
     let mut h = attached_with((100, 12), &[]);
-    click_at(&mut h, 3, 10);
+    click_at(&mut h, 3, 11);
     h.wait_for_text("New in", TIMEOUT);
     let screen = rows(&h);
     let top = screen.iter().position(|r| r.contains("╭─ New in")).unwrap();
     let bottom = screen.iter().rposition(|r| r.starts_with('╰')).unwrap();
-    assert_eq!((top, bottom), (3, 9), "{}", h.screen_text());
-    assert!(screen[10].starts_with("  + New"), "{}", h.screen_text());
+    assert_eq!((top, bottom), (4, 10), "{}", h.screen_text());
+    assert!(screen[11].starts_with("  + New"), "{}", h.screen_text());
 }
 
 #[test]
@@ -713,7 +738,7 @@ fn a_project_closed_by_another_client_closes_the_menu_with_a_flash() {
     prefixed(&mut h, "\t");
     h.wait_for_text("n menu", TIMEOUT);
     h.send_keys("jj");
-    click_at(&mut h, 3, 22);
+    click_at(&mut h, 3, 23);
     h.wait_for_text("New in api", TIMEOUT);
     let out = h.run_deck(&["close", &id]);
     assert!(out.status.success(), "{}", support::stderr(&out));
@@ -770,7 +795,7 @@ fn the_new_button_adds_a_terminal_panel_to_the_selected_project() {
     prefixed(&mut h, "\t");
     h.wait_for_text("n menu", TIMEOUT);
     h.send_keys("jj");
-    click_at(&mut h, 3, 22);
+    click_at(&mut h, 3, 23);
     h.wait_for_text("New in api", TIMEOUT);
     // `api` holds its own first panel.
     let api_panels = |h: &Harness| {

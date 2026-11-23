@@ -56,18 +56,18 @@ fn random_ratios(n: usize, seed: &mut u64) -> Ratios {
 // --- panel area (DECK-08) ---
 
 #[test]
-fn the_panel_area_leaves_the_sidebar_and_the_status_bar() {
-    assert_eq!(panel_area((100, 24), 28, true), (71, 23));
-    assert_eq!(panel_area((100, 24), 28, false), (100, 23));
+fn the_panel_area_leaves_the_sidebar_and_keeps_every_row() {
+    assert_eq!(panel_area((100, 24), 28, true), (71, 24));
+    assert_eq!(panel_area((100, 24), 28, false), (100, 24));
     assert_eq!(panel_area((100, 0), 28, false), (100, 0));
 }
 
 #[test]
 fn a_narrow_window_hides_the_sidebar() {
     // 28 + separator + 20 columns is the narrowest that keeps it.
-    assert_eq!(panel_area((49, 24), 28, true), (20, 23));
-    assert_eq!(panel_area((48, 24), 28, true), (48, 23));
-    assert_eq!(panel_area((100, 24), 40, true), (59, 23));
+    assert_eq!(panel_area((49, 24), 28, true), (20, 24));
+    assert_eq!(panel_area((48, 24), 28, true), (48, 24));
+    assert_eq!(panel_area((100, 24), 40, true), (59, 24));
 }
 
 #[test]

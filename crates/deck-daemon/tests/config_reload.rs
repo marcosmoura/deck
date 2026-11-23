@@ -50,14 +50,14 @@ async fn the_welcome_carries_the_daemons_config_and_the_first_shell_is_sized_for
         &daemon.paths.socket,
         Attach {
             cols: 100,
-            rows: 25,
+            rows: 24,
             env,
             ..Attach::default()
         },
     )
     .await;
     assert_eq!(welcome_config(&client).sidebar_width, 40);
-    // Outer 100 - (40 + 1) columns, and the status-bar row off the rows.
+    // Outer 100 - (40 + 1) columns, and every row.
     assert_eq!(
         client.view.as_ref().unwrap().layout_viewport,
         Some((59, 24))
@@ -219,7 +219,7 @@ async fn a_reload_moves_no_pty_to_a_client_that_was_not_active() {
     let daemon = watching("").await;
     let attach = |cols| Attach {
         cols,
-        rows: 25,
+        rows: 24,
         ..Attach::default()
     };
     let mut a = Client::attach(&daemon.paths.socket, attach(100)).await;

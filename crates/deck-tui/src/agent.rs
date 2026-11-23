@@ -73,20 +73,6 @@ pub fn title_mark(
     Some((text, style, agent.kind.name()))
 }
 
-/// How many terminals of the session wait for the user.
-pub fn waiting_terminals(view: &SessionView) -> usize {
-    view.projects
-        .iter()
-        .flat_map(|p| &p.panels)
-        .flat_map(|p| &p.terminals)
-        .filter(|t| {
-            t.agent
-                .as_ref()
-                .is_some_and(|a| a.status == AgentStatus::Waiting)
-        })
-        .count()
-}
-
 /// How many panels of a project wait for the user.
 pub fn waiting_panels(project: &ProjectView) -> usize {
     project

@@ -17,7 +17,7 @@ A terminal that runs an agent has an agent state: its kind, a status and a sourc
 
 Urgency, most to least: `waiting`, `working`, `active`, `idle`, `quiet`, none. The sidebar shows, in the status column of a panel row, the glyph of the panel's most urgent terminal. The glyphs and colours come from `[theme.glyphs]` (`spinner` is a list of frames, `waiting`, `idle`, `quiet`) and the theme colours; see the reference in `deck config default`.
 
-A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<glyph> <kind> · <name>` in place of the number. The status bar shows `space › <status> <icon> <name>` for the active panel (`space › ⠹ ✻  Fix login bug`), the same status glyph and icon as the sidebar row, so the state stays visible when the sidebar is hidden; there is no status glyph without an agent. The client redraws the spinner only while one spins.
+A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<glyph> <kind> · <name>` in place of the number. There is no status glyph without an agent. The client redraws the spinner only while one spins.
 
 ## Detection by process
 
@@ -79,7 +79,6 @@ Hook-sourced states only (a process-only `active` to `quiet` pause happens all t
 - **Looking** means the panel is the session's active panel and a client of the session has its outer terminal focused. A client reports focus with `ClientMsg::Focus(bool)` from the outer terminal's focus events, and again on every attach once it saw one; a client that never reported counts as focused, so a terminal without focus reporting never notifies for the active panel.
 - **Unseen** panels are bold in the sidebar with the `unseen` glyph (`•`, accent) after the name, until the panel is the active panel of a focused client. A collapsed space shows `!<n>` (warning) after its name when `n` of its panels wait.
 - **The alert** goes to the one client of the session that sent input or a viewport last, and the client writes it to the outer terminal as `notify` says: `"osc9"` (default) `ESC ] 9 ; <body> BEL`, `"bell"` a lone `BEL`, `"none"` nothing. The body is `<kind> needs you · <space> › <panel>` for `waiting` and `<kind> finished · <space> › <panel>` for `idle`; control characters are stripped from the names. OSC 9 shows a desktop notification in iTerm2, Ghostty and WezTerm and is ignored by terminals that do not know it (kitty uses OSC 99 and is not targeted). Inside tmux or over ssh it reaches the desktop only if they pass it through.
-- **The status bar** shows `<n> waiting` (warning) on its right while any terminal of the session waits, and the `a next` hint.
 - **Jump**: `prefix a` (`next_attention`) focuses the next waiting terminal in sidebar order after the current one, wrapping; with none waiting, the next idle terminal in an unseen panel; with none, it flashes `no agent needs you`. Panels of collapsed spaces are included.
 
 Limitations: a session with no attached client alerts nobody (its panels are still marked unseen for the next attach), and the session picker shows no agent status.

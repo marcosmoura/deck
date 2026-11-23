@@ -26,7 +26,7 @@ const UUID_A: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const UUID_B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const UUID_X: &str = "11111111-1111-4111-8111-111111111111";
 /// The bar row of the 24-row window, 0-based.
-const BAR_ROW: u16 = 22;
+const BAR_ROW: u16 = 23;
 /// A column on the `Restore` chip of the 28-column sidebar.
 const CHIP: u16 = 20;
 
@@ -426,9 +426,9 @@ fn right_down_enter_on_the_codex_column_resumes_that_session_in_a_new_active_pan
     );
     wait_gone(&h, "Restore agent session");
     wait_until("the new panel active", TIMEOUT, || {
-        rows(&h)
-            .iter()
-            .any(|r| r.starts_with('▌') && r.chars().take(28).collect::<String>().contains("codex"))
+        rows(&h).iter().enumerate().any(|(y, r)| {
+            h.is_active_row(y) && r.chars().take(28).collect::<String>().contains("codex")
+        })
     });
     assert!(sb.starts("claude").is_empty());
 }
@@ -453,8 +453,12 @@ fn a_session_opens_in_the_project_that_holds_its_directory_else_in_the_active_on
     // Make the first project active: click its panel.
     click_at(&mut h, 10, 3);
     wait_until("the first project active", TIMEOUT, || {
-        let p = projects(&h);
-        p[0].1.iter().any(|r| r.starts_with('▌'))
+        // The band is on a panel row of the first project, above the next project's row.
+        let rows = rows(&h);
+        let next = (3..rows.len())
+            .find(|&y| rows[y].starts_with(" ▾") || rows[y].starts_with(" ▸"))
+            .unwrap_or(rows.len());
+        (3..next).any(|y| h.is_active_row(y))
     });
     open_by_click(&mut h);
     h.wait_for_text("Fix the login redirect", TIMEOUT);
@@ -628,7 +632,7 @@ fn without_a_project_the_binding_and_the_button_flash_and_open_nothing() {
     fixtures(&sb);
     let mut h = start(&sb);
     prefixed(&mut h, "Q");
-    h.wait_for_text("(y/n)", TIMEOUT);
+    h.wait_for_text("y yes  n no", TIMEOUT);
     h.send_keys("y");
     wait_until("no project", TIMEOUT, || projects(&h).is_empty());
     prefixed(&mut h, "R");

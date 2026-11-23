@@ -1,4 +1,4 @@
-//! Applying the daemon's config while the client runs, and the notices in the status bar.
+//! Applying the daemon's config while the client runs, and the notices in the floating bar.
 
 use std::time::{Duration, Instant};
 
@@ -66,14 +66,14 @@ fn notice(level: NoticeLevel, text: &str) -> ServerMsg {
 fn a_new_theme_applies_at_once() {
     let mut a = app();
     let before = render(&a);
-    let accent = before[(0, 3)].fg;
+    let accent = before[(1, 0)].fg;
     let outs = a.on_server(ServerMsg::Config(Box::new(parse(
         "[theme]\naccent = \"#ff0000\"",
     ))));
     assert!(outs.is_empty(), "a theme changes no size: {outs:?}");
     let after = render(&a);
-    assert_ne!(after[(0, 3)].fg, accent);
-    assert_eq!(after[(0, 3)].fg, Color::Rgb(255, 0, 0));
+    assert_ne!(after[(1, 0)].fg, accent);
+    assert_eq!(after[(1, 0)].fg, Color::Rgb(255, 0, 0));
 }
 
 #[test]
@@ -107,9 +107,9 @@ fn new_bindings_and_prefix_apply_and_an_armed_prefix_is_kept() {
 #[test]
 fn a_new_sidebar_width_resizes_and_sends_the_viewport() {
     let mut a = app();
-    assert_eq!(a.viewport(), (71, 23));
+    assert_eq!(a.viewport(), (71, 24));
     let outs = a.on_server(ServerMsg::Config(Box::new(parse("sidebar_width = 40"))));
-    assert_eq!(outs, [viewport(59, 23)]);
+    assert_eq!(outs, [viewport(59, 24)]);
     assert_eq!(a.sidebar_width, 40);
     let buf = render(&a);
     assert_eq!(buf[(40, 5)].symbol(), "│", "the separator moved");
@@ -138,7 +138,7 @@ fn a_sidebar_the_user_hid_stays_hidden_unless_the_setting_changes() {
     assert!(a.sidebar_hidden);
     let outs = a.on_server(ServerMsg::Config(Box::new(parse("sidebar_width = 40"))));
     assert!(!a.sidebar_hidden);
-    assert_eq!(outs, [viewport(59, 23)]);
+    assert_eq!(outs, [viewport(59, 24)]);
 }
 
 #[test]
@@ -175,7 +175,8 @@ fn a_notice_flashes_for_its_level_and_colour() {
         );
         let buf = render(&a);
         let line = row(&buf, 23);
-        let x = u16::try_from(line.find("hello notice").unwrap()).unwrap();
+        let at = line.find("hello notice").unwrap();
+        let x = u16::try_from(line[..at].chars().count()).unwrap();
         assert_eq!(buf[(x, 23)].fg, theme_fg, "{level:?}");
         a.tick(until);
         assert!(a.flash.is_none());

@@ -42,9 +42,9 @@ fn rows(h: &Harness) -> Vec<String> {
 /// Waits until the sidebar header (the first row) names the session.
 fn wait_for_session(h: &Harness, name: &str) {
     wait_until(&format!("the session {name}"), TIMEOUT, || {
-        // The status bar starts with the session's name; the sidebar header cuts it short.
+        // The sidebar header starts with the session's name.
         rows(h)
-            .last()
+            .first()
             .is_some_and(|r| r.trim_start().split(' ').next() == Some(name))
     });
 }
@@ -129,7 +129,7 @@ fn ctrl_o_creates_a_session_from_the_filter_and_switches_to_it() {
     // With an empty filter it asks for a name.
     open_picker(&mut h);
     h.send_keys(CTRL_O);
-    h.wait_for_text("New session:", TIMEOUT);
+    h.wait_for_text("New session", TIMEOUT);
     h.capture("new-session-prompt");
     h.send_keys("fourth");
     h.send_keys(ENTER);
@@ -145,12 +145,13 @@ fn ctrl_r_renames_the_selected_session_and_a_duplicate_shows_the_error() {
     h.send_keys("oth");
     wait_gone(&h, "● main");
     h.send_keys(CTRL_R);
-    h.wait_for_text("Rename session: other", TIMEOUT);
+    h.wait_for_text("Rename session", TIMEOUT);
+    h.wait_for_text("│ other█", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("main");
     h.send_keys(ENTER);
     h.wait_for_text("a session named \"main\" already exists", TIMEOUT);
-    h.wait_for_text("Rename session:", TIMEOUT);
+    h.wait_for_text("Rename session", TIMEOUT);
     h.capture("rename-error");
     h.send_keys(CTRL_U);
     h.send_keys("second");
@@ -176,7 +177,7 @@ fn ctrl_x_kills_the_current_session_and_the_client_moves_to_the_previous_one() {
 
     open_picker(&mut h);
     h.send_keys(CTRL_X);
-    h.wait_for_text("Kill session \"other\" and its 1 terminal? (y/n)", TIMEOUT);
+    h.wait_for_text("Kill session \"other\" and its 1 terminal?", TIMEOUT);
     h.capture("kill-confirm");
     h.send_keys("y");
     wait_for_session(&h, "main");
@@ -186,7 +187,7 @@ fn ctrl_x_kills_the_current_session_and_the_client_moves_to_the_previous_one() {
     // The last session ends the client.
     open_picker(&mut h);
     h.send_keys(CTRL_X);
-    h.wait_for_text("(y/n)", TIMEOUT);
+    h.wait_for_text("y yes  n no", TIMEOUT);
     h.send_keys("y");
     h.wait_for_text("[session main ended]", TIMEOUT);
     assert!(h.wait_for_exit(TIMEOUT).success());
@@ -210,12 +211,13 @@ fn killing_another_session_from_the_picker_keeps_the_picker_open() {
 fn the_rename_binding_renames_the_current_session() {
     let mut h = attached();
     prefixed(&mut h, "$");
-    h.wait_for_text("Rename session: main", TIMEOUT);
+    h.wait_for_text("Rename session", TIMEOUT);
+    h.wait_for_text("│ main█", TIMEOUT);
     h.send_keys(CTRL_U);
     h.send_keys("primary");
     h.send_keys(ENTER);
     wait_for_session(&h, "primary");
-    h.wait_for_text(" primary  dk", TIMEOUT);
+    h.wait_for_text(" primary ", TIMEOUT);
     assert!(ls(&h).starts_with("primary"));
     h.capture("renamed");
 }

@@ -203,23 +203,25 @@ fn the_sessions_panels_and_grid_come_back_after_kill_server() {
     // named after their shell at once.
     prefixed(&mut h, "c");
     wait_until("a second panel", TIMEOUT, || {
-        h.screen_text()
-            .lines()
-            .nth(4)
-            .is_some_and(|r| r.starts_with("▌  ❯  sh"))
+        h.is_active_row(4)
+            && h.screen_text()
+                .lines()
+                .nth(4)
+                .is_some_and(|r| r.starts_with("   ❯  sh"))
     });
     add_terminals(&mut h, 3);
     prefixed(&mut h, "c");
     wait_until("a third panel", TIMEOUT, || {
-        h.screen_text()
-            .lines()
-            .nth(5)
-            .is_some_and(|r| r.starts_with("▌  ❯  sh"))
+        h.is_active_row(5)
+            && h.screen_text()
+                .lines()
+                .nth(5)
+                .is_some_and(|r| r.starts_with("   ❯  sh"))
     });
     add_terminals(&mut h, 5);
     prefixed(&mut h, ",");
     h.send_keys("\x15build\r");
-    h.wait_for_text("▌  ❯  build", TIMEOUT);
+    h.wait_for_active_row("   ❯  build", TIMEOUT);
     let other = h.run_deck(&["new", "other", "-d"]);
     assert!(other.status.success(), "{}", stderr(&other));
     wait_until("the grid to settle", TIMEOUT, || {
