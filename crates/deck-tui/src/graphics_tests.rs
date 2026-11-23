@@ -445,3 +445,41 @@ fn names_start_at_the_same_column_with_logos_and_with_text_icons() {
         assert_eq!(buf[(6, y)].symbol(), first, "row {y}");
     }
 }
+
+#[test]
+fn the_logos_of_the_dragged_and_target_rows_are_sent_in_their_colours() {
+    use crate::sidebar::{RowDrag, Sel};
+    use deck_core::model::{PanelId, ProjectId};
+    let mut a = ghostty("");
+    // Panel 6 (row 6) is dragged to the place of the first panel (row 3, the active one).
+    a.row_drag = Some(RowDrag {
+        item: Sel::Panel(ProjectId(1), PanelId(6)),
+        to: 0,
+    });
+    assert!(a.drag_target_sel().is_some());
+    let mut sink = Vec::new();
+    a.send_images(&mut sink).unwrap();
+    let (buf, _) = render(&a);
+    let base = crate::sidebar::base_style(&a.theme);
+    let images = a.images.as_ref().unwrap();
+    // The dragged row is dimmed in place; the target's logo moved two columns right and has
+    // its normal (band, active) colours.
+    for (column, row, style) in [
+        (3, 6, crate::sidebar::dimmed_style(&a.theme, base)),
+        (
+            5,
+            3,
+            crate::sidebar::panel_style(&a.theme, base, true, true),
+        ),
+    ] {
+        let id = placeholder_cell(&buf, column, row).expect("the logo is drawn");
+        let pair = images.order.iter().find(|(i, _)| *i == id).unwrap().1;
+        // The logo is drawn in its provider colour over the row's style (`icon_style`).
+        let kind = [IconKind::Claude, IconKind::Codex, IconKind::OpenCode]
+            .into_iter()
+            .find(|k| Logo::of(*k) == Some(pair.logo))
+            .expect("an agent logo");
+        let style = crate::sidebar::icon_style(&a.theme, kind, style);
+        assert_eq!(pair.rgb, images.cell_for(style).0, "row {row}");
+    }
+}

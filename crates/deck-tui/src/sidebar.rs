@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
 use crate::agent;
-use crate::app::{App, Out};
+use crate::app::{App, Out, too_small};
 use crate::convert::image_id_color;
 use crate::draw::{color, selection, truncate, width};
 use crate::graphics::{Logo, Pair, placeholder};
@@ -39,6 +39,14 @@ pub const SIDEBAR_HINTS: &[(&str, &str)] = &[
     ("x", "close"),
     ("esc", "back"),
 ];
+
+/// A row being dragged to another place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RowDrag {
+    pub item: Sel,
+    /// The index the item ends at if dropped now.
+    pub to: usize,
+}
 
 /// The row the sidebar selection is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +141,8 @@ pub enum Row {
     Panel(ProjectId, PanelId),
     /// The muted `no panels` of an empty project.
     NoPanels,
+    /// A blank row between two spaces (`sidebar_space_gap`).
+    Gap,
 }
 
 impl Row {
@@ -140,15 +150,47 @@ impl Row {
         match self {
             Self::Project(p) => Some(Sel::Project(p)),
             Self::Panel(p, panel) => Some(Sel::Panel(p, panel)),
-            Self::NoPanels => None,
+            Self::NoPanels | Self::Gap => None,
         }
     }
 }
 
-/// The rows of the session's projects, collapsed ones without their panels.
-pub fn rows(view: &SessionView) -> Vec<Row> {
+/// An item shown at another place than the daemon's, while it is dragged or its move is on
+/// its way: the item ends at index `to` of its list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reorder {
+    pub item: Sel,
+    pub to: usize,
+}
+
+/// `items` with the one at `from` moved to `to` (clamped to the last index).
+fn moved<T>(items: &mut Vec<T>, from: usize, to: usize) {
+    let item = items.remove(from);
+    items.insert(to.min(items.len()), item);
+}
+
+/// The rows of the session's projects, collapsed ones without their panels, with `gap` blank
+/// rows between two projects.
+pub fn rows(view: &SessionView, gap: u8) -> Vec<Row> {
+    rows_with(view, gap, None)
+}
+
+/// [`rows`] as they will be once `reorder` is applied.
+pub fn rows_with(view: &SessionView, gap: u8, reorder: Option<Reorder>) -> Vec<Row> {
+    let mut projects: Vec<&deck_core::model::ProjectView> = view.projects.iter().collect();
+    if let Some(Reorder {
+        item: Sel::Project(id),
+        to,
+    }) = reorder
+        && let Some(from) = projects.iter().position(|p| p.id == id)
+    {
+        moved(&mut projects, from, to);
+    }
     let mut rows = Vec::new();
-    for project in &view.projects {
+    for (i, project) in projects.into_iter().enumerate() {
+        if i > 0 {
+            rows.extend(std::iter::repeat_n(Row::Gap, usize::from(gap)));
+        }
         rows.push(Row::Project(project.id));
         if project.collapsed {
             continue;
@@ -156,14 +198,27 @@ pub fn rows(view: &SessionView) -> Vec<Row> {
         if project.panels.is_empty() {
             rows.push(Row::NoPanels);
         }
-        rows.extend(project.panels.iter().map(|p| Row::Panel(project.id, p.id)));
+        let mut panels: Vec<PanelId> = project.panels.iter().map(|p| p.id).collect();
+        if let Some(Reorder {
+            item: Sel::Panel(owner, id),
+            to,
+        }) = reorder
+            && owner == project.id
+            && let Some(from) = panels.iter().position(|p| *p == id)
+        {
+            moved(&mut panels, from, to);
+        }
+        rows.extend(panels.into_iter().map(|p| Row::Panel(project.id, p)));
     }
     rows
 }
 
 impl App {
     pub(crate) fn sidebar_rows(&self) -> Vec<Row> {
-        self.mirror.view().map_or_else(Vec::new, rows)
+        let gap = self.config.sidebar_space_gap;
+        self.mirror
+            .view()
+            .map_or_else(Vec::new, |view| rows(view, gap))
     }
 
     fn selectable(&self) -> Vec<Sel> {
@@ -236,7 +291,9 @@ impl App {
     /// Recomputes the hover from the last pointer position, after rows moved under it.
     pub(crate) fn refresh_hover(&mut self) {
         let hover = match self.pointer {
-            Some((column, row)) if !self.overlay_open() => self.hover_at(column, row),
+            Some((column, row)) if !self.overlay_open() && self.row_drag.is_none() => {
+                self.hover_at(column, row)
+            }
             _ => None,
         };
         self.set_hover(hover);
@@ -414,6 +471,228 @@ impl App {
         outs
     }
 
+    /// The release of a click on `item`: focuses the panel, or folds or unfolds the space.
+    fn click_row(&mut self, item: Sel) -> Vec<Out> {
+        self.selection = Some(item);
+        match item {
+            Sel::Panel(_, panel) => vec![self.act(Act::FocusPanel { panel }, None)],
+            Sel::Project(project) => self.toggle_collapsed(project),
+        }
+    }
+
+    /// Ends the press or drag of a row, for a reason that is not its release: the rest of the
+    /// gesture goes to no program.
+    /// The rest of the gesture is swallowed only when `swallow` (its release is still to come).
+    pub(crate) fn end_row_gesture(&mut self, swallow: bool) {
+        let pressed = self.row_press.take().is_some();
+        let dragged = self.row_drag.take().is_some();
+        if pressed || dragged {
+            self.swallow_release |= swallow;
+            self.dirty = true;
+        }
+    }
+
+    /// Ends a gesture whose row is gone or whose sidebar cannot be drawn.
+    pub(crate) fn check_row_gesture(&mut self) {
+        let item = self.row_drag.map(|d| d.item).or(self.row_press);
+        let Some(item) = item else { return };
+        let alive = !too_small(self.size)
+            && self.sidebar_visible()
+            && !self.overlay_open()
+            && self.sidebar_rows().iter().any(|r| r.sel() == Some(item));
+        if !alive {
+            self.end_row_gesture(true);
+        }
+    }
+
+    /// The rows as they are drawn: the daemon's, with the item just dropped at its new place until
+    /// the daemon answers.
+    pub(crate) fn preview_rows(&self) -> Vec<Row> {
+        // The list stays still while dragging; a move just dropped shows until its answer.
+        let reorder = self.row_drop.map(|(r, _)| r);
+        let gap = self.config.sidebar_space_gap;
+        self.mirror
+            .view()
+            .map_or_else(Vec::new, |view| rows_with(view, gap, reorder))
+    }
+
+    /// The item whose row is the drop target of the drag: the one whose place the dragged item
+    /// would take. None without a drag, or when the target is the item's own place.
+    pub(crate) fn drag_target_sel(&self) -> Option<Sel> {
+        let drag = self.row_drag?;
+        if self.place_of(drag.item)? == drag.to {
+            return None;
+        }
+        let view = self.mirror.view()?;
+        match drag.item {
+            Sel::Project(_) => view.projects.get(drag.to).map(|p| Sel::Project(p.id)),
+            Sel::Panel(project, _) => {
+                let panels = &view.projects.iter().find(|p| p.id == project)?.panels;
+                panels.get(drag.to).map(|p| Sel::Panel(project, p.id))
+            }
+        }
+    }
+
+    /// The index `item` is at in its list now.
+    fn place_of(&self, item: Sel) -> Option<usize> {
+        let view = self.mirror.view()?;
+        match item {
+            Sel::Project(id) => view.projects.iter().position(|p| p.id == id),
+            Sel::Panel(project, id) => view
+                .projects
+                .iter()
+                .find(|p| p.id == project)?
+                .panels
+                .iter()
+                .position(|p| p.id == id),
+        }
+    }
+
+    /// The index `item` would end at with the pointer on row `at` of the daemon's `rows`.
+    fn drop_target(&self, rows: &[Row], item: Sel, at: usize) -> Option<usize> {
+        let view = self.mirror.view()?;
+        match item {
+            Sel::Project(_) => {
+                // A blank row or `no panels` belongs to the space above it.
+                let owner = rows.get(..=at)?.iter().rev().find_map(|r| match r {
+                    Row::Project(p) | Row::Panel(p, _) => Some(*p),
+                    Row::NoPanels | Row::Gap => None,
+                })?;
+                view.projects.iter().position(|p| p.id == owner)
+            }
+            Sel::Panel(project, _) => {
+                let panels = &view.projects.iter().find(|p| p.id == project)?.panels;
+                if let Some(Row::Panel(p, panel)) = rows.get(at)
+                    && *p == project
+                {
+                    return panels.iter().position(|x| x.id == *panel);
+                }
+                // Above the space's panels is the first, below is the last.
+                let first = rows
+                    .iter()
+                    .position(|r| matches!(r, Row::Panel(p, _) if *p == project))?;
+                Some(if at < first {
+                    0
+                } else {
+                    panels.len().saturating_sub(1)
+                })
+            }
+        }
+    }
+
+    /// The press, drag and release of a row: `Some` with what to send when the event is the
+    /// gesture's and goes no further.
+    pub(crate) fn row_drag_mouse(&mut self, event: ct::MouseEvent) -> Option<Vec<Out>> {
+        use ct::MouseButton::Left;
+        use ct::MouseEventKind as Kind;
+        if self.row_press.is_none() && self.row_drag.is_none() {
+            return None;
+        }
+        match event.kind {
+            Kind::Drag(Left) => {
+                self.row_drag_to(event);
+                Some(Vec::new())
+            }
+            Kind::Up(Left) => {
+                let press = self.row_press.take();
+                let drag = self.row_drag.take();
+                self.dirty = true;
+                if let Some(drag) = drag {
+                    return Some(self.drop_row(drag, event));
+                }
+                let item = press?;
+                if self.hover_at(event.column, event.row) == Some(Hover::Row(item)) {
+                    self.hover = None;
+                    return Some(self.click_row(item));
+                }
+                Some(Vec::new())
+            }
+            // The release was lost: the gesture is over, and this event is handled as usual.
+            Kind::Moved | Kind::Down(_) => {
+                self.row_press = None;
+                self.row_drag = None;
+                self.dirty = true;
+                None
+            }
+            _ => Some(Vec::new()),
+        }
+    }
+
+    /// The release of a drag: the move, when the item ends at another place. A release over
+    /// the panel area drops nothing.
+    fn drop_row(&mut self, drag: RowDrag, event: ct::MouseEvent) -> Vec<Out> {
+        if event.column >= self.sidebar_width || self.place_of(drag.item) == Some(drag.to) {
+            return Vec::new();
+        }
+        self.row_drop = Some((
+            Reorder {
+                item: drag.item,
+                to: drag.to,
+            },
+            self.pending.len(),
+        ));
+        let action = match drag.item {
+            Sel::Project(project) => Act::MoveProject {
+                project,
+                to: drag.to,
+            },
+            Sel::Panel(_, panel) => Act::MovePanel { panel, to: drag.to },
+        };
+        vec![self.act(action, None)]
+    }
+
+    /// The pointer moved with the button down after a press on a row: starts the drag when it
+    /// reaches another row, then follows it.
+    fn row_drag_to(&mut self, event: ct::MouseEvent) {
+        let rows = self.sidebar_rows();
+        let height = self.list_height();
+        let in_list = event.column < self.sidebar_width;
+        let line = event
+            .row
+            .checked_sub(HEADER_ROWS)
+            .map(usize::from)
+            .filter(|l| in_list && *l < height);
+        // A pointer below the last row is on it.
+        let at = line
+            .map(|l| (self.sidebar_offset + l).min(rows.len().saturating_sub(1)))
+            .filter(|_| !rows.is_empty());
+        let item = self.row_drag.map(|d| d.item).or(self.row_press);
+        let Some(item) = item else { return };
+        if self.row_drag.is_none() {
+            // The pointer has to reach another row to start a drag.
+            let reached = line
+                .and_then(|l| rows.get(self.sidebar_offset + l))
+                .is_some_and(|r| r.sel() != Some(item));
+            if !reached {
+                return;
+            }
+            self.row_press = None;
+            self.row_drag = Some(RowDrag { item, to: 0 });
+            self.set_hover(None);
+            self.dirty = true;
+            if let Some(to) = self.place_of(item) {
+                self.row_drag = Some(RowDrag { item, to });
+            }
+        }
+        if let Some(at) = at
+            && let Some(to) = self.drop_target(&rows, item, at)
+            && let Some(drag) = self.row_drag.as_mut()
+            && drag.to != to
+        {
+            drag.to = to;
+            self.dirty = true;
+        }
+        // The header scrolls the list up, the last row down.
+        let max = rows.len().saturating_sub(height);
+        if in_list && event.row < HEADER_ROWS && self.sidebar_offset > 0 {
+            self.sidebar_offset -= 1;
+            self.dirty = true;
+        } else if in_list && height > 0 && line == Some(height - 1) && self.sidebar_offset < max {
+            self.sidebar_offset += 1;
+            self.dirty = true;
+        }
+    }
+
     /// A mouse event over the sidebar or its separator.
     pub(crate) fn sidebar_mouse(&mut self, event: ct::MouseEvent) -> Vec<Out> {
         if event.column >= self.sidebar_width {
@@ -443,17 +722,9 @@ impl App {
                 if line >= self.list_height() {
                     return Vec::new();
                 }
-                match rows.get(self.sidebar_offset + line) {
-                    Some(Row::Panel(project, panel)) => {
-                        self.selection = Some(Sel::Panel(*project, *panel));
-                        vec![self.act(Act::FocusPanel { panel: *panel }, None)]
-                    }
-                    Some(Row::Project(project)) => {
-                        self.selection = Some(Sel::Project(*project));
-                        self.toggle_collapsed(*project)
-                    }
-                    _ => Vec::new(),
-                }
+                // The press only records the row: its release acts, a drag moves it.
+                self.row_press = rows.get(self.sidebar_offset + line).and_then(|r| r.sel());
+                Vec::new()
             }
             _ => Vec::new(),
         }
@@ -547,6 +818,20 @@ pub fn panel_style(theme: &Theme, base: Style, band: bool, active: bool) -> Styl
     }
 }
 
+/// The caret of the drop target's row: `➤`, or the Nerd Font caret with the `nerd` icons.
+pub fn caret_glyph(theme: &Theme) -> &'static str {
+    if theme.icons == IconPreset::Nerd {
+        "\u{f0da}"
+    } else {
+        "\u{27a4}"
+    }
+}
+
+/// The style of the dragged row, left in its place: all muted.
+pub fn dimmed_style(theme: &Theme, base: Style) -> Style {
+    base.fg(color(theme.muted))
+}
+
 /// Draws the sidebar in `area` (its columns, without the separator) and the separator
 /// column after it.
 pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
@@ -602,7 +887,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     );
     put(buf, area.y, span.start, new_project_chip(w), style);
 
-    let rows = rows(view);
+    let rows = app.preview_rows();
+    let dragged = app.row_drag.map(|d| d.item);
+    let target = app.drag_target_sel();
     let height = usize::from(
         area.height
             .saturating_sub(HEADER_ROWS + bar_rows(area.height)),
@@ -625,8 +912,19 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         let is_selected = row.sel().is_some() && row.sel() == selected;
         let active = matches!(*row, Row::Panel(_, id) if view.active_panel == Some(id));
         // The selection in sidebar focus, else the active panel, has the band.
-        let band = is_selected || (active && !app.sidebar_focus);
-        let hovered = !band
+        // The drop target is drawn two columns to the right, after a caret; the dragged row
+        // is dimmed.
+        let shifted = row.sel().is_some() && row.sel() == target;
+        let dimmed = row.sel().is_some() && row.sel() == dragged;
+        // A band or hover background starts after the caret.
+        let (lead, full) = if shifted {
+            (2, w.saturating_sub(2))
+        } else {
+            (0, w)
+        };
+        let band = !dimmed && (is_selected || (active && !app.sidebar_focus));
+        let hovered = !dimmed
+            && !band
             && row.sel().is_some()
             && (app.hover == row.sel().map(Hover::Row) || menu_row == row.sel());
         let muted = if hovered {
@@ -637,7 +935,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         // The accent and muted patches must not replace a custom selection colour.
         let keep = |style: Style| {
             let none = Default::default();
-            if band && theme.selection_fg != none {
+            if dimmed {
+                style.fg(color(theme.muted))
+            } else if band && theme.selection_fg != none {
                 style.fg(color(theme.selection_fg))
             } else if band && theme.selection_bg == none {
                 // Reversed: a colour would show as a block, so the text colour stays.
@@ -646,13 +946,33 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 style
             }
         };
-        if band {
+        if dimmed {
+            row_style = dimmed_style(theme, row_style);
+        } else if band {
             row_style = selection(theme, row_style);
-            buf.set_style(Rect::new(area.x, y, w, 1), row_style);
+            buf.set_style(Rect::new(area.x + lead, y, full, 1), row_style);
         } else if hovered {
             row_style = row_style.bg(hover_bg);
-            buf.set_style(Rect::new(area.x, y, w, 1), row_style);
+            buf.set_style(Rect::new(area.x + lead, y, full, 1), row_style);
         }
+        // The caret, then the row's content in the room that is left.
+        let (shift, w) = (lead, full);
+        if shifted {
+            let caret = Style::new()
+                .fg(color(theme.accent))
+                .add_modifier(Modifier::BOLD)
+                .remove_modifier(Modifier::REVERSED);
+            buf.set_stringn(area.x, y, format!("{} ", caret_glyph(theme)), 2, caret);
+        }
+        let put = |buf: &mut Buffer, y: u16, x: u16, text: &str, style: Style| {
+            buf.set_stringn(
+                area.x + shift + x,
+                y,
+                text,
+                usize::from(w.saturating_sub(x)),
+                style,
+            );
+        };
         // The right-aligned count, if any, takes its room off the name.
         let side = |text: String| -> (String, u16) {
             let n = width(&text);
@@ -686,7 +1006,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     .saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 })
                     .saturating_sub(badge_w);
                 let mut style = row_style;
-                if view.active_project == Some(id) {
+                if view.active_project == Some(id) && !dimmed {
                     style = style.add_modifier(Modifier::BOLD);
                 }
                 let name = truncate(&p.name, room);
@@ -721,6 +1041,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 if hovered {
                     style = style.bg(hover_bg);
                 }
+                if dimmed {
+                    style = row_style;
+                }
                 // The status column: the panel's most urgent agent.
                 if let Some((text, glyph_style)) =
                     agent::glyph(agent::panel_status(p), app.spin, theme)
@@ -754,7 +1077,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 let room = w
                     .saturating_sub(name_x + 1 + if count_w > 0 { count_w + 1 } else { 0 })
                     .saturating_sub(marker_w);
-                if p.unseen {
+                if p.unseen && !dimmed {
                     style = style.add_modifier(Modifier::BOLD);
                 }
                 if let Some((icon, icon_style)) = icon {
@@ -798,6 +1121,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 }
             }
             Row::NoPanels => put(buf, y, 3, "no panels", keep(row_style.patch(muted))),
+            Row::Gap => {}
         }
     }
     if bar_rows(area.height) > 0 {

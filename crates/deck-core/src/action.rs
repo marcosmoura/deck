@@ -49,6 +49,11 @@ pub enum Action {
     FocusProject {
         project: ProjectId,
     },
+    /// Moves a space to index `to` of the session's spaces (clamped to the last one).
+    MoveProject {
+        project: ProjectId,
+        to: usize,
+    },
     NewPanel {
         project: ProjectId,
         name: Option<String>,
@@ -71,6 +76,11 @@ pub enum Action {
     },
     FocusPanel {
         panel: PanelId,
+    },
+    /// Moves a panel to index `to` of its space's panels (clamped to the last one).
+    MovePanel {
+        panel: PanelId,
+        to: usize,
     },
     CyclePanel {
         delta: i32,
@@ -323,6 +333,14 @@ mod tests {
             Action::AutoNamePanel { panel: PanelId(2) },
             Action::ClosePanel { panel: PanelId(2) },
             Action::FocusPanel { panel: PanelId(2) },
+            Action::MoveProject {
+                project: ProjectId(1),
+                to: 2,
+            },
+            Action::MovePanel {
+                panel: PanelId(2),
+                to: 0,
+            },
             Action::CyclePanel { delta: -1 },
             Action::RenameSession { name: "s".into() },
             Action::KillSession,

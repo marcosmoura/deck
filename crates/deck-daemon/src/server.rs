@@ -1511,6 +1511,27 @@ impl Shared {
                     return Err(ActionError::NoSuchProject(project));
                 }
             }
+            Action::MoveProject { project, to } => {
+                let projects = &mut sess.model.projects;
+                let from = projects
+                    .iter()
+                    .position(|p| p.id == project)
+                    .ok_or(ActionError::NoSuchProject(project))?;
+                let item = projects.remove(from);
+                projects.insert(to.min(projects.len()), item);
+            }
+            Action::MovePanel { panel, to } => {
+                let panels = sess
+                    .model
+                    .projects
+                    .iter_mut()
+                    .map(|p| &mut p.panels)
+                    .find(|panels| panels.iter().any(|p| p.id == panel))
+                    .ok_or(ActionError::NoSuchPanel(panel))?;
+                let from = panels.iter().position(|p| p.id == panel).unwrap_or(0);
+                let item = panels.remove(from);
+                panels.insert(to.min(panels.len()), item);
+            }
             Action::CloseProject { project } => {
                 let removed = sess
                     .model

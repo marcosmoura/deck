@@ -27,6 +27,7 @@ No row of the window is reserved. A one-row floating bar shows over the last row
 | State                                        | Badge         | Then                                                                         |
 | -------------------------------------------- | ------------- | ---------------------------------------------------------------------------- |
 | Dragging the sidebar separator               | `SIDEBAR <w>` | nothing                                                                      |
+| Dragging a space or panel row                | `MOVE`        | `esc cancel`                                                                 |
 | The prefix is armed                          | `PREFIX`      | `esc cancel  ? help` (`?` is the first key of `help`; left out when unbound) |
 | A resize repeat or a terminal border drag    | `RESIZE`      | the repeat: `H J K L resize  = reset`; a drag: nothing                       |
 | Scroll mode                                  | `SCROLL`      | `[offset/history]` when scrolled back, then `q exit  g top  G bottom`        |

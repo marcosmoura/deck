@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Blank rows between spaces
@@ -37,11 +37,11 @@ status: todo
 
 ## Acceptance criteria
 
-- [ ] `sidebar_space_gap` parses 0 to 3, defaults to 0, errors outside it naming the key, and is in `default.toml`.
-- [ ] With N > 0 the sidebar has exactly N blank rows between spaces, none before the first or after the last; with 0 it is unchanged.
-- [ ] Gap rows do not hover, open no menu, do nothing on click, and are skipped by `Up`/`Down` in sidebar focus.
-- [ ] Editing the key reloads every attached client.
-- [ ] `docs/features/sidebar.md` (configuration block, a sentence on the gap) and `docs/features/config.md` describe it.
+- [x] `sidebar_space_gap` parses 0 to 3, defaults to 0, errors outside it naming the key, and is in `default.toml`.
+- [x] With N > 0 the sidebar has exactly N blank rows between spaces, none before the first or after the last; with 0 it is unchanged.
+- [x] Gap rows do not hover, open no menu, do nothing on click, and are skipped by `Up`/`Down` in sidebar focus.
+- [x] Editing the key reloads every attached client.
+- [x] `docs/features/sidebar.md` (configuration block, a sentence on the gap) and `docs/features/config.md` describe it.
 
 ## Tests
 

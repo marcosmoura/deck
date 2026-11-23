@@ -753,3 +753,95 @@ async fn an_unsized_session_starts_its_shell_for_an_80_by_24_viewport() {
     assert_eq!(first.size, (80, 24));
     daemon.stop().await.unwrap();
 }
+
+/// The projects' ids in order, and each one's panel ids.
+fn order(c: &Client) -> (Vec<u64>, Vec<Vec<u64>>) {
+    let view = c.view.as_ref().unwrap();
+    (
+        view.projects.iter().map(|p| p.id.0).collect(),
+        view.projects
+            .iter()
+            .map(|p| p.panels.iter().map(|x| x.id.0).collect())
+            .collect(),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_reorder_spaces_and_panels_and_keep_the_rest() {
+    let daemon = TestDaemon::start().await;
+    let mut c = attach(&daemon).await;
+    let main = c.tree()[0].0.clone();
+    new_panel(&mut c, &main).await;
+    new_panel(&mut c, &main).await;
+    let (a, b) = (dir("a"), dir("b"));
+    for (name, d) in [("a", &a), ("b", &b)] {
+        c.action(Action::NewProject {
+            name: name.into(),
+            root: real(d),
+        })
+        .await
+        .unwrap();
+    }
+    let (projects, panels) = order(&c);
+    let (m, pa, pb) = (projects[0], projects[1], projects[2]);
+    let [p1, p2, p3] = [panels[0][0], panels[0][1], panels[0][2]];
+    let active = c.view.as_ref().unwrap().clone();
+    let (active_project, active_panel) = (active.active_project, active.active_panel);
+    c.action(Action::SetProjectCollapsed {
+        project: c.project_id("a"),
+        collapsed: true,
+    })
+    .await
+    .unwrap();
+
+    let mv = |project, to| Action::MoveProject {
+        project: deck_core::model::ProjectId(project),
+        to,
+    };
+    let mp = |panel, to| Action::MovePanel {
+        panel: deck_core::model::PanelId(panel),
+        to,
+    };
+    // To the front, to the back, to the same place, and past the end (clamped).
+    c.action(mv(pb, 0)).await.unwrap();
+    assert_eq!(order(&c).0, [pb, m, pa]);
+    c.action(mv(pb, 2)).await.unwrap();
+    assert_eq!(order(&c).0, [m, pa, pb]);
+    c.action(mv(pa, 1)).await.unwrap();
+    assert_eq!(order(&c).0, [m, pa, pb]);
+    c.action(mv(m, 99)).await.unwrap();
+    assert_eq!(order(&c).0, [pa, pb, m]);
+    c.action(mp(p3, 0)).await.unwrap();
+    assert_eq!(order(&c).1[2], [p3, p1, p2]);
+    c.action(mp(p3, 99)).await.unwrap();
+    assert_eq!(order(&c).1[2], [p1, p2, p3]);
+    c.action(mp(p2, 1)).await.unwrap();
+    assert_eq!(order(&c).1[2], [p1, p2, p3]);
+
+    // Active space and panel, and the collapsed state, are untouched.
+    let view = c.view.as_ref().unwrap();
+    assert_eq!(
+        (view.active_project, view.active_panel),
+        (active_project, active_panel)
+    );
+    assert!(view.projects[0].collapsed);
+
+    // Unknown ids are refused.
+    assert!(matches!(
+        c.action(mv(999, 0)).await,
+        Err(ActionError::NoSuchProject(_))
+    ));
+    assert!(matches!(
+        c.action(mp(999, 0)).await,
+        Err(ActionError::NoSuchPanel(_))
+    ));
+
+    // The order is saved.
+    let before = order(&c);
+    drop(c);
+    let home = daemon.stop_keep().await;
+    let daemon = TestDaemon::start_on(home).await;
+    let again = attach(&daemon).await;
+    assert_eq!(order(&again), before);
+    daemon.stop().await.unwrap();
+}

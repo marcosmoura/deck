@@ -24,7 +24,7 @@ deck config default > ~/.config/deck/config.toml
 
 ## Live reload
 
-Save the file and, within about a second, the colours, border style, glyphs, key bindings, prefix, sidebar and sidebar width change in every attached client, with `config reloaded` in the floating bar. Editors that save through a temporary file and a rename work, and deleting the file returns everything to the defaults.
+Save the file and, within about a second, the colours, border style, glyphs, key bindings, prefix, sidebar, sidebar width and sidebar space gap change in every attached client, with `config reloaded` in the floating bar. Editors that save through a temporary file and a rename work, and deleting the file returns everything to the defaults.
 
 - Only what changed in the file changes on screen: a sidebar you hid with the `toggle_sidebar` key stays hidden unless `sidebar` itself changed. An armed prefix or an open prompt is kept.
 - `shell`, `shell_args` and `scrollback_lines` apply to terminals started afterwards; running terminals are not touched.

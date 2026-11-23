@@ -16,8 +16,10 @@ scrollback_lines = 10000
 
 # The sidebar of spaces and panels: shown or hidden, and its width in columns (20 to 60).
 # It also hides while the window is narrower than its width plus 21 columns.
+# sidebar_space_gap is the number of blank rows between two spaces (0 to 3).
 sidebar = true
 sidebar_width = 28
+sidebar_space_gap = 0
 
 # How deck tells you, through the outer terminal, that an agent needs you or finished while
 # you were not looking: "osc9" (a desktop notification in iTerm2, Ghostty and WezTerm; other

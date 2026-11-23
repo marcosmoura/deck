@@ -51,6 +51,13 @@ impl App {
                 ..Mode::default()
             });
         }
+        if self.row_drag.is_some() {
+            return Some(Mode {
+                badge: " MOVE ".into(),
+                hints: vec![("esc".to_string(), "cancel".to_string())],
+                ..Mode::default()
+            });
+        }
         if self.armed {
             let mut hints = vec![("esc".to_string(), "cancel".to_string())];
             if let Some(key) = self.bindings.first_key(Action::Help) {

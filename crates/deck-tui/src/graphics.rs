@@ -333,8 +333,9 @@ impl App {
                 rgb: images.cell_for(sidebar::icon_style(theme, kind, style)).0,
             })
         };
+        let dragged = self.row_drag.map(|d| d.item);
         let mut out = Vec::new();
-        for row in sidebar::rows(view) {
+        for row in sidebar::rows(view, 0) {
             let Row::Panel(_, id) = row else { continue };
             let Some((_, panel)) = self.mirror.find_panel(id) else {
                 continue;
@@ -342,7 +343,11 @@ impl App {
             let is_selected = row.sel().is_some() && row.sel() == selected;
             let active = view.active_panel == Some(id);
             let band = is_selected || (active && !self.sidebar_focus);
-            let style = sidebar::panel_style(theme, base, band, active);
+            let style = if row.sel().is_some() && row.sel() == dragged {
+                sidebar::dimmed_style(theme, base)
+            } else {
+                sidebar::panel_style(theme, base, band, active)
+            };
             out.extend(pair(panel, style));
         }
         // The menu's items and the restore dialog's headings, as they are drawn.

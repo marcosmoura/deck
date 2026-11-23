@@ -211,3 +211,31 @@ fn the_first_shell_starts_at_its_final_size() {
     assert!(!h.screen_text().contains("RESIZED"), "{}", h.screen_text());
     h.capture("first-size");
 }
+
+#[test]
+fn a_space_gap_puts_a_blank_row_between_spaces_without_reattaching() {
+    let h = running(&[]);
+    let out = h.run_deck(&["new-space", "api", "--dir", "/tmp"]);
+    assert!(out.status.success(), "{}", support::stderr(&out));
+    h.wait_for_text("api", TIMEOUT);
+    let before = find_opt(&h, "api").expect("api in the sidebar");
+    write(&h, "sidebar_space_gap = 1\n");
+    h.wait_for_text("config reloaded", TIMEOUT);
+    wait_until("the blank row", TIMEOUT, || {
+        find_opt(&h, "api") == Some(before + 1)
+    });
+    let text = h.screen_text();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines[before].chars().take(28).all(|c| c == ' '), "{text}");
+    h.capture("space-gap");
+    write(&h, "sidebar_space_gap = 0\n");
+    wait_until("no blank row", TIMEOUT, || {
+        find_opt(&h, "api") == Some(before)
+    });
+}
+
+fn find_opt(h: &Harness, text: &str) -> Option<usize> {
+    h.screen_text()
+        .lines()
+        .position(|r| r.chars().take(28).collect::<String>().contains(text))
+}

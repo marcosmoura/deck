@@ -17,7 +17,7 @@ use crate::app::{App, Out};
 use crate::draw::draw;
 use crate::mirror::tests::{frame, mockup, no_sidebar, panel, project};
 use crate::modal::Modal;
-use crate::sidebar::Sel;
+use crate::sidebar::{Row, Sel, rows};
 
 fn app_at(config: &Config, size: (u16, u16), view: SessionView) -> App {
     let mut app = App::new(config, size, &[])
@@ -89,6 +89,10 @@ fn mouse(kind: ct::MouseEventKind, column: u16, row: u16) -> ct::Event {
 
 fn click(column: u16, row: u16) -> ct::Event {
     mouse(ct::MouseEventKind::Down(ct::MouseButton::Left), column, row)
+}
+
+fn lift(column: u16, row: u16) -> ct::Event {
+    mouse(ct::MouseEventKind::Up(ct::MouseButton::Left), column, row)
 }
 
 fn screen(a: &App) -> (Terminal<TestBackend>, Vec<String>) {
@@ -668,24 +672,24 @@ fn clicks_focus_panels_and_fold_projects_and_the_wheel_scrolls() {
     let mut a = app();
     // Rows: header 0, blank 1, project 2, editor 3, claude 4.
     assert_eq!(
-        run(&mut a, &[click(5, 4)]),
+        run(&mut a, &[click(5, 4), lift(5, 4)]),
         [action(Act::FocusPanel { panel: PanelId(4) })]
     );
     assert_eq!(
-        run(&mut a, &[click(5, 2)]),
+        run(&mut a, &[click(5, 2), lift(5, 2)]),
         [action(Act::SetProjectCollapsed {
             project: ProjectId(1),
             collapsed: true
         })]
     );
     assert_eq!(
-        run(&mut a, &[click(5, 12)]),
+        run(&mut a, &[click(5, 12), lift(5, 12)]),
         [] as [Out; 0],
         "past the last row"
     );
     // The collapsed project of the mockup opens on a click.
     assert_eq!(
-        run(&mut a, &[click(5, 10)]),
+        run(&mut a, &[click(5, 10), lift(5, 10)]),
         [action(Act::SetProjectCollapsed {
             project: ProjectId(8),
             collapsed: false
@@ -695,12 +699,21 @@ fn clicks_focus_panels_and_fold_projects_and_the_wheel_scrolls() {
     assert!(
         run(
             &mut a,
-            &[click(28, 4), click(5, 0), click(5, 1), click(5, 9)]
+            &[
+                click(28, 4),
+                lift(28, 4),
+                click(5, 0),
+                lift(5, 0),
+                click(5, 1),
+                lift(5, 1),
+                click(5, 9),
+                lift(5, 9)
+            ]
         )
         .is_empty()
     );
     // Clicks are not sent to the terminal (it did not ask for the mouse anyway).
-    assert!(run(&mut a, &[click(40, 4)]).is_empty());
+    assert!(run(&mut a, &[click(40, 4), lift(40, 4)]).is_empty());
 }
 
 fn many_panels() -> SessionView {
@@ -964,4 +977,98 @@ fn a_help_taller_than_the_window_scrolls_and_says_how_much_is_hidden() {
         ],
     );
     assert!(!screen(&a).iter().any(|r| r.contains('↑')));
+}
+
+fn gap_config(gap: u8) -> Config {
+    Config::parse(&format!("sidebar_space_gap = {gap}"))
+        .unwrap()
+        .config
+}
+
+fn kinds(rows: &[Row]) -> String {
+    rows.iter()
+        .map(|r| match r {
+            Row::Project(_) => 'P',
+            Row::Panel(..) => 'p',
+            Row::NoPanels => 'n',
+            Row::Gap => '_',
+        })
+        .collect()
+}
+
+#[test]
+fn rows_put_the_gap_between_spaces_only() {
+    let view = mockup();
+    // Expanded, empty and collapsed spaces: P1 with 3 panels, P2 with 1, P7 empty, P8 folded.
+    assert_eq!(kinds(&rows(&view, 0)), "PpppPpPnP");
+    assert_eq!(kinds(&rows(&view, 1)), "Pppp_Pp_Pn_P");
+    assert_eq!(kinds(&rows(&view, 3)), "Pppp___Pp___Pn___P");
+    let mut one = mockup();
+    one.projects.truncate(1);
+    assert_eq!(kinds(&rows(&one, 3)), "Pppp");
+    one.projects.clear();
+    assert!(rows(&one, 3).is_empty());
+}
+
+#[test]
+fn a_gap_row_draws_blank_and_does_not_hover_click_or_open_a_menu() {
+    let mut a = app_at(&gap_config(1), (100, 24), mockup());
+    let (_, screen_rows) = screen(&a);
+    // Header 0, blank 1, P1 2, editor 3, claude 4, tests 5, gap 6, P2 7.
+    assert!(screen_rows[5].starts_with("   "), "{}", screen_rows[5]);
+    assert_eq!(screen_rows[6][..28].trim(), "");
+    assert!(screen_rows[7].contains("budget"), "{}", screen_rows[7]);
+    assert!(screen_rows[10].contains("empty") && screen_rows[11].contains("no panels"));
+    assert_eq!(screen_rows[12][..28].trim(), "");
+    assert!(screen_rows[13].contains("dotfiles"), "{}", screen_rows[13]);
+    assert_eq!(a.hover_at(5, 6), None);
+    let outs = run(
+        &mut a,
+        &[
+            mouse(ct::MouseEventKind::Moved, 5, 6),
+            click(5, 6),
+            mouse(ct::MouseEventKind::Down(ct::MouseButton::Right), 5, 6),
+        ],
+    );
+    assert!(outs.is_empty(), "{outs:?}");
+    assert!(a.context.is_none());
+    assert_eq!(a.hover, None);
+}
+
+#[test]
+fn the_selection_skips_gap_rows() {
+    let mut a = app_at(&gap_config(2), (100, 24), mockup());
+    run(&mut a, &[prefix(), key(ct::KeyCode::Tab)]);
+    assert_eq!(a.selection, Some(Sel::Panel(ProjectId(1), PanelId(3))));
+    run(&mut a, &[ch('j'), ch('j')]);
+    assert_eq!(a.selection, Some(Sel::Panel(ProjectId(1), PanelId(5))));
+    run(&mut a, &[ch('j')]);
+    assert_eq!(a.selection, Some(Sel::Project(ProjectId(2))));
+    run(&mut a, &[ch('k')]);
+    assert_eq!(a.selection, Some(Sel::Panel(ProjectId(1), PanelId(5))));
+}
+
+#[test]
+fn gap_rows_count_for_scrolling() {
+    let mut view = mockup();
+    view.active_project = Some(ProjectId(2));
+    view.active_panel = Some(PanelId(6));
+    let a = app_at(&gap_config(3), (100, 10), view);
+    // Rows: P1 e c t, 3 gaps, P2 (7), api (8); the list is 6 rows high.
+    assert_eq!(a.sidebar_offset, 3);
+    let (_, screen_rows) = screen(&a);
+    assert!(
+        screen_rows.iter().any(|r| r.contains("api")),
+        "{screen_rows:#?}"
+    );
+}
+
+#[test]
+fn a_new_gap_redraws_and_keeps_the_offset_in_range() {
+    let mut a = app_at(&gap_config(3), (100, 10), mockup());
+    a.sidebar_offset = 100;
+    a.dirty = false;
+    a.on_server(ServerMsg::Config(Box::new(gap_config(0))));
+    assert!(a.dirty);
+    assert!(a.sidebar_offset <= rows(&mockup(), 0).len() - 6);
 }

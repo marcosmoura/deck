@@ -809,3 +809,68 @@ fn the_new_button_adds_a_terminal_panel_to_the_selected_project() {
     h.send_keys("1");
     wait_until("a second panel in api", TIMEOUT, || api_panels(&h) == 2);
 }
+
+/// A left press at 0-based `column` and `row`, motion with the button held to `to`, and the
+/// release there.
+fn drag_row(h: &mut Harness, column: u16, row: u16, to: u16) {
+    h.send_keys(&format!("\x1b[<0;{};{}M", column + 1, row + 1));
+    sleep(Duration::from_millis(50));
+    h.send_keys(&format!("\x1b[<32;{};{}M", column + 1, to + 1));
+    sleep(Duration::from_millis(50));
+    h.send_keys(&format!("\x1b[<0;{};{}m", column + 1, to + 1));
+}
+
+/// The index of the sidebar row that holds `name`.
+fn row_of(h: &Harness, name: &str) -> Option<u16> {
+    side(h)
+        .iter()
+        .position(|r| r.contains(name))
+        .map(|i| u16::try_from(i).unwrap())
+}
+
+#[test]
+fn dragging_a_space_row_above_another_moves_the_space() {
+    let mut h = attached();
+    new_project(&h, "second");
+    wait_until("the second space", TIMEOUT, || {
+        row_of(&h, "second").is_some()
+    });
+    let home = home_name(&h);
+    let (first, second) = (row_of(&h, &home).unwrap(), row_of(&h, "second").unwrap());
+    assert!(first < second, "{:?}", side(&h));
+
+    // A press alone moves nothing; the drag shows the MOVE bar.
+    h.send_keys(&format!("\x1b[<0;6;{}M", second + 1));
+    h.send_keys(&format!("\x1b[<32;6;{}M", first + 1));
+    h.wait_for_text("MOVE  esc cancel", TIMEOUT);
+    h.capture("sidebar-reorder-drag");
+    h.send_keys(&format!("\x1b[<0;6;{}m", first + 1));
+    wait_until(
+        "the second space first",
+        TIMEOUT,
+        || matches!((row_of(&h, "second"), row_of(&h, &home)), (Some(a), Some(b)) if a < b),
+    );
+    wait_gone(&h, "MOVE");
+    let tree = stdout(&h.run_deck(&["ls", "--tree"]));
+    let at = |name: &str| tree.find(&format!("space {name}")).unwrap_or(usize::MAX);
+    assert!(at("second") < at(&home), "{tree}");
+    h.capture("sidebar-reorder-dropped");
+}
+
+#[test]
+fn dragging_a_panel_row_above_its_sibling_reorders_the_panel_numbers() {
+    let mut h = attached();
+    prefixed(&mut h, "c");
+    wait_until("two panels, the second active", TIMEOUT, || {
+        panels_in_sidebar(&h) == 2 && h.is_active_row(4)
+    });
+    drag_row(&mut h, 8, 4, 3);
+    // The active panel is the one that moved: it is the first now.
+    wait_until("the moved panel first", TIMEOUT, || h.is_active_row(3));
+    click_at(&mut h, 10, 4);
+    wait_until("the other panel active", TIMEOUT, || h.is_active_row(4));
+    prefixed(&mut h, "1");
+    wait_until("prefix 1 on the moved panel", TIMEOUT, || {
+        h.is_active_row(3)
+    });
+}

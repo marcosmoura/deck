@@ -439,6 +439,16 @@ impl App {
         now: std::time::Instant,
     ) {
         let (retry, silent) = self.pending.pop_front().unwrap_or((None, false));
+        // The daemon's view came before the move's answer: the preview ends with it, and a
+        // refused move falls back to the daemon's order.
+        self.row_drop = match self.row_drop {
+            Some((_, 0)) => {
+                self.dirty = true;
+                None
+            }
+            Some((reorder, ahead)) => Some((reorder, ahead - 1)),
+            None => None,
+        };
         match self.launch_result {
             Some(0) => {
                 self.launch_result = None;

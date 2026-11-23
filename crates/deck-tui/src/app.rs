@@ -30,7 +30,7 @@ use crate::picker::{Picker, Req};
 use crate::resize::{Drag, SidebarDrag};
 use crate::restore::Restore;
 use crate::select::{self, MULTI_CLICK_MS, TextSel, Unit};
-use crate::sidebar::{Hover, Sel};
+use crate::sidebar::{Hover, Reorder, RowDrag, Sel};
 
 /// Below this many columns or rows the client shows only a message.
 pub const MIN_SIZE: (u16, u16) = (20, 5);
@@ -136,6 +136,13 @@ pub struct App {
     pub sidebar_width: u16,
     /// The sidebar's separator being dragged with the mouse.
     pub(crate) sidebar_drag: Option<SidebarDrag>,
+    /// A left press landed on a space or panel row; its release on the same row acts.
+    pub(crate) row_press: Option<Sel>,
+    /// A space or panel row being dragged to another place.
+    pub(crate) row_drag: Option<RowDrag>,
+    /// The move just dropped, drawn until the daemon's view comes.
+    /// How many answers come before the move's own.
+    pub(crate) row_drop: Option<(Reorder, usize)>,
     /// The first `SessionView` of an attach has not come yet: the client compares its
     /// viewport with the daemon's then.
     check_viewport: bool,
@@ -221,6 +228,9 @@ impl App {
             sidebar_hidden: !config.sidebar,
             sidebar_width: layout::clamp_sidebar_width(size.0, config.sidebar_width),
             sidebar_drag: None,
+            row_press: None,
+            row_drag: None,
+            row_drop: None,
             check_viewport: true,
             sidebar_focus: false,
             selection: None,
@@ -289,6 +299,11 @@ impl App {
             self.sidebar_width = layout::clamp_sidebar_width(self.size.0, new.sidebar_width);
             sized = true;
         }
+        if new.sidebar_space_gap != old.sidebar_space_gap {
+            self.ensure_visible();
+            self.refresh_hover();
+        }
+        self.check_row_gesture();
         if !sized {
             return Vec::new();
         }
@@ -365,6 +380,9 @@ impl App {
         self.resize_until = None;
         self.drag = None;
         self.sidebar_drag = None;
+        self.row_press = None;
+        self.row_drag = None;
+        self.row_drop = None;
         self.check_viewport = true;
         self.queued.clear();
         self.sidebar_focus = false;
@@ -482,6 +500,7 @@ impl App {
                 self.dirty = true;
                 self.end_sidebar_drag();
                 self.sidebar_width = layout::clamp_sidebar_width(cols, self.sidebar_width);
+                self.check_row_gesture();
                 if !self.sidebar_visible() {
                     self.sidebar_focus = false;
                 }
@@ -536,6 +555,7 @@ impl App {
             self.swallow_release = false;
         }
         self.pointer = Some((event.column, event.row));
+        let released = matches!(event.kind, ct::MouseEventKind::Up(_));
         if let Some(outs) = self.select_mouse(event) {
             return outs;
         }
@@ -557,27 +577,35 @@ impl App {
         if self.restore.is_some() && !too_small(self.size) {
             self.drag = None;
             self.end_sidebar_drag();
+            self.end_row_gesture(!released);
             return self.restore_mouse(event);
         }
         // The context menu and the New menu have the mouse before the sidebar.
         if self.context.is_some() && !too_small(self.size) {
             self.drag = None;
             self.end_sidebar_drag();
+            self.end_row_gesture(!released);
             return self.context_mouse(event);
         }
         if self.menu.is_some() && !too_small(self.size) {
             self.drag = None;
             self.end_sidebar_drag();
+            self.end_row_gesture(!released);
             return self.menu_mouse(event);
         }
         if self.overlay_open() || too_small(self.size) {
             self.drag = None;
             self.end_sidebar_drag();
+            self.end_row_gesture(!released);
             return Vec::new();
         }
         // The sidebar's separator drag and a border drag are ours from their press to their
         // release, never a program's.
         if let Some(outs) = self.sidebar_drag_mouse(event, now) {
+            return outs;
+        }
+        // A press on a row is the sidebar's until its release, wherever the pointer goes.
+        if let Some(outs) = self.row_drag_mouse(event) {
             return outs;
         }
         // A border drag is ours from its press to its release, never a program's.
@@ -863,6 +891,9 @@ impl App {
             self.dirty = true;
         }
         if !gained {
+            self.end_row_gesture(false);
+        }
+        if !gained {
             self.set_hover(None);
         }
         let mut outs = vec![Out::Send(ClientMsg::Focus(gained))];
@@ -971,6 +1002,14 @@ impl App {
         // A key ends a sidebar drag, so an overlay it opens never shows one; the rest of the
         // gesture is still the drag's and goes to no program.
         self.end_sidebar_drag();
+        // Esc cancels a row drag and goes no further; any other key cancels it and acts.
+        let dragging = self.row_drag.is_some();
+        if dragging {
+            self.end_row_gesture(true);
+            if key.code == KeyCode::Esc && !key.mods.ctrl && !key.mods.alt {
+                return Vec::new();
+            }
+        }
         if self.modal.is_some() {
             return self.modal_key(key);
         }
@@ -1345,6 +1384,7 @@ impl App {
                     .view()
                     .map(|v| (v.active_project, v.active_panel));
                 self.mirror.set_view(view);
+                self.check_row_gesture();
                 self.arm_spinner(Instant::now());
                 self.check_scroll_target();
                 self.check_modal_target(Instant::now());

@@ -236,6 +236,7 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "scrollback_lines",
     "sidebar",
     "sidebar_width",
+    "sidebar_space_gap",
     "notify",
     "resume_agents",
     "keys",
@@ -245,6 +246,9 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
 
 /// The sidebar width, in columns, accepted by `sidebar_width`.
 pub const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 20..=60;
+
+/// The blank rows between spaces accepted by `sidebar_space_gap`.
+pub const SIDEBAR_SPACE_GAP_RANGE: std::ops::RangeInclusive<u8> = 0..=3;
 
 /// How the client tells the user, through the outer terminal, that an agent needs them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +284,8 @@ pub struct Config {
     /// Whether the sidebar is shown (unless the window is too narrow).
     pub sidebar: bool,
     pub sidebar_width: u16,
+    /// Blank rows between two spaces in the sidebar.
+    pub sidebar_space_gap: u8,
     pub notify: NotifyMode,
     /// Reopen each terminal's agent on its conversation after a daemon restart.
     pub resume_agents: bool,
@@ -379,6 +385,7 @@ impl Default for Config {
             scrollback_lines: 10_000,
             sidebar: true,
             sidebar_width: 28,
+            sidebar_space_gap: 0,
             notify: NotifyMode::default(),
             resume_agents: true,
             keys,
@@ -534,6 +541,19 @@ fn apply(
             config.sidebar_width = u16::try_from(n)
                 .ok()
                 .filter(|w| SIDEBAR_WIDTH_RANGE.contains(w))
+                .ok_or_else(|| bad(key, format!("must be between {min} and {max}, got {n}")))?;
+        }
+        "sidebar_space_gap" => {
+            let n = value
+                .as_integer()
+                .ok_or_else(|| bad(key, "expected an integer"))?;
+            let (min, max) = (
+                *SIDEBAR_SPACE_GAP_RANGE.start(),
+                *SIDEBAR_SPACE_GAP_RANGE.end(),
+            );
+            config.sidebar_space_gap = u8::try_from(n)
+                .ok()
+                .filter(|g| SIDEBAR_SPACE_GAP_RANGE.contains(g))
                 .ok_or_else(|| bad(key, format!("must be between {min} and {max}, got {n}")))?;
         }
         "notify" => {
@@ -713,6 +733,7 @@ mod tests {
         assert_eq!(c.scrollback_lines, 10_000);
         assert!(c.sidebar);
         assert_eq!(c.sidebar_width, 28);
+        assert_eq!(c.sidebar_space_gap, 0);
         assert_eq!(c.keys["detach"], [spec("d")]);
         assert_eq!(c.keys["scroll"], [spec("[")]);
         let parsed = Config::parse("").unwrap();
@@ -973,6 +994,9 @@ mod tests {
             ("sidebar_width = 61", "sidebar_width"),
             ("sidebar_width = -3", "sidebar_width"),
             ("sidebar_width = \"x\"", "sidebar_width"),
+            ("sidebar_space_gap = -1", "sidebar_space_gap"),
+            ("sidebar_space_gap = 4", "sidebar_space_gap"),
+            ("sidebar_space_gap = \"x\"", "sidebar_space_gap"),
             ("theme = 1", "theme"),
             ("[theme]\naccent = \"purple\"", "theme.accent"),
         ] {
@@ -987,6 +1011,15 @@ mod tests {
             Config::parse("prefix = "),
             Err(ConfigError::Syntax(_))
         ));
+    }
+
+    #[test]
+    fn the_sidebar_space_gap_takes_0_to_3() {
+        for n in 0..=3u8 {
+            let p = Config::parse(&format!("sidebar_space_gap = {n}")).unwrap();
+            assert!(p.warnings.is_empty());
+            assert_eq!(p.config.sidebar_space_gap, n);
+        }
     }
 
     #[test]

@@ -213,9 +213,13 @@ fn a_press_on_the_separator_with_the_sidebar_hidden_does_nothing() {
 #[test]
 fn a_press_on_a_sidebar_row_still_focuses_it() {
     let mut a = app();
-    let outs = press(&mut a, 5, Instant::now());
+    let now = Instant::now();
+    assert!(
+        press(&mut a, 5, now).is_empty(),
+        "a press only records the row"
+    );
     assert!(a.sidebar_drag.is_none());
-    assert!(!outs.is_empty(), "the row is acted on");
+    assert!(!release(&mut a, 5, now).is_empty(), "the release acts");
 }
 
 #[test]

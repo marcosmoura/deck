@@ -47,6 +47,8 @@ mod sidebar_bar_tests;
 #[cfg(test)]
 mod sidebar_drag_tests;
 #[cfg(test)]
+mod sidebar_reorder_tests;
+#[cfg(test)]
 mod sidebar_tests;
 mod term;
 #[cfg(test)]
