@@ -37,7 +37,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-17 | Floating bar, sidebar highlight, menus | done       | —                | [floating-bar-menus](specs/2026-11-23-floating-bar-menus/00-overview.md)     |
 | DECK-18 | Sidebar reorder and space gaps         | done       | —                | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
 | DECK-19 | Images in panels                       | draft spec | —                | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
-| DECK-20 | Built-in icons                         | draft spec | —                | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
+| DECK-20 | Built-in icons                         | ready      | —                | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
 
 ### Withdrawn
 

@@ -69,3 +69,5 @@ Asked by the user on 23 Nov 2026: "remove every single icon override customizati
 - **DECK-19 (images in panels)** is drafted at the same time and also changes `graphics.rs`, the client's image ids and the protocol version. The user put DECK-20 first in the queue (23 Nov 2026). Whichever lands second merges the other's changes, keeps ids unique within a client run from one counter, and takes the next protocol version.
 
 Reviewed by spec-reviewer on 23 Nov 2026.
+
+Approved by the user on 23 Nov 2026.
