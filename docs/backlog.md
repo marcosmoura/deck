@@ -8,6 +8,8 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
+1. DECK-16
+
 ### Not ordered yet
 
 Open tasks the user has not placed in the queue: none.
@@ -30,6 +32,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-13 | OpenCode v2 hooks                      | done   | DECK-06          | —                                                                            |
 | DECK-14 | Release workflow and local install     | done   | —                | —                                                                            |
 | DECK-15 | Mouse text selection, copy on select   | done   | —                | —                                                                            |
+| DECK-16 | Call projects spaces                   | todo   | —                | —                                                                            |
 
 ### Withdrawn
 
@@ -40,6 +43,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-16
+
+**Call projects spaces.** Asked on 23 Nov 2026: the sidebar header reads `Spaces` with a `+ New space` chip, and everything the user sees or types says space, not project.
+
+- What: every user-facing word: sidebar header and chip, prompts (`Space name:`, `Rename space:`), confirmations, flashes, empty states, the help overlay's `Spaces` group, CLI help and messages, `deck ls` output. Hard renames, no aliases: config keys `new_space`, `rename_space`, `close_space`; `deck new-project` becomes `deck new-space`; `--project` becomes `--space`; the `projects` key of `deck ls --json` becomes `spaces`. Rust identifiers, protocol types and persisted state keep the name project.
+- Why: one name for one thing; "space" is the product's word.
+- Acceptance: no user-facing string, config key, CLI command, flag or JSON key says project; tests updated to the new text; `docs/features/` and `docs/architecture.md` say space wherever they describe what the user sees or types.
 
 ### DECK-15
 
