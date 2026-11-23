@@ -8,6 +8,8 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
+1. DECK-15
+
 ### Not ordered yet
 
 Open tasks the user has not placed in the queue: none.
@@ -29,6 +31,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-12 | Agent logos as images                  | done   | DECK-09          | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
 | DECK-13 | OpenCode v2 hooks                      | done   | DECK-06          | —                                                                            |
 | DECK-14 | Release workflow and local install     | done   | —                | —                                                                            |
+| DECK-15 | Mouse text selection, copy on select   | todo   | —                | —                                                                            |
 
 ### Withdrawn
 
@@ -39,6 +42,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-15
+
+**Mouse text selection, copy on select.** Asked on 23 Nov 2026: select text in a terminal with the mouse, and copy it when the selection is made.
+
+- What: in `deck-tui` only, from the client's mirror of the screen (no protocol change). A left drag in the focused terminal selects from the press cell to the pointer, clamped to that terminal's screen even when the pointer leaves it; a double-click selects a word, a triple-click the line, and a drag after them extends by words or lines. Releasing copies the selected text to the outer terminal with OSC 52 (`c`), each row trimmed of trailing blanks, rows joined with newlines, a wide character once. A click without a drag selects nothing. When the program has mouse reporting on, the mouse stays the program's unless Option/Alt is held at the press; in scroll mode the press always selects. The selection is drawn in the theme's selection colours and is cleared by the next press, and by a frame of its terminal that changes a selected row, the size or the scroll offset. Only the rows on screen can be selected (no auto-scroll into the history).
+- Why: the only way to copy from a terminal today is a program's own OSC 52 or the outer terminal's bypass selection, which crosses grid borders and the sidebar.
+- Acceptance: unit tests for the cell-to-text extraction (wide characters, gaps between runs, trailing blanks), word and line bounds, drag clamping, the Option/Alt override against mouse reporting, double and triple click, the OSC 52 output on release and the clearing rules; `docs/features/` and `docs/architecture.md` (client section and a Decisions row replacing "No copy mode in v1") describe it.
 
 ### DECK-14
 
