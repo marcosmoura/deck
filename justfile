@@ -28,7 +28,8 @@ test-crate crate filter="":
 run *args:
     cargo build -p deck
     mkdir -p "${TMPDIR:-/tmp}/deck-dev-{{ shell('printf %.8s "$1"', sha256(justfile_directory())) }}"
-    DECK_HOME="${TMPDIR:-/tmp}/deck-dev-{{ shell('printf %.8s "$1"', sha256(justfile_directory())) }}" target/debug/deck "$@"
+    env -u DECK -u DECK_SOCKET -u DECK_SESSION_ID -u DECK_PANEL_ID -u DECK_TERMINAL_ID \
+        DECK_HOME="${TMPDIR:-/tmp}/deck-dev-{{ shell('printf %.8s "$1"', sha256(justfile_directory())) }}" target/debug/deck "$@"
 
 # Build and install deck into $PREFIX/bin (default ~/.local/bin).
 install:

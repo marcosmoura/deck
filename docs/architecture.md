@@ -123,7 +123,7 @@ The daemon and the client both call `layout` with the same inputs: the daemon to
 | Socket and lock      | `$XDG_RUNTIME_DIR/deck/` if set, else `$TMPDIR/deck-<uid>/`, else `/tmp/deck-<uid>/`: `deck.sock`, `deck.lock` (holds the daemon's pid)                        |
 | Everything, isolated | `DECK_HOME=<dir>` puts the config at `<dir>/config.toml`, state in `<dir>/state/` and the socket in `<dir>/run/`. Used by tests and `just run`.                |
 
-Socket paths must stay under 100 bytes (the macOS limit is 104); `deck` refuses a longer one with a clear error. That is why `just run` puts its `DECK_HOME` in `${TMPDIR:-/tmp}/deck-dev-<8 hex characters of just's sha256() of the checkout path>` rather than under `target/`: a socket inside `.worktrees/<slug>/target/` would exceed the limit.
+Socket paths must stay under 100 bytes (the macOS limit is 104); `deck` refuses a longer one with a clear error. That is why `just run` puts its `DECK_HOME` in `${TMPDIR:-/tmp}/deck-dev-<8 hex characters of just's sha256() of the checkout path>` rather than under `target/`: a socket inside `.worktrees/<slug>/target/` would exceed the limit. `just run` also clears the `DECK` and `DECK_*` variables of an enclosing deck session: `DECK_SOCKET` wins over `DECK_HOME`, so without that the dev build would reach the installed daemon, and its attach would refuse to nest.
 
 ## Config
 
