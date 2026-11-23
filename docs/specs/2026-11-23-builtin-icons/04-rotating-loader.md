@@ -3,7 +3,7 @@ type: shippable
 status: todo
 ---
 
-# 03 — A rotating loader at 60 frames per second
+# 04 — A rotating loader at 60 frames per second
 
 ## Scope
 
@@ -11,8 +11,8 @@ In Ghostty and kitty (the `Image` tier), a working agent's status mark is Hugeic
 
 ## Requirements
 
-1. **Frames**: 60 frames per revolution. Frame `k` (0..60) is the `spinner` mask of [02](02-icon-images.md) rotated clockwise by `6·k` degrees around the mask's centre (31.5, 31.5), sampled bilinearly, pixels outside the source transparent. A pure function `spinner_frame(k) -> [u8; 4096]`, computed on first use and cached for the client run (60 × 4 KiB).
-2. **Images**: each (frame, colour) is an image of the registry (02 requirement 4), with its own id. The first time a colour is needed for the spinner, the pre-pass transmits all 60 frames of that colour before the frame that draws the first one, so the turn never waits on a transmission. In practice there are one to three colours: `accent`, the reversed active row's visible text colour, and `muted` while a spinning row is dragged (DECK-18 dims it), which sends its burst when the drag starts.
+1. **Frames**: 60 frames per revolution. Frame `k` (0..60) is the `spinner` mask of [03](03-icon-images.md) rotated clockwise by `6·k` degrees around the mask's centre (31.5, 31.5), sampled bilinearly, pixels outside the source transparent. A pure function `spinner_frame(k) -> [u8; 4096]`, computed on first use and cached for the client run (60 × 4 KiB).
+2. **Images**: each (frame, colour) is an image of the registry (03 requirement 4), with its own id. The first time a colour is needed for the spinner, the pre-pass transmits all 60 frames of that colour before the frame that draws the first one, so the turn never waits on a transmission. In practice there are one to three colours: `accent`, the reversed active row's visible text colour, and `muted` while a spinning row is dragged (DECK-18 dims it), which sends its burst when the drag starts.
 3. **Which frame**: from the clock, not a counter: `k = floor(elapsed · 60) mod 60`, where `elapsed` is the time since the client started (an `Instant` stored in `App`; tests pass `now`). A late tick shows the frame for its time, so the turn keeps its speed when frames are dropped. Every spinning terminal shows the same frame.
 4. **Timer**: while the `Image` tier is on and a terminal spins (`agent::view_spins`, as today), the spinner deadline is the next 1/60 s boundary of `elapsed` (so ticks do not drift); otherwise `SPIN_EVERY` (100 ms) as today. When nothing spins, no timer runs (unchanged). Only the frames move: a tick that changes nothing else marks the app dirty for the spinner alone.
 5. **Cost of a frame**: a spinner tick redraws through ratatui as any frame does, so only the spinner cells (two per spinning slot, new foreground colour) are written to the outer terminal. Nothing else in the draw path changes for this sub-spec unless the budget below is missed.
@@ -24,7 +24,7 @@ In Ghostty and kitty (the `Image` tier), a working agent's status mark is Hugeic
 
 ## Screen
 
-Same cells as 02; the status slot of a working terminal holds a placeholder pair whose id changes 60 times a second, cycling through 60 ids.
+Same cells as 03; the status slot of a working terminal holds a placeholder pair whose id changes 60 times a second, cycling through 60 ids.
 
 ## Acceptance criteria
 

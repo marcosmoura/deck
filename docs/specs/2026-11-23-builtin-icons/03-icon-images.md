@@ -3,11 +3,11 @@ type: shippable
 status: todo
 ---
 
-# 02 — Hugeicons images for every icon
+# 03 — Hugeicons images for every icon
 
 ## Scope
 
-In Ghostty and kitty (the `Image` tier of [01](01-icon-tiers.md)), every icon deck draws is a small image made from a Hugeicons free SVG: program icons, carets, status marks and the unseen marker. The spinner stays its Nerd glyph frames until [03](03-rotating-loader.md). Other tiers are unchanged. Owning crate: `deck-tui` (assets, the image registry, drawing); `deck` (e2e test).
+In Ghostty and kitty (the `Image` tier of [02](02-terminal-probe.md)), every icon deck draws is a small image made from a Hugeicons free SVG: program icons, carets, status marks and the unseen marker. The spinner stays its Nerd glyph frames until [04](04-rotating-loader.md). Other tiers are unchanged. Owning crate: `deck-tui` (assets, the image registry, drawing); `deck` (e2e test).
 
 ## Requirements
 
@@ -28,7 +28,7 @@ In Ghostty and kitty (the `Image` tier of [01](01-icon-tiers.md)), every icon de
    | `repl`      | `CodeSquare`                   | `repl`      |
    | `Expanded`  | `ArrowDown01`                  | `expanded`  |
    | `Collapsed` | `ArrowRight01`                 | `collapsed` |
-   | `Spinner`   | `Loading02` (used by 03)       | `spinner`   |
+   | `Spinner`   | `Loading02` (used by 04)       | `spinner`   |
    | `Waiting`   | `AlertCircle`                  | `waiting`   |
    | `Idle`      | `CheckmarkCircle02`            | `idle`      |
    | `Quiet`     | `Circle`                       | `quiet`     |

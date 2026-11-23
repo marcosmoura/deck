@@ -7,9 +7,9 @@ status: todo
 
 ## Scope
 
-deck draws its own icons and the config can no longer change them. In Ghostty, kitty and WezTerm every icon is a Nerd Font glyph (agents in Ghostty and kitty keep DECK-12's logo images); elsewhere every icon is a Unicode glyph. The status column, the space caret and the unseen marker take two cells, like the program icon. The five icon config keys are gone and warn when found. Owning crates: `deck-core` (the icon table, theme and config), `deck-tui` (tier detection and drawing), `deck` (e2e harness environment).
+deck draws its own icons and the config can no longer change them. In Ghostty, kitty and WezTerm every icon is a Nerd Font glyph (agents in Ghostty and kitty keep DECK-12's logo images); elsewhere every icon is a Unicode glyph until [02](02-terminal-probe.md) asks the terminal and reads its font. The status column, the space caret and the unseen marker take two cells, like the program icon. The five icon config keys are gone and warn when found. Owning crates: `deck-core` (the icon table, theme and config), `deck-tui` (tier detection and drawing), `deck` (e2e harness environment).
 
-Sub-spec 02 adds images for every icon on top of the `Image` tier this one introduces; until then the `Image` tier draws images only for the three agents (DECK-12) and the Nerd glyph for every other icon.
+Sub-spec 02 replaces this sub-spec's first-cut tier rules with real checks; sub-spec 03 adds images for every icon on top of the `Image` tier; until then the `Image` tier draws images only for the three agents (DECK-12) and the Nerd glyph for every other icon.
 
 ## Requirements
 
@@ -41,9 +41,9 @@ Sub-spec 02 adds images for every icon on top of the `Image` tier this one intro
 
 2. **Theme and config**: `Theme` loses `icons`, `icon_images`, `glyphs`, `icon_glyphs` and `icon_colors`, with `IconPreset`, `IconImages`, `Glyphs`, `IconGlyphs` and `IconColors`. `[theme] icons`, `[theme] icon_images`, `[theme.glyphs]`, `[theme.icon_glyphs]` and `[theme.icon_colors]` each give one warning with the key's path and the message `<path> was removed: deck ships its own icons` (one per key or table, not one per key inside a table), and change nothing else; a config with them loads. `default.toml` loses them and their comments (DECK-08 sync test). The old glyph-width and icon-name errors, and the `the_removed_active_glyph_warns` behaviour, go away with them.
 
-3. **Tier** (`deck-tui`, pure function over an environment map and `truecolor`, read once at client start like DECK-12's `detect`): `enum Tier { Image, Nerd, Unicode }`.
+3. **Tier, first cut** (`deck-tui`, pure function over an environment map and `truecolor`, read once at client start like DECK-12's `detect`; [02](02-terminal-probe.md) replaces it): `enum Tier { Image, Nerd, Unicode }`, stored in `App`.
    - `Image` when DECK-12's detection says images work (its rules unchanged; the `icon_images` argument goes away).
-   - Else `Nerd` when any of: `TERM` is `xterm-kitty` or `xterm-ghostty`; `TERM_PROGRAM` is `ghostty` or `WezTerm`; `KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR` or `WEZTERM_EXECUTABLE` is set and non-empty. This holds inside tmux, Zellij, screen and a deck panel too.
+   - Else `Nerd` when any of: `TERM` is `xterm-kitty` or `xterm-ghostty`; `TERM_PROGRAM` is `ghostty` or `WezTerm`; `KITTY_WINDOW_ID`, `GHOSTTY_RESOURCES_DIR` or `WEZTERM_EXECUTABLE` is set and non-empty.
    - Else `Unicode`.
    - Config reload no longer changes how icons are drawn (nothing to reload); a reload of `truecolor` follows DECK-12's existing behaviour.
 
@@ -89,14 +89,14 @@ Grid border title of a working Claude terminal: `╭─ ⠹  claude · Fix login
 ## Acceptance criteria
 
 - [ ] Every icon and every spinner frame has a Unicode and a Nerd glyph one cell wide; the table above is what the functions return.
-- [ ] Tier table: `Image` for Ghostty and kitty with truecolor outside tmux; `Nerd` for Ghostty inside tmux (`TMUX` set, `GHOSTTY_RESOURCES_DIR` set), kitty without truecolor, `TERM_PROGRAM=WezTerm`, `WEZTERM_EXECUTABLE` alone; `Unicode` for `TERM=xterm-256color` alone, `TERM_PROGRAM=Apple_Terminal`, `TERM_PROGRAM=iTerm.app`, and an empty environment.
+- [ ] Tier table: `Image` for Ghostty and kitty with truecolor outside tmux; `Nerd` for kitty without truecolor, `TERM_PROGRAM=WezTerm`, `WEZTERM_EXECUTABLE` alone; `Unicode` for `TERM=xterm-256color` alone, `TERM_PROGRAM=Apple_Terminal`, `TERM_PROGRAM=iTerm.app`, and an empty environment.
 - [ ] Each of the five removed keys gives exactly one warning naming it with the message above and leaves the theme at its default; `[theme.glyphs]` with three keys gives one warning; `default.toml` has none of them and stays in sync.
 - [ ] `TestBackend`, Unicode tier: the panel row, space row, unseen marker and grid border title match the screen above cell for cell; Nerd tier: the same cells hold the Nerd glyphs; Image tier: a Claude row holds DECK-12's placeholder pair and a shell row the Nerd `terminal` glyph.
 - [ ] The Claude icon is `#d97757` in every tier, on a normal and on a reversed row; a Codex icon on the active row is in the row's colour.
 - [ ] No `IconPreset`, `IconImages`, `Glyphs`, `IconGlyphs` or `IconColors` is left in the workspace; no code path skips icons.
-- [ ] End to end (Unicode tier): a fake `claude` panel row reads `⠹  ✻ ` up to its name (any spinner frame), and a config with `icons = "nerd"` loads with the warning in the floating bar. Existing e2e tests pass with their captures updated to the new columns, when run from Ghostty, kitty, WezTerm or tmux.
+- [ ] End to end (Unicode tier): a fake `claude` panel row reads `⠹  ✻ ` up to its name (any spinner frame), and a config with `icons = "nerd"` loads with the warning in the floating bar. Existing e2e tests pass with their captures updated to the new columns, when run from Ghostty, kitty or WezTerm.
 - [ ] `PROTOCOL_VERSION` is 20.
-- [ ] By hand, in Ghostty (outside and inside tmux), kitty, WezTerm and Terminal.app: the icons look right and line up; the Claude and OpenAI Nerd glyphs render in Ghostty, kitty and WezTerm (else see the overview's risk).
+- [ ] By hand, in Ghostty, kitty, WezTerm and Terminal.app: the icons look right and line up; the Claude and OpenAI Nerd glyphs render in Ghostty, kitty and WezTerm (else see the overview's risk).
 
 ## Tests
 
