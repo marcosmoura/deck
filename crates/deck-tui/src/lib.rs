@@ -513,9 +513,9 @@ mod tests {
     const GLYPHS: [&str; 5 + 11 + 11] = [
         "▾", "▸", "▌", "⠋", "⠹", // The `unicode` icons.
         "✻", "◎", "◇", "❯", "✎", "±", "◔", "⇄", "▲", "¶", "λ",
-        // The `nerd` icons: Font Awesome codepoints.
-        "\u{f069}", "\u{f1ce}", "\u{f1b2}", "\u{f120}", "\u{f040}", "\u{f126}", "\u{f0e4}",
-        "\u{f0ec}", "\u{f013}", "\u{f02d}", "\u{f121}",
+        // The `nerd` icons: Codicons for the agents, `▣` for OpenCode, Font Awesome for the rest.
+        "\u{ec82}", "\u{ec81}", "▣", "\u{f120}", "\u{f040}", "\u{f126}", "\u{f0e4}", "\u{f0ec}",
+        "\u{f013}", "\u{f02d}", "\u{f121}",
     ];
 
     /// Colours and theme glyphs of deck's own UI come from the theme: no `Color` constructor

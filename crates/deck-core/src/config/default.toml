@@ -114,9 +114,9 @@ unseen = "•" # a panel whose agent needed you or finished while you were not l
 # One cell wide each. Uncomment a line to change one icon of the preset; with
 # icons = "none" they are still checked but not drawn.
 [theme.icon_glyphs]
-# claude = "✻" # Claude Code (nerd: U+F069)
-# codex = "◎" # Codex (nerd: U+F1CE)
-# opencode = "◇" # OpenCode (nerd: U+F1B2)
+# claude = "✻" # Claude Code (nerd: U+EC82)
+# codex = "◎" # Codex (nerd: U+EC81)
+# opencode = "◇" # OpenCode (nerd: ▣, U+25A3)
 # terminal = "❯" # a shell and every program without an icon of its own (nerd: U+F120)
 # editor = "✎" # vi, vim, nvim, hx, helix, nano, emacs, micro, kak (nerd: U+F040)
 # git = "±" # git, lazygit, tig, gitui (nerd: U+F126)

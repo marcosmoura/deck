@@ -148,9 +148,9 @@ fn the_nerd_preset_and_overrides_pick_the_glyphs() {
     let a = app_with("[theme]\nicons = \"nerd\"", titled());
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[3], pad("▌⠋ \u{f069} Fix login bug"));
+    assert_eq!(side[3], pad("▌⠋ \u{ec82} Fix login bug"));
     assert_eq!(side[4], pad("   \u{f040} nvim"));
-    assert_eq!(side[5], pad(" ! \u{f1ce} Review the API changes"));
+    assert_eq!(side[5], pad(" ! \u{ec81} Review the API changes"));
     assert_eq!(side[7], pad("   \u{f126} api"));
 
     let a = app_with("[theme.icon_glyphs]\nclaude = \"C\"\ngit = \"G\"", titled());

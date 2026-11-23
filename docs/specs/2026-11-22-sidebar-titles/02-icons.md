@@ -15,9 +15,9 @@ Every panel row in the sidebar, and the panel in the status bar, starts with an 
 
    | Kind       | Programs                                                                            | `unicode` glyph | `nerd` glyph (Nerd Fonts name, codepoint) |
    | ---------- | ----------------------------------------------------------------------------------- | --------------- | ----------------------------------------- |
-   | `claude`   | Claude Code agent                                                                   | `✻`             | `nf-fa-asterisk`, U+F069                  |
-   | `codex`    | Codex agent                                                                         | `◎`             | `nf-fa-circle_o_notch`, U+F1CE            |
-   | `opencode` | OpenCode agent                                                                      | `◇`             | `nf-fa-cube`, U+F1B2                      |
+   | `claude`   | Claude Code agent                                                                   | `✻`             | `nf-cod-claude`, U+EC82                   |
+   | `codex`    | Codex agent                                                                         | `◎`             | `nf-cod-openai`, U+EC81                   |
+   | `opencode` | OpenCode agent                                                                      | `◇`             | none: `▣` (U+25A3) stands in              |
    | `terminal` | `sh`, `bash`, `zsh`, `fish`, `dash`, `nu`, `ksh`, `tcsh`, and every unknown program | `❯`             | `nf-fa-terminal`, U+F120                  |
    | `editor`   | `vi`, `vim`, `nvim`, `hx`, `helix`, `nano`, `emacs`, `micro`, `kak`                 | `✎`             | `nf-fa-pencil`, U+F040                    |
    | `git`      | `git`, `lazygit`, `tig`, `gitui`                                                    | `±`             | `nf-fa-code_fork`, U+F126                 |
@@ -28,7 +28,7 @@ Every panel row in the sidebar, and the panel in the status bar, starts with an 
    | `repl`     | `python`, `python3`, `node`, `irb`, `ghci`, `iex`                                   | `λ`             | `nf-fa-code`, U+F121                      |
 
 2. **Config**: `[theme] icons = "unicode" | "nerd" | "none"` (default `unicode`, next to DECK-08's `border_style`) picks the preset; `[theme.icon_glyphs]` overrides single kinds (`claude = "C"`). Every icon glyph follows DECK-08's one-cell rule; a wider glyph or an unknown kind is an error naming the key. With `icons = "none"` no icon is drawn anywhere; `[theme.icon_glyphs]` is still checked but not drawn. All of it is documented in `default.toml`, which the DECK-08 sync test checks.
-3. **The `nerd` preset** is the table's last column: Font Awesome glyphs, which every Nerd Font carries at these codepoints. Nerd Fonts has no Anthropic or OpenAI logo, so the agents get generic glyphs (Claude Code's asterisk-like mark, a notch circle, a cube). Before using them, the worker checks each name and codepoint against Nerd Fonts' `glyphnames.json` and, if one is wrong, fixes the table and records it in Notes.
+3. **The `nerd` preset** is the table's last column: Codicons for Claude Code and Codex (`cod-claude`, `cod-openai`) and Font Awesome glyphs for the rest, which every Nerd Font 3.5 carries at these codepoints. Nerd Fonts has no OpenCode logo, so `▣` stands in. Before using them, the worker checks each name and codepoint against Nerd Fonts' `glyphnames.json` and, if one is wrong, fixes the table and records it in Notes.
 4. **Panel icon**: the icon of the panel's source terminal (sub-spec 01's choice), from its `agent` (DECK-06) and `program` (sub-spec 01). A panel with no terminals has no icon.
 5. **Sidebar row**: `▌`, the status column, a space, the icon, a space, then the name; the name keeps DECK-02's truncation and right-aligned terminal count in the space that is left. With `icons = "none"` the icon and its space are not drawn, and the row is DECK-02's.
 6. **Status bar**: `project › <status> <icon> <name>`, the status glyph of the sidebar row (DECK-06 requirement 9; left out without an agent) and no icon with `icons = "none"`. The ` · <title>` suffix from DECK-02 is drawn only when the panel's `name_source` is `manual`, using the source terminal's title, and only when that title differs from the name.
@@ -77,3 +77,4 @@ Status bar:
 - **Nerd Fonts check.** All eleven names and codepoints of the `nerd` column match `glyphnames.json` of Nerd Fonts 3.5.1 (`fa-asterisk` f069, `fa-circle_o_notch` f1ce, `fa-cube` f1b2, `fa-terminal` f120, `fa-pencil` f040, `fa-code_fork` f126, `fa-tachometer` f0e4, `fa-exchange` f0ec, `fa-cog` f013, `fa-book` f02d, `fa-code` f121). No change to the table.
 - **Status bar.** DECK-06's `kind ·` after the panel name is gone: the icon and the name replace it. The status glyph stays, in front of the icon. A kept terminal that exited still adds ` · exited <code>`.
 - **`icons = "none"`** still validates `[theme.icon_glyphs]` (an error names the key) and does not draw it.
+- **Agent glyphs changed after the merge** (23 Nov 2026, at the user's request): the `nerd` preset uses Nerd Fonts' Codicons `cod-claude` (U+EC82) and `cod-openai` (U+EC81, for Codex) instead of the generic Font Awesome glyphs. Nerd Fonts 3.5.1 has no OpenCode glyph, so `▣` (U+25A3, close to OpenCode's square logo) stands in.

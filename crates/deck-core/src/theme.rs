@@ -208,11 +208,12 @@ impl IconGlyphs {
                 pager: g("¶"),
                 repl: g("λ"),
             },
-            // Font Awesome codepoints, checked against Nerd Fonts' `glyphnames.json`.
+            // Codicons for the agents and Font Awesome for the rest, checked against Nerd
+            // Fonts' `glyphnames.json` (3.5.1). Nerd Fonts has no OpenCode logo: `▣` stands in.
             IconPreset::Nerd => Self {
-                claude: g("\u{f069}"),   // nf-fa-asterisk
-                codex: g("\u{f1ce}"),    // nf-fa-circle_o_notch
-                opencode: g("\u{f1b2}"), // nf-fa-cube
+                claude: g("\u{ec82}"),   // nf-cod-claude
+                codex: g("\u{ec81}"),    // nf-cod-openai
+                opencode: g("▣"),        // no Nerd Font glyph
                 terminal: g("\u{f120}"), // nf-fa-terminal
                 editor: g("\u{f040}"),   // nf-fa-pencil
                 git: g("\u{f126}"),      // nf-fa-code_fork
@@ -676,7 +677,7 @@ mod tests {
         assert_eq!(parse("").unwrap().icons, IconPreset::Unicode);
         assert_eq!(
             parse("icons = \"nerd\"").unwrap().icon_glyphs.claude,
-            "\u{f069}"
+            "\u{ec82}"
         );
         assert_eq!(
             parse("icons = \"unicode\"").unwrap().icon_glyphs.terminal,
