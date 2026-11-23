@@ -64,7 +64,8 @@ async fn stty(c: &mut Client, terminal: TerminalId, tag: &str) -> (u16, u16) {
     let marker = format!("{tag}=");
     let find = move |c: &Client| -> Option<(u16, u16)> {
         c.screens.get(&terminal)?.iter().find_map(|row| {
-            let rest = row.trim_start().strip_prefix(&marker)?;
+            // Anywhere in the row: dash prints the answer to a line typed ahead after its prompt.
+            let (_, rest) = row.split_once(&marker)?;
             let (rows, cols) = rest.trim().split_once(' ')?;
             Some((cols.parse().ok()?, rows.parse().ok()?))
         })

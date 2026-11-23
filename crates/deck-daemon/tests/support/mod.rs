@@ -489,8 +489,13 @@ impl Client {
         self.screens.values().flatten().cloned().collect()
     }
 
+    /// A row that is `text`, or the prompt and `text`: dash prints the answer to a line
+    /// typed before its prompt on the prompt's row.
     pub fn has_row(&self, text: &str) -> bool {
-        self.screen().iter().any(|r| r.trim_end() == text)
+        self.screen().iter().any(|r| {
+            let r = r.trim_end();
+            r == text || r.strip_prefix("$ ") == Some(text)
+        })
     }
 
     pub fn has_text(&self, text: &str) -> bool {

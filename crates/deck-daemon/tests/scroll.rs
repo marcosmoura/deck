@@ -78,8 +78,9 @@ async fn input_returns_a_scrolled_terminal_to_the_bottom() {
 async fn output_while_scrolled_back_grows_the_history_in_a_frame() {
     let daemon = TestDaemon::start().await;
     let mut c = with_history(&daemon).await;
-    c.type_line("(sleep 1; seq 1 50) &").await;
-    c.wait_text("[1]").await;
+    // Its own marker: dash does not print bash's `[1] <pid>` for a background job.
+    c.type_line("(sleep 1; seq 1 50) & echo bg''started").await;
+    c.wait_text("bgstarted").await;
     scroll(&mut c, ScrollTo::Lines(10)).await;
     c.wait(|c| last_frame(c).display_offset == 10).await;
     let before = last_frame(&c);
