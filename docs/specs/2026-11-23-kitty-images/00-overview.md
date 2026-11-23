@@ -71,3 +71,5 @@ Asked by the user on 23 Nov 2026: "deck is unable to display images inside the t
 - `AGENTS.md`: the toolchain line names Zig.
 
 Reviewed by spec-reviewer on 23 Nov 2026.
+
+Approved by the user on 23 Nov 2026.
