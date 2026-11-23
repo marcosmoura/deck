@@ -8,6 +8,8 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
+1. [DECK-14](#deck-14): release workflow and local install
+
 ### Not ordered yet
 
 Open tasks the user has not placed in the queue: none.
@@ -28,6 +30,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-11 | Restore agent sessions                 | done   | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
 | DECK-12 | Agent logos as images                  | done   | DECK-09          | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
 | DECK-13 | OpenCode v2 hooks                      | done   | DECK-06          | —                                                                            |
+| DECK-14 | Release workflow and local install     | todo   | —                | —                                                                            |
 
 ### Withdrawn
 
@@ -38,6 +41,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-14
+
+**Release workflow and local install.** Asked on 23 Nov 2026: a release workflow, in CI and locally, that installs `deck` in the user's paths.
+
+- What: `just install` builds and installs `deck` with `cargo install --path crates/deck --locked --root "${PREFIX:-$HOME/.local}"` (so `~/.local/bin/deck` by default) and warns when that `bin` directory is not on `PATH`. GitHub Actions (repository `marcosmoura/deck`): `.github/workflows/ci.yml` runs `just check` on macOS and Linux for pushes to `main` and pull requests, with the tools from `.mise.toml`; `.github/workflows/release.yml`, on a pushed `v*` tag that matches the workspace version, builds `deck` in release mode on native runners for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, packs each as `deck-<version>-<target>.tar.gz` (the binary and `README.md`) with a `.sha256` file, and publishes them in a GitHub release for the tag with `gh`. `install.sh` at the root (POSIX `sh`) picks the target from `uname`, downloads the latest release (or `DECK_VERSION`), checks the SHA-256 and installs the binary into `${DECK_INSTALL_DIR:-$HOME/.local/bin}`, warning when that is not on `PATH`.
+- Why: today the only install path is a manual `cargo install` into `~/.cargo/bin`, and there is no CI and no binary release.
+- Acceptance: `just install` installs a working `deck` into a temp `PREFIX`; both workflows pass `actionlint` and `install.sh` passes `shellcheck` (run locally, not added to the repo); `install.sh` installs from a locally built tarball served through its download-URL override, and refuses a bad checksum; the workflows are not run, since the repository has no remote yet (said in the summary); README (install), AGENTS.md (commands), `docs/architecture.md` (tools and a Decisions row) describe it.
 
 ### DECK-13
 
