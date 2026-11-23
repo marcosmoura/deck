@@ -10,6 +10,7 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 1. [DECK-10](#tasks): sidebar mouse resize, New project button and per-project New menu
 1. [DECK-11](#tasks): restore agent sessions from a dialog
+1. [DECK-12](#tasks): agent logos as images in Ghostty and kitty
 
 ### Not ordered yet
 
@@ -29,6 +30,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-09 | Sidebar titles with icons              | done        | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
 | DECK-10 | Sidebar mouse and buttons              | in-progress | DECK-06          | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
 | DECK-11 | Restore agent sessions                 | ready       | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
+| DECK-12 | Agent logos as images                  | draft spec  | DECK-09          | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
 
 ### Withdrawn
 
