@@ -742,6 +742,7 @@ fn draw_prompt(
 pub fn cursor_style(shape: CursorShape) -> ratatui::crossterm::cursor::SetCursorStyle {
     use ratatui::crossterm::cursor::SetCursorStyle;
     match shape {
+        CursorShape::Default => SetCursorStyle::DefaultUserShape,
         CursorShape::Block => SetCursorStyle::SteadyBlock,
         CursorShape::Bar => SetCursorStyle::SteadyBar,
         CursorShape::Underline => SetCursorStyle::SteadyUnderScore,

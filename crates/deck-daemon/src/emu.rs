@@ -9,7 +9,7 @@ use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{ClipboardType, Config, Osc52, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{
-    Color as AnsiColor, CursorShape as AnsiCursorShape, NamedColor, Processor, Rgb,
+    Color as AnsiColor, CursorShape as AnsiCursorShape, CursorStyle, NamedColor, Processor, Rgb,
 };
 use deck_core::model::TerminalId;
 use deck_core::protocol::{
@@ -112,6 +112,12 @@ impl Emu {
         let events = Listener::default();
         let config = Config {
             scrolling_history: scrollback,
+            // No escape sequence sets the `Hidden` shape, so as the default it marks a
+            // terminal whose program never chose one.
+            default_cursor_style: CursorStyle {
+                shape: AnsiCursorShape::Hidden,
+                blinking: false,
+            },
             osc52: Osc52::CopyPaste,
             ..Config::default()
         };
@@ -255,10 +261,9 @@ impl Emu {
                 col: u16::try_from(point.column.0)
                     .unwrap_or(0)
                     .min(cols.saturating_sub(1)),
-                visible: on_screen
-                    && mode.contains(TermMode::SHOW_CURSOR)
-                    && shape != AnsiCursorShape::Hidden,
+                visible: on_screen && mode.contains(TermMode::SHOW_CURSOR),
                 shape: match shape {
+                    AnsiCursorShape::Hidden => CursorShape::Default,
                     AnsiCursorShape::Beam => CursorShape::Bar,
                     AnsiCursorShape::Underline => CursorShape::Underline,
                     _ => CursorShape::Block,
@@ -514,6 +519,28 @@ mod tests {
         assert!(!frame.cursor.visible);
         assert_eq!(frame.cursor.shape, CursorShape::Bar);
         assert_eq!((frame.cursor.row, frame.cursor.col), (2, 3));
+    }
+
+    #[test]
+    fn a_cursor_shape_nobody_chose_is_the_outer_terminals_default() {
+        let mut e = emu(10, 4);
+        let frame = e.full_frame(TerminalId(1));
+        assert!(frame.cursor.visible);
+        assert_eq!(frame.cursor.shape, CursorShape::Default);
+        // Blinking mode alone does not choose a shape.
+        e.feed(b"\x1b[?12h");
+        assert_eq!(
+            e.full_frame(TerminalId(1)).cursor.shape,
+            CursorShape::Default
+        );
+        e.feed(b"\x1b[2 q");
+        assert_eq!(e.full_frame(TerminalId(1)).cursor.shape, CursorShape::Block);
+        // DECSCUSR 0 goes back to the default.
+        e.feed(b"\x1b[0 q");
+        assert_eq!(
+            e.full_frame(TerminalId(1)).cursor.shape,
+            CursorShape::Default
+        );
     }
 
     #[test]
