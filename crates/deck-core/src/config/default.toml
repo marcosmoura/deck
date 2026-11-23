@@ -65,6 +65,7 @@ panel_9 = "9" # Focus panel 9
 rename_panel = "," # Rename the panel
 close_panel = "X" # Close the panel
 new_project = "P" # New project
+new_menu = "N" # New panel menu: shell or agent
 rename_project = "." # Rename the project
 close_project = "Q" # Close the project
 toggle_sidebar = "b" # Show or hide the sidebar
@@ -136,17 +137,26 @@ unseen = "•" # a panel whose agent needed you or finished while you were not l
 # backslashes, `$`, backticks and other shell syntax are errors: the command is joined with
 # spaces and run by `sh -c`. With several agents of one kind in one directory and no session
 # ids, each one runs `resume_latest`.
+#
+# `command` is what a new panel for that agent runs (the `New` menu), directly and with no
+# shell, in the project's directory. It is a program and arguments split on whitespace, with
+# the same restrictions and no `{session_id}`; a program with a `/` must be an absolute path.
+# A program that is not in `process` is not detected as the agent, so a daemon restart
+# relaunches it fresh instead of resuming it.
 [agents.claude]
 process = ["claude"] # Claude Code
+command = "claude"
 resume = "claude --resume {session_id}"
 resume_latest = "claude --continue"
 
 [agents.codex]
 process = ["codex"] # Codex
+command = "codex"
 resume = "codex resume {session_id}"
 resume_latest = "codex resume --last"
 
 [agents.opencode]
 process = ["opencode"] # OpenCode
+command = "opencode"
 resume = "opencode --session {session_id}"
 resume_latest = "opencode --continue"

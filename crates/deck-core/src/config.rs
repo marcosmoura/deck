@@ -184,6 +184,12 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
     def("close_panel", &["X"], HelpGroup::Panels, "Close the panel"),
     def("new_project", &["P"], HelpGroup::Projects, "New project"),
     def(
+        "new_menu",
+        &["N"],
+        HelpGroup::Projects,
+        "New panel menu: shell or agent",
+    ),
+    def(
         "rename_project",
         &["."],
         HelpGroup::Projects,
@@ -283,6 +289,9 @@ pub struct AgentConfig {
     /// Program names (the basename of the command as typed, or of the script an interpreter
     /// runs, without extension) that mean this agent.
     pub process: Vec<String>,
+    /// The command a new panel for this agent runs: a program and arguments split on
+    /// whitespace.
+    pub command: String,
     /// The command that reopens a conversation; `{session_id}` is a whole argument.
     pub resume: String,
     /// The command that reopens the most recent conversation, for when no valid session id
@@ -320,6 +329,7 @@ impl Default for AgentsConfig {
     fn default() -> Self {
         let one = |name: &str, resume: &str, resume_latest: &str| AgentConfig {
             process: vec![name.to_string()],
+            command: name.to_string(),
             resume: resume.to_string(),
             resume_latest: resume_latest.to_string(),
         };
@@ -592,6 +602,11 @@ fn apply(
                                 .map(|v| string(&path, v))
                                 .collect::<Result<_, _>>()?;
                         }
+                        "command" => {
+                            let command = string(&path, value)?;
+                            check_command(&command).map_err(|e| bad(&path, e))?;
+                            agent.command = command;
+                        }
                         "resume" | "resume_latest" => {
                             let template = string(&path, value)?;
                             check_template(&template, field == "resume")
@@ -610,6 +625,18 @@ fn apply(
         _ => unreachable!("key checked against TOP_LEVEL_KEYS"),
     }
     Ok(())
+}
+
+/// Checks an agent's `command`: a template without placeholders whose program, when it has
+/// a `/`, is an absolute path.
+fn check_command(command: &str) -> Result<(), String> {
+    check_template(command, false)?;
+    match command.split_whitespace().next() {
+        Some(program) if program.contains('/') && !program.starts_with('/') => {
+            Err("a program with a `/` must be an absolute path".to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Makes every key belong to one action. A key the user set wins over the default keys of
@@ -792,9 +819,41 @@ mod tests {
     }
 
     #[test]
+    fn agent_commands_are_checked() {
+        let p = Config::parse(
+            "[agents.claude]\ncommand = \"claude --model fast\"\n[agents.codex]\ncommand = \"/opt/bin/codex\"",
+        )
+        .unwrap();
+        assert_eq!(p.config.agents.claude.command, "claude --model fast");
+        assert_eq!(p.config.agents.codex.command, "/opt/bin/codex");
+        assert_eq!(p.config.agents.opencode.command, "opencode");
+        for text in [
+            "[agents.claude]\ncommand = \"claude $HOME\"",
+            "[agents.claude]\ncommand = \"claude 'x'\"",
+            "[agents.claude]\ncommand = \"claude \\\\x\"",
+            "[agents.claude]\ncommand = \"\"",
+            "[agents.claude]\ncommand = \"  \"",
+            "[agents.claude]\ncommand = \"claude {session_id}\"",
+            "[agents.claude]\ncommand = \"bin/claude\"",
+            "[agents.claude]\ncommand = \"./claude\"",
+            "[agents.claude]\ncommand = 1",
+        ] {
+            match Config::parse(text) {
+                Err(ConfigError::Value { key, .. }) => {
+                    assert_eq!(key, "agents.claude.command", "{text}");
+                }
+                other => panic!("{text}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn resume_templates_and_the_switch_default_and_can_be_set() {
         let c = Config::default();
         assert!(c.resume_agents);
+        assert_eq!(c.agents.claude.command, "claude");
+        assert_eq!(c.agents.codex.command, "codex");
+        assert_eq!(c.agents.opencode.command, "opencode");
         assert_eq!(c.agents.claude.resume, "claude --resume {session_id}");
         assert_eq!(c.agents.codex.resume_latest, "codex resume --last");
         let p = Config::parse(
@@ -949,6 +1008,7 @@ mod tests {
             ("rename_panel", ","),
             ("close_panel", "X"),
             ("new_project", "P"),
+            ("new_menu", "N"),
             ("rename_project", "."),
             ("close_project", "Q"),
             ("toggle_sidebar", "b"),
@@ -961,6 +1021,19 @@ mod tests {
         for def in DEFAULT_BINDINGS {
             assert!(!def.help.is_empty(), "{} has no help text", def.name);
         }
+    }
+
+    #[test]
+    fn new_menu_defaults_to_n_in_the_projects_group_and_can_be_overridden() {
+        let def = DEFAULT_BINDINGS
+            .iter()
+            .find(|d| d.name == "new_menu")
+            .unwrap();
+        assert_eq!(def.group, HelpGroup::Projects);
+        assert_eq!(Config::default().keys["new_menu"], [spec("N")]);
+        let p = Config::parse("[keys]\nnew_menu = \"M\"").unwrap();
+        assert_eq!(p.config.keys["new_menu"], [spec("M")]);
+        assert!(p.warnings.is_empty());
     }
 
     #[test]

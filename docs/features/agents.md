@@ -88,6 +88,23 @@ Limitations: a session with no attached client alerts nobody (its panels are sti
 notify = "bell"
 ```
 
+## Starting an agent in a new panel
+
+The action `NewPanelWith` (sent by the [`New` menu](sidebar.md#the-new-button-and-menu) and by DECK-11's restore) starts a new panel in a project that runs an agent's `[agents.<kind>] command` (defaults `claude`, `opencode`, `codex`), in the project's directory. The command is run directly, with no shell, as the program of an explicit-program terminal (like `deck new-terminal -- <program>`), so the panel closes when the agent quits. The panel is added, active and focused like `prefix c`, and is named at once after its program (`claude`).
+
+```toml
+[agents.claude]
+command = "claude --model fast"
+```
+
+`command` is a program and arguments split on whitespace, with the same limits as a resume template (no quote, backslash, `$` or other shell syntax) and no `{session_id}`. An empty command, one that breaks those limits, or a program with a `/` that is not an absolute path is a config error naming the key (`agents.claude.command`).
+
+Before anything is created the daemon looks the program up: a program with a `/` must be an executable file, any other is searched in the `PATH` of the session's environment, which is the one of the client that created the session (it is not refreshed when another client attaches, and the daemon's own `PATH` is never used). When it is missing, no panel is created, focus stays and the client flashes `"opencode" not found in PATH (set [agents.opencode] command)`. If the program is found but cannot be started (the project's directory is gone, say), the error is the operating system's text and nothing is created either. A script with a bad interpreter line starts, fails and closes its panel like any program that exits at once.
+
+`deck new-panel -- <program>` passes its own program and does not use `command`.
+
+The terminal is saved and restored as an explicit-program terminal. When the program's name is in the kind's `process` list (the default `command` always is), the agent is detected and [resumed](#resume) after a daemon restart. For a `command` whose program is not in `process`, the agent is not detected, and a restart relaunches the command fresh.
+
 ## Resume
 
 After `deck kill-server` or a reboot, each terminal that had an agent in the foreground when the state was saved comes back with that agent reopened on its conversation (`resume_agents = true`, the default). The saved state keeps, per terminal, the agent's kind and its `session_id` (from hooks; `null` when only the process was seen). The state is saved 500 ms after the agent or its session id changes, and once more, before the terminals are hung up, when the daemon stops. While the daemon is shutting down it ignores agent events and detection changes, so an agent's `SessionEnd` hook or the hang-up's exits cannot clear what resume needs.

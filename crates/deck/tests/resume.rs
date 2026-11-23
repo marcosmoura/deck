@@ -14,6 +14,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use deck_core::action::{Action, PanelLaunch};
+use deck_core::agents::AgentKind;
+use deck_core::protocol::{ClientMsg, FrameReader, PROTOCOL_VERSION, Role, ServerMsg, encode};
 use serde_json::Value;
 use support::{Harness, Home, TIMEOUT, stderr, wait_until};
 
@@ -384,4 +387,100 @@ fn a_resumed_agent_is_detected_again_and_resumes_a_second_time() {
     assert_eq!(fakes.lines("claude")[2], format!("{home}|--resume abc"));
     drop(third);
     drop(first);
+}
+
+/// Asks the running daemon for a panel with `launch` in the first project, as an attached
+/// client does (there is no command for it), and returns the action's answer.
+fn new_panel_with(home: &Home, launch: PanelLaunch) -> Result<(), deck_core::action::ActionError> {
+    use std::io::{Read, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(home.socket()).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .unwrap();
+    // No environment: the session's `PATH` is the one of the client that created it.
+    let hello = ClientMsg::Hello {
+        version: PROTOCOL_VERSION,
+        role: Role::Attach {
+            session: None,
+            create: false,
+            cols: SIZE.0,
+            rows: SIZE.1,
+        },
+        cwd: std::env::temp_dir(),
+        env: Vec::new(),
+        colors: None,
+    };
+    stream.write_all(&encode(&hello).unwrap()).unwrap();
+    let mut reader = FrameReader::new();
+    let mut sent = false;
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        while let Some(msg) = reader.next_message::<ServerMsg>().unwrap() {
+            match msg {
+                ServerMsg::SessionView(view) if !sent => {
+                    sent = true;
+                    let action = Action::NewPanelWith {
+                        project: view.projects[0].id,
+                        launch,
+                    };
+                    stream
+                        .write_all(&encode(&ClientMsg::Action(action)).unwrap())
+                        .unwrap();
+                }
+                ServerMsg::ActionResult(result) => return result,
+                _ => {}
+            }
+        }
+        let n = stream.read(&mut buf).unwrap();
+        assert!(n > 0, "the daemon closed the connection");
+        reader.push(&buf[..n]);
+    }
+}
+
+#[test]
+fn an_agent_panel_is_resumed_after_a_restart() {
+    let fakes = Fakes::new();
+    fakes.claude("abc", false);
+    let h = builder(&fakes).deck();
+    h.wait_for_text("$", TIMEOUT);
+    new_panel_with(h.home(), PanelLaunch::Agent(AgentKind::Claude)).unwrap();
+    fakes.wait_lines("claude", 1);
+    wait_saved(h.home(), "abc");
+    let home = here(h.home());
+
+    let (_again, _first) = restart(h, &fakes);
+    fakes.wait_lines("claude", 2);
+    assert_eq!(
+        fakes.lines("claude"),
+        [format!("{home}|"), format!("{home}|--resume abc")]
+    );
+}
+
+#[test]
+fn a_command_outside_the_process_list_is_relaunched_fresh() {
+    let fakes = Fakes::new();
+    let rec = fakes.rec("myclaude").display().to_string();
+    fakes.write_script(
+        "myclaude",
+        &format!("printf '%s|%s\\n' \"$(pwd -P)\" \"$*\" >> '{rec}'\nread line\n"),
+    );
+    let command = fakes.path("myclaude").display().to_string();
+    let h = builder(&fakes)
+        .config(
+            "agents",
+            &format!(r#"{{ claude = {{ command = "{command}" }} }}"#),
+        )
+        .deck();
+    h.wait_for_text("$", TIMEOUT);
+    new_panel_with(h.home(), PanelLaunch::Agent(AgentKind::Claude)).unwrap();
+    fakes.wait_lines("myclaude", 1);
+    let home = here(h.home());
+
+    let (_again, _first) = restart(h, &fakes);
+    fakes.wait_lines("myclaude", 2);
+    assert_eq!(
+        fakes.lines("myclaude"),
+        [format!("{home}|"), format!("{home}|")],
+        "relaunched as the plain command, not resumed"
+    );
 }

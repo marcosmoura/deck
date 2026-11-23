@@ -18,12 +18,13 @@ A session holds projects, a project holds panels, and a panel shows one terminal
 - The header is the session name. Each project is a row with `▾` (expanded) or `▸` (collapsed), its name and, when collapsed, its panel count at the right. Each panel of an expanded project is a row with its name and, when it holds more than one terminal, the terminal count at the right. A project with no panels shows a muted `no panels`. Names that do not fit end in `…`.
 - The active panel is drawn in the accent colour, bold, with a `▌` in the left gutter; the active project's name is bold. The cell before each name shows the agent status of the panel's most urgent terminal (see [agents](agents.md)). A panel whose agent needed you while you were not looking is bold with a `•` after its name, and a collapsed project shows `!<n>` for its waiting panels ([attention](agents.md#attention)).
 - With more rows than fit, the list scrolls to keep the active panel (or, in sidebar focus, the selection) in view. The wheel scrolls it too, three rows a notch.
-- The sidebar takes `sidebar_width` columns (default 28) and a separator; the panels get the rest. When the window is narrower than `sidebar_width + 21` columns the sidebar hides, so the panel area never drops below 20 columns, and it comes back when the window grows, unless you hid it with `toggle_sidebar`.
+- The last row of the sidebar is a bottom bar with a `+ New project` chip at the left (`+` alone when the sidebar is under 26 columns wide), and the row above it is blank, so the list is two rows shorter. A sidebar under 8 rows tall draws neither. The right-hand end of the bar is reserved for the `Restore` button of agent restore and shows nothing for now.
+- The sidebar takes `sidebar_width` columns (default 28) and a separator; the panels get the rest. When the window is narrower than 41 columns the sidebar hides, and it comes back when the window grows, unless you hid it with `toggle_sidebar`. A shrinking window narrows a wide sidebar so the panel area keeps its 20 columns (a sidebar at 60 in an 81-column window becomes 59 in an 80-column one); a growing window does not widen it again.
 - The active project, active panel and which projects are collapsed are shared by every client attached to the session. The selection, sidebar focus, prompts and overlays are each client's own.
 
 ## Bindings
 
-After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previous panel, `1`..`9` the N-th panel of the active project, `,` rename the panel, `X` close it, `P` new project, `.` rename the project, `Q` close it, `b` show or hide the sidebar, `Tab` move focus into the sidebar, `?` help. The full table, with the config names, is in [keys](keys.md#bindings).
+After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previous panel, `1`..`9` the N-th panel of the active project, `,` rename the panel, `X` close it, `P` new project, `N` the [New menu](#the-new-button-and-menu), `.` rename the project, `Q` close it, `b` show or hide the sidebar, `Tab` move focus into the sidebar, `?` help. The full table, with the config names, is in [keys](keys.md#bindings).
 
 - A new panel runs one shell in the project's directory and starts with the lowest unused number (`1`, `2`, ...) as its name, which is only a fallback for the moment before its first name: every panel, the first of a session included, is named after its shell at once.
 - A panel keeps its name in step with what runs in it until you rename it: a coding agent shows its title without the spinner in front (`Fix login bug`), else the first line of its first prompt; any other program shows the title it sets (a shell's directory, an editor's file), else its own name (`nvim`, `zsh`). The name follows the panel's first terminal that has an agent, else its focused terminal, and is cut to 32 cells. When an agent exits, the name follows what is left. Renaming a panel (`,`, `deck rename-panel`) locks the name; `deck rename-panel --auto` unlocks it.
@@ -43,6 +44,7 @@ After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previo
 | `Enter`                     | Focus the selected panel and return to the terminal; on a project, fold or unfold it |
 | `Left` / `h`, `Right` / `l` | Fold or unfold the selected row's project                                            |
 | `c`, `P`                    | New panel in the selected project, new project                                       |
+| `n`                         | The [New menu](#the-new-button-and-menu) for the selected project                    |
 | `r`, `x`                    | Rename the selected row, close it (with the confirmation)                            |
 | `Esc`, `Tab`                | Return to the terminal                                                               |
 
@@ -50,7 +52,29 @@ These keys are fixed in v1. Entering the sidebar ends scroll mode.
 
 ## Mouse
 
-A click on a panel row focuses that panel; on a project row it folds or unfolds it. The wheel scrolls the list. A click on the separator does nothing. No sidebar key or click is needed first: the mouse works without sidebar focus.
+A click on a panel row focuses that panel; on a project row it folds or unfolds it. The wheel scrolls the list. Clicking the `+ New project` chip does what `prefix P` does: the `Directory:` prompt, prefilled with the directory deck was started in, then `Project name:`; it does nothing while a prompt, a confirmation or an overlay is open. The chip turns to the selection colours while the pointer is over it. Motion over the sidebar is never sent to a program, and the screen is redrawn only when the highlighted button changes. No sidebar key or click is needed first: the mouse works without sidebar focus.
+
+### The New button and menu
+
+While the pointer is on a project row (and on the selected project row in sidebar focus) the row shows a `[ New ▾ ]` button, right-aligned with one cell of margin, in the accent colour (the selection colours while the pointer is on the button). It takes the right edge from the collapsed panel count and the waiting count `!<n>`, which come back when the pointer leaves, and its room off the name, which is cut with `…`. A terminal that sends no pointer motion never shows it; the keyboard reaches the same menu.
+
+A click on the button, `prefix N` (for the active project; nothing without one) or `n` in sidebar focus (for the selected project, or the project of the selected panel) opens a rounded `New in <project>` menu with four items, each with its digit: `Terminal`, `Claude`, `OpenCode`, `Codex`. Its top border is on the row below the project row and its right edge on the sidebar's last column, so a narrow sidebar lets it extend over the panel area; it flips above the row when there is no room below, always stays inside the window, and with the sidebar hidden it sits at the top right. A click on the rest of the row still folds the project.
+
+| Keys / mouse                                  | What they do                              |
+| --------------------------------------------- | ----------------------------------------- |
+| `Up` / `k`, `Down` / `j`, `Ctrl+p` / `Ctrl+n` | Move the highlight                        |
+| `Enter`, `1` to `4`                           | Choose the highlighted item, or that item |
+| `Esc`, `q`                                    | Close the menu                            |
+| Hover, click on an item                       | Move the highlight, choose the item       |
+| Click elsewhere                               | Close the menu; the click goes no further |
+
+The prefix key is ordinary while the menu is open, the wheel does nothing, and these keys are fixed in v1. Choosing `Terminal` adds a new panel with a shell in the project's directory (like `prefix c` for that project; `prefix t` adds a terminal to the active panel instead); the others add a panel running the agent's [`command`](agents.md#starting-an-agent-in-a-new-panel). The new panel becomes active and focused, the sidebar expands its project if it was folded, and the keyboard leaves sidebar focus once the daemon has accepted the launch (a refusal leaves it where it was). A refusal, such as a program that is not in `PATH`, shows a red flash for 4 seconds. When the project is closed meanwhile (by another client), the menu closes with `project "<name>" was closed`.
+
+### Resizing the sidebar
+
+Drag the separator column (the `│` between the sidebar and the panels) to make the sidebar wider or narrower; the terminals follow, because the panel area is the rest of the window. While you drag, the separator is drawn `┃` in the accent colour and the status bar shows `SIDEBAR <width>` in the prefix badge's style. The width stays between 20 and 60 columns and leaves the panel area at least 20 columns (in a 60-column window the sidebar stops at 39). The press and the drag are never sent to a program, and the terminals' ratios are kept. A press on the separator while the sidebar is hidden does nothing, and neither does one under a prompt or an overlay.
+
+The dragged width belongs to this client: it is kept across `toggle_sidebar` and session switches, is not saved to `config.toml`, and is lost when the client exits. Editing `sidebar_width` in `config.toml` replaces it; any other config edit leaves it.
 
 ## Prompts
 

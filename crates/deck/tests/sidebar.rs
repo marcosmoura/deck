@@ -293,17 +293,26 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
     wait_for_row(&h, "▌  ❯ 2");
     h.wait_for_text("│TWO", TIMEOUT);
     wait_gone(&h, "SIDEBAR");
-    // Collapse: the panels go and the project shows how many it holds.
+    // Collapse: the panels go. The selected project row shows its `[ New ▾ ]` button; once
+    // the keyboard leaves the sidebar it shows how many panels it holds.
     prefixed(&mut h, TAB);
     h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("h");
     wait_until("the collapsed project", TIMEOUT, || {
         rows(&h)
             .iter()
-            .any(|r| r.starts_with(" ▸ dk") && r.contains("2 │"))
+            .any(|r| r.starts_with(" ▸ dk") && r.contains("[ New ▾ ] │"))
     });
     assert!(!rows(&h).iter().any(|r| r.starts_with("▌  ❯ 2")));
     h.capture("sidebar-focus");
+    h.send_keys(ESC);
+    wait_until("the panel count", TIMEOUT, || {
+        rows(&h)
+            .iter()
+            .any(|r| r.starts_with(" ▸ dk") && r.contains("2 │"))
+    });
+    prefixed(&mut h, TAB);
+    h.wait_for_text("SIDEBAR", TIMEOUT);
     h.send_keys("l");
     wait_for_row(&h, "▌  ❯ 2");
     // Esc hands the keyboard back to the shell.
@@ -344,16 +353,19 @@ fn toggling_the_sidebar_resizes_the_shell_by_its_width_and_separator() {
 
 #[test]
 fn the_sidebar_hides_in_a_narrow_window_and_comes_back() {
+    // Under 41 columns there is no room for the 20-column sidebar and a 20-column panel area.
     let mut h = attached_with((49, 24), &[]);
     h.wait_for_text("▾", TIMEOUT);
-    h.resize(48, 24);
+    h.resize(40, 24);
     wait_gone(&h, "▾");
     h.resize(49, 24);
     h.wait_for_text("▾", TIMEOUT);
 
+    // A wide sidebar shrinks with the window instead of hiding (see sidebar_mouse.rs).
     let mut h = attached_with((81, 24), &[("sidebar_width", "60")]);
     h.wait_for_text("▾", TIMEOUT);
     h.resize(80, 24);
+    h.resize(40, 24);
     wait_gone(&h, "▾");
 }
 

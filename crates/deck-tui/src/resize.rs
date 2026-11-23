@@ -31,6 +31,13 @@ pub(crate) struct Drag {
     sent: Option<(Ratios, Instant)>,
 }
 
+/// The sidebar's separator being dragged.
+#[derive(Debug)]
+pub(crate) struct SidebarDrag {
+    /// When the width last changed, for the throttle.
+    applied: Option<Instant>,
+}
+
 /// The position of `boundary` along its axis, in cells of the panel area, and where its span
 /// starts.
 fn edge(grid: &Grid, boundary: Boundary) -> (i32, i32) {
@@ -94,6 +101,63 @@ impl App {
     /// `SetRatios`, whose refusal shows nothing: the next view puts things right.
     fn set_ratios(&mut self, panel: PanelId, n: usize, ratios: Ratios) -> Out {
         self.act_silent(Act::SetRatios { panel, n, ratios })
+    }
+
+    /// Whether a sidebar drag is on, or this event starts one on the separator; `Some` with
+    /// what to send when the event is the drag's and must go no further.
+    pub(crate) fn sidebar_drag_mouse(
+        &mut self,
+        event: ct::MouseEvent,
+        now: Instant,
+    ) -> Option<Vec<Out>> {
+        use ct::MouseButton::Left;
+        use ct::MouseEventKind as Kind;
+        if self.sidebar_drag.is_some() {
+            match event.kind {
+                Kind::Drag(Left) => return Some(self.sidebar_drag_to(event.column, now, false)),
+                Kind::Up(Left) => {
+                    let outs = self.sidebar_drag_to(event.column, now, true);
+                    self.sidebar_drag = None;
+                    self.dirty = true;
+                    return Some(outs);
+                }
+                // The release was lost: the drag is over, and this event is handled as usual.
+                Kind::Moved | Kind::Down(_) => {
+                    self.sidebar_drag = None;
+                    self.dirty = true;
+                }
+                _ => return Some(Vec::new()),
+            }
+        }
+        let on_separator = self.sidebar_visible()
+            && event.column == self.sidebar_width
+            && event.row.saturating_add(1) < self.size.1;
+        if event.kind == Kind::Down(Left) && on_separator {
+            self.sidebar_drag = Some(SidebarDrag { applied: None });
+            self.dirty = true;
+            return Some(Vec::new());
+        }
+        None
+    }
+
+    /// Moves the separator to the pointer, at most every [`DRAG_EVERY`] except on release,
+    /// and tells the daemon the new panel area.
+    fn sidebar_drag_to(&mut self, column: u16, now: Instant, release: bool) -> Vec<Out> {
+        let width = layout::clamp_sidebar_width(self.size.0, column);
+        let Some(drag) = self.sidebar_drag.as_mut() else {
+            return Vec::new();
+        };
+        let due = release
+            || drag
+                .applied
+                .is_none_or(|at| now.saturating_duration_since(at) >= DRAG_EVERY);
+        if width == self.sidebar_width || !due {
+            return Vec::new();
+        }
+        drag.applied = Some(now);
+        self.sidebar_width = width;
+        self.dirty = true;
+        vec![self.viewport_msg()]
     }
 
     /// Whether a drag is on, or this event starts one; `Some` with what to send when the

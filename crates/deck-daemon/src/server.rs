@@ -37,6 +37,7 @@ use crate::{CwdQuery, ForegroundQuery};
 mod agents;
 mod control;
 mod cwd;
+mod launch;
 mod restore;
 mod terminal_io;
 mod waiting;
@@ -626,7 +627,11 @@ impl Shared {
         // the state lock) is still free when the session is added.
         let _attaching = self.attaching.lock().await;
         let config = self.config();
-        let viewport = panel_area((a.cols, a.rows), &config, config.sidebar);
+        let viewport = panel_area(
+            (a.cols, a.rows),
+            layout::clamp_sidebar_width(a.cols, config.sidebar_width),
+            config.sidebar,
+        );
         let plan = {
             let mut st = self.st();
             if st.shutting_down {
@@ -671,7 +676,11 @@ impl Shared {
         // the viewport and the `Welcome` both come from this one read.
         let config = self.config();
         client.session = Some(sid);
-        client.viewport = Some(panel_area((a.cols, a.rows), &config, config.sidebar));
+        client.viewport = Some(panel_area(
+            (a.cols, a.rows),
+            config.sidebar_width,
+            config.sidebar,
+        ));
         client.active = active;
         let queue = Arc::clone(&client.queue);
 
@@ -1395,6 +1404,9 @@ impl Shared {
                     .await
                     .map(|_| ())
             }
+            Action::NewPanelWith { project, launch } => {
+                self.new_panel_with(sid, project, launch).await
+            }
             Action::NewTerminal { panel } => self
                 .add_terminal(sid, panel, None, true, false)
                 .await
@@ -1573,6 +1585,7 @@ impl Shared {
             }
             Action::NewProject { .. }
             | Action::NewPanel { .. }
+            | Action::NewPanelWith { .. }
             | Action::NewTerminal { .. }
             | Action::KillSession => {
                 unreachable!("handled by `action`")

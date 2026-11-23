@@ -197,7 +197,9 @@ fn sidebar_focus_selects_with_reversed_and_shows_the_hints() {
     assert!(buf[(28 - 1, 4)].modifier.contains(Modifier::REVERSED));
     assert!(!buf[(5, 3)].modifier.contains(Modifier::REVERSED));
     assert!(rows[23].starts_with(" SIDEBAR "), "{}", rows[23]);
-    assert!(rows[23].ends_with("↑↓ move  ⏎ open  ←→ fold  c new  r rename  x close  esc back"));
+    assert!(
+        rows[23].ends_with("↑↓ move  ⏎ open  ←→ fold  c new  n menu  r rename  x close  esc back")
+    );
     // Keys do not reach the terminal while the sidebar has them.
     let outs = run(&mut a2, &[ch('x'), ch('z')]);
     assert!(
@@ -588,17 +590,20 @@ fn empty_states_and_typing_that_goes_nowhere() {
 #[test]
 fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
     let wide = |width| app_at(&Config::default(), (width, 24), mockup());
-    // 28 + separator + 20 columns is the narrowest that keeps the sidebar.
-    assert!(wide(49).sidebar_visible());
+    // The sidebar narrows with the window (to the 20-column limit); under 41 columns it hides.
     assert_eq!(wide(49).viewport(), (20, 23));
-    assert!(!wide(48).sidebar_visible());
-    assert_eq!(wide(48).viewport(), (48, 23));
+    assert!(wide(48).sidebar_visible());
+    assert_eq!(wide(48).sidebar_width, 27);
+    assert_eq!(wide(48).viewport(), (20, 23));
+    assert!(wide(41).sidebar_visible());
+    assert!(!wide(40).sidebar_visible());
+    assert_eq!(wide(40).viewport(), (40, 23));
     let wider = Config {
         sidebar_width: 60,
         ..Config::default()
     };
     assert!(app_at(&wider, (81, 24), mockup()).sidebar_visible());
-    assert!(!app_at(&wider, (80, 24), mockup()).sidebar_visible());
+    assert!(app_at(&wider, (80, 24), mockup()).sidebar_visible());
 
     let mut a = app();
     assert_eq!(a.viewport(), (71, 23));
@@ -617,17 +622,21 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
     );
     // It reappears when the window grows again, and resizing sends the panel area.
     let mut a = app_at(&Config::default(), (100, 24), mockup());
-    let outs = run(&mut a, &[ct::Event::Resize(48, 24)]);
+    // Under 41 columns it hides; it comes back at the lower limit, and does not grow.
+    let outs = run(&mut a, &[ct::Event::Resize(40, 24)]);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::Viewport { cols: 48, rows: 23 })]
+        [Out::Send(ClientMsg::Viewport { cols: 40, rows: 23 })]
     );
+    assert!(!a.sidebar_visible());
     let outs = run(&mut a, &[ct::Event::Resize(100, 24)]);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::Viewport { cols: 71, rows: 23 })]
+        [Out::Send(ClientMsg::Viewport { cols: 79, rows: 23 })]
     );
+    assert_eq!(a.sidebar_width, 20);
     // A hidden sidebar stays hidden when the window grows.
+    let mut a = app_at(&Config::default(), (100, 24), mockup());
     pfx(&mut a, 'b');
     let outs = run(&mut a, &[ct::Event::Resize(120, 30)]);
     assert_eq!(
@@ -710,12 +719,8 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
         .iter()
         .position(|r| r.starts_with("▌  ❯ p30"))
         .unwrap_or_else(|| panic!("{rows:#?}"));
-    assert_eq!(at, 22, "the last row of the list");
-    assert!(
-        rows[2].starts_with("   ❯ p10") || rows[2].starts_with("   ❯ p11"),
-        "{}",
-        rows[2]
-    );
+    assert_eq!(at, 20, "the last row of the list");
+    assert!(rows[2].starts_with("   ❯ p12"), "{}", rows[2]);
     // The selection scrolls it back up.
     run(&mut a, &[prefix(), key(ct::KeyCode::Tab)]);
     for _ in 0..28 {
@@ -731,7 +736,7 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     for _ in 0..20 {
         run(&mut a, &[mouse(ct::MouseEventKind::ScrollDown, 5, 5)]);
     }
-    assert_eq!(a.sidebar_offset, 31 - 21);
+    assert_eq!(a.sidebar_offset, 31 - 19);
     for _ in 0..20 {
         run(&mut a, &[mouse(ct::MouseEventKind::ScrollUp, 5, 5)]);
     }
@@ -833,7 +838,7 @@ fn sidebar_focus_ends_when_a_resize_hides_the_sidebar() {
     let mut a = app();
     run(&mut a, &[prefix(), key(ct::KeyCode::Tab)]);
     assert!(a.sidebar_focus);
-    run(&mut a, &[ct::Event::Resize(48, 24)]);
+    run(&mut a, &[ct::Event::Resize(40, 24)]);
     assert!(!a.sidebar_focus);
     run(&mut a, &[ct::Event::Resize(100, 24)]);
     assert!(!a.sidebar_focus);
@@ -850,7 +855,7 @@ fn a_wheel_scrolled_list_stays_put_on_a_view_update_until_the_active_panel_moves
     view.projects[0].active_panel = Some(PanelId(30));
     view.active_panel = Some(PanelId(30));
     a.on_server(ServerMsg::SessionView(view));
-    assert_eq!(a.sidebar_offset, 10);
+    assert_eq!(a.sidebar_offset, 12);
 }
 
 #[test]
@@ -878,7 +883,7 @@ fn a_click_reaches_the_program_with_the_sidebar_taken_off() {
 
 #[test]
 fn toggling_a_sidebar_that_is_too_narrow_to_show_says_so() {
-    let mut a = app_at(&Config::default(), (48, 24), mockup());
+    let mut a = app_at(&Config::default(), (40, 24), mockup());
     a.sidebar_hidden = true;
     pfx(&mut a, 'b');
     assert!(!a.sidebar_hidden);

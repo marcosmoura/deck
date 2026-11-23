@@ -43,10 +43,10 @@ The sidebar and the panel area can be resized with the mouse, and the sidebar ga
 
 | Sub-spec                   | Type       | Crate                             | Summary                                                                                       | Depends | Status |
 | -------------------------- | ---------- | --------------------------------- | --------------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-sidebar-resize.md) | shippable  | deck-core, deck-tui               | Drag the sidebar separator; the panel area follows; width is client state                     | —       | todo   |
-| [02](02-bottom-bar.md)     | shippable  | deck-tui                          | Bottom bar with `New project`, reserved `Restore` slot, hover state that redraws on change    | 01      | todo   |
-| [03](03-launch-actions.md) | foundation | deck-core, deck-daemon            | `NewPanelWith`, `[agents.<kind>] command`, program lookup and the missing-program error       | DECK-06 | todo   |
-| [04](04-new-menu.md)       | shippable  | deck-tui, deck-core, deck (tests) | `[ New ▾ ]` on hovered project rows, the menu popup, `new_menu` binding and sidebar-focus `n` | 02, 03  | todo   |
+| [01](01-sidebar-resize.md) | shippable  | deck-core, deck-tui               | Drag the sidebar separator; the panel area follows; width is client state                     | —       | done   |
+| [02](02-bottom-bar.md)     | shippable  | deck-tui                          | Bottom bar with `New project`, reserved `Restore` slot, hover state that redraws on change    | 01      | done   |
+| [03](03-launch-actions.md) | foundation | deck-core, deck-daemon            | `NewPanelWith`, `[agents.<kind>] command`, program lookup and the missing-program error       | DECK-06 | done   |
+| [04](04-new-menu.md)       | shippable  | deck-tui, deck-core, deck (tests) | `[ New ▾ ]` on hovered project rows, the menu popup, `new_menu` binding and sidebar-focus `n` | 02, 03  | done   |
 
 01 and 02 both change `deck-tui`'s sidebar, so they run one after the other; 03 is independent of them.
 

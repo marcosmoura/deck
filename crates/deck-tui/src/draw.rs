@@ -92,6 +92,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             theme,
         );
     }
+    crate::menu::draw(frame.buffer_mut(), app, theme);
     if !app.truecolor {
         downsample(frame.buffer_mut());
     }
@@ -465,31 +466,38 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
 
     let name = app.mirror.session_name().unwrap_or("");
     let resizing = app.resize_until.is_some();
-    let (badge, badge_style) =
-        if app.armed || app.scroll_mode.is_some() || app.sidebar_focus || resizing {
-            let label = if app.armed {
-                " PREFIX "
-            } else if resizing && app.scroll_mode.is_none() && !app.sidebar_focus {
-                " RESIZE "
-            } else if app.scroll_mode.is_some() {
-                " SCROLL "
-            } else {
-                " SIDEBAR "
-            };
-            (
-                label.to_string(),
-                Style::new()
-                    .fg(color(theme.warning))
-                    .add_modifier(Modifier::REVERSED),
-            )
+    let dragging_sidebar = app.sidebar_drag.is_some();
+    let (badge, badge_style) = if app.armed
+        || app.scroll_mode.is_some()
+        || app.sidebar_focus
+        || resizing
+        || dragging_sidebar
+    {
+        let label = if dragging_sidebar {
+            format!(" SIDEBAR {} ", app.sidebar_width)
+        } else if app.armed {
+            " PREFIX ".to_string()
+        } else if resizing && app.scroll_mode.is_none() && !app.sidebar_focus {
+            " RESIZE ".to_string()
+        } else if app.scroll_mode.is_some() {
+            " SCROLL ".to_string()
         } else {
-            (
-                format!(" {name} "),
-                Style::new()
-                    .fg(color(theme.accent))
-                    .add_modifier(Modifier::BOLD),
-            )
+            " SIDEBAR ".to_string()
         };
+        (
+            label,
+            Style::new()
+                .fg(color(theme.warning))
+                .add_modifier(Modifier::REVERSED),
+        )
+    } else {
+        (
+            format!(" {name} "),
+            Style::new()
+                .fg(color(theme.accent))
+                .add_modifier(Modifier::BOLD),
+        )
+    };
     let project = app.mirror.project_name().unwrap_or("");
     // `project › <status> <icon> <name>` like the sidebar row (the status only with an
     // agent; coloured after the text is drawn); a manually named panel keeps its name, so

@@ -13,6 +13,9 @@ mod grid_tests;
 #[cfg(test)]
 mod icons_tests;
 mod input;
+mod menu;
+#[cfg(test)]
+mod menu_tests;
 mod mirror;
 mod modal;
 mod picker;
@@ -22,6 +25,10 @@ mod resize;
 #[cfg(test)]
 mod resize_tests;
 mod sidebar;
+#[cfg(test)]
+mod sidebar_bar_tests;
+#[cfg(test)]
+mod sidebar_drag_tests;
 #[cfg(test)]
 mod sidebar_tests;
 mod term;
@@ -118,9 +125,10 @@ enum Server {
 
 async fn run_async(mut options: Options) -> Exit {
     // Handlers first, so a signal during set-up still restores the terminal.
-    let (Ok(mut sigterm), Ok(mut sighup)) = (
+    let (Ok(mut sigterm), Ok(mut sighup), Ok(mut sigwinch)) = (
         signal(SignalKind::terminate()),
         signal(SignalKind::hangup()),
+        signal(SignalKind::window_change()),
     ) else {
         return Exit::Error("cannot install the signal handlers".into());
     };
@@ -232,6 +240,14 @@ async fn run_async(mut options: Options) -> Exit {
                     drawn_once = true;
                 }
                 continue;
+            },
+            // crossterm drops a SIGWINCH that becomes ready together with the TTY, so the
+            // size is also read here; a size the app already has is not a resize.
+            _ = sigwinch.recv() => match ct_terminal::size() {
+                Ok((cols, rows)) if (cols, rows) != app.size => {
+                    app.on_event(ct::Event::Resize(cols, rows), Instant::now())
+                }
+                _ => Vec::new(),
             },
             _ = sigterm.recv() => break Exit::Signal,
             _ = sighup.recv() => break Exit::Signal,

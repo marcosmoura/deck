@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
+use crate::config::SIDEBAR_WIDTH_RANGE;
 
 pub mod golden;
 #[cfg(test)]
@@ -24,13 +24,22 @@ pub fn sidebar_cols(cols: u16, sidebar_width: u16, shown: bool) -> u16 {
     }
 }
 
+/// `wanted` as a sidebar width in a window `cols` wide: within the `sidebar_width` limits
+/// and leaving the panel area its [`MIN_PANEL_COLS`]. Where the two conflict (a window under
+/// 41 columns, which hides the sidebar anyway) the lower limit wins.
+pub fn clamp_sidebar_width(cols: u16, wanted: u16) -> u16 {
+    let (low, high) = (*SIDEBAR_WIDTH_RANGE.start(), *SIDEBAR_WIDTH_RANGE.end());
+    let room = cols.saturating_sub(1 + MIN_PANEL_COLS);
+    wanted.min(high).min(room).max(low)
+}
+
 /// The panel area of an `outer` window (columns, rows): what is left of it after the
 /// sidebar and the status-bar row. `sidebar_visible` says the user has not hidden the
 /// sidebar; a window too narrow for it hides it anyway.
-pub fn panel_area(outer: (u16, u16), config: &Config, sidebar_visible: bool) -> (u16, u16) {
+pub fn panel_area(outer: (u16, u16), sidebar_width: u16, sidebar_visible: bool) -> (u16, u16) {
     let (cols, rows) = outer;
     (
-        cols - sidebar_cols(cols, config.sidebar_width, sidebar_visible),
+        cols - sidebar_cols(cols, sidebar_width, sidebar_visible),
         rows.saturating_sub(1),
     )
 }

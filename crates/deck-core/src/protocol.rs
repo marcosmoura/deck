@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;

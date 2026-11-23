@@ -29,6 +29,8 @@ pub enum Action {
     RenamePanel,
     ClosePanel,
     NewProject,
+    /// Opens the New menu for the active project.
+    NewMenu,
     RenameProject,
     CloseProject,
     ToggleSidebar,
@@ -62,6 +64,7 @@ impl Action {
             "rename_panel" => Self::RenamePanel,
             "close_panel" => Self::ClosePanel,
             "new_project" => Self::NewProject,
+            "new_menu" => Self::NewMenu,
             "rename_project" => Self::RenameProject,
             "close_project" => Self::CloseProject,
             "toggle_sidebar" => Self::ToggleSidebar,

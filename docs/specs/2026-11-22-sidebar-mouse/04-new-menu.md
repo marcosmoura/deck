@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 04 — The New button and menu
@@ -29,19 +29,19 @@ Hovering a project row in the sidebar shows a `[ New ▾ ]` button; clicking it 
  main                       │
                             │
  ▾ terminal-multiplexer     │
-▌  editor                   │
-   claude                   │
+▌  ❯ editor                 │
+   ❯ claude                 │
  ▾ budget         [ New ▾ ] │
-   api╭─ New in budget ────╮│
-   no │ ❯ Terminal       1 ││
- ▸ dot│   Claude         2 ││
-      │   OpenCode       3 ││
+   ❯ a╭─ New in budget ────╮│
+ ▾ emp│ ▌ Terminal       1 ││
+   no │   Claude         2 ││
+ ▸ dot│   OpenCode       3 ││
       │   Codex          4 ││
       │ ⏎ choose  esc close││
       ╰────────────────────╯│
 ```
 
-- The `❯` row is highlighted in the selection colours; the hint row is `muted`; the title and borders use `border`.
+- The `▌` row is highlighted in the selection colours; the hint row is `muted`; the title and borders use `border`.
 - The button uses `accent`; the name is truncated to make room (`budget` fits at 28 columns; a 20-character name shows as `terminal-mu…`).
 - Sidebar-focus hints: `SIDEBAR  ↑↓ move  ⏎ open  ←→ fold  c new  n menu  r rename  x close  esc back`.
 
@@ -69,5 +69,6 @@ Hovering a project row in the sidebar shows a `[ New ▾ ]` button; clicking it 
 
 ## Notes
 
+- The menu's marker is the theme's `active` glyph (`▌`), not `❯`: `❯` is the shell icon, and the drawing code takes no icon literal.
 - Menu items carry no icons; DECK-09 icons can be added later through the same `icon_for` choice.
 - `Terminal` here and `prefix t` differ on purpose: the first makes a panel (a sidebar row), the second a terminal inside the active panel's grid.

@@ -5,11 +5,19 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::AgentKind;
 use crate::layout::{Direction, Ratios};
 use crate::model::{PanelId, ProjectId, TerminalId};
 
 /// Longest name, in characters.
 pub const MAX_NAME_LEN: usize = 64;
+
+/// What a new panel starts, resolved by the daemon from the config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PanelLaunch {
+    /// The agent's `[agents.<kind>] command`, run directly in the project root.
+    Agent(AgentKind),
+}
 
 /// What an action changes, on the attached session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +44,11 @@ pub enum Action {
     NewPanel {
         project: ProjectId,
         name: Option<String>,
+    },
+    /// A new panel that runs a program chosen by the daemon, in the project root.
+    NewPanelWith {
+        project: ProjectId,
+        launch: PanelLaunch,
     },
     RenamePanel {
         panel: PanelId,
@@ -120,6 +133,15 @@ pub enum ActionError {
     ShuttingDown,
     #[error("{0}")]
     Spawn(String),
+    /// `key` is the `[agents.<kind>]` setting that supplied `program`.
+    #[error("\"{program}\" not found in PATH (set [agents.{}] {key})", .kind.name())]
+    ProgramNotFound {
+        program: String,
+        kind: AgentKind,
+        key: String,
+    },
+    #[error("{0}")]
+    LaunchFailed(String),
 }
 
 /// What a name names; session and project names may not contain `/`.
@@ -207,6 +229,19 @@ mod tests {
             "\"/nope\" is not a directory"
         );
         assert_eq!(ActionError::EmptyName.to_string(), "name must not be empty");
+        assert_eq!(
+            ActionError::ProgramNotFound {
+                program: "opencode".into(),
+                kind: AgentKind::OpenCode,
+                key: "command".into(),
+            }
+            .to_string(),
+            "\"opencode\" not found in PATH (set [agents.opencode] command)"
+        );
+        assert_eq!(
+            ActionError::LaunchFailed("Permission denied".into()).to_string(),
+            "Permission denied"
+        );
     }
 
     #[test]
@@ -255,6 +290,10 @@ mod tests {
                 project: ProjectId(1),
                 name: None,
             },
+            Action::NewPanelWith {
+                project: ProjectId(1),
+                launch: PanelLaunch::Agent(AgentKind::OpenCode),
+            },
             Action::RenamePanel {
                 panel: PanelId(2),
                 name: "x".into(),
@@ -297,6 +336,12 @@ mod tests {
             Err(ActionError::NoSuchTerminal(TerminalId(3))),
             Err(ActionError::LayoutChanged),
             Err(ActionError::InvalidRatios),
+            Err(ActionError::ProgramNotFound {
+                program: "opencode".into(),
+                kind: AgentKind::OpenCode,
+                key: "command".into(),
+            }),
+            Err(ActionError::LaunchFailed("denied".into())),
         ] {
             let msg = ServerMsg::ActionResult(r);
             assert_eq!(decode::<ServerMsg>(&encode(&msg).unwrap()).unwrap(), msg);

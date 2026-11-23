@@ -21,11 +21,12 @@ use crate::Exit;
 use crate::agent;
 use crate::grid::Grid;
 use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
+use crate::menu::NewMenu;
 use crate::mirror::Mirror;
 use crate::modal::{Modal, PromptKind, Retry};
 use crate::picker::{Picker, Req};
-use crate::resize::Drag;
-use crate::sidebar::Sel;
+use crate::resize::{Drag, SidebarDrag};
+use crate::sidebar::{Hover, Sel};
 
 /// Below this many columns or rows the client shows only a message.
 pub const MIN_SIZE: (u16, u16) = (20, 5);
@@ -103,22 +104,39 @@ pub struct App {
     pub(crate) pending: VecDeque<(Option<Retry>, bool)>,
     /// The session picker, open over everything but the prompts it starts.
     pub picker: Option<Picker>,
+    /// The New menu, open over the sidebar.
+    pub menu: Option<NewMenu>,
+    /// How many answers come before the one of the launch the menu sent; its success ends
+    /// the sidebar focus.
+    pub(crate) launch_result: Option<usize>,
     /// What each request sent whose answer is still to come was for, oldest first.
     pub(crate) requests: VecDeque<Req>,
     /// A click focused a terminal; the rest of that click (drag, release) is not forwarded.
-    swallow_release: bool,
+    pub(crate) swallow_release: bool,
     /// Until when the resize keys act without the prefix.
     pub(crate) resize_until: Option<Instant>,
     /// The border being dragged with the mouse.
     pub(crate) drag: Option<Drag>,
     /// The user hid the sidebar (it also hides when the window is narrow).
     pub sidebar_hidden: bool,
+    /// The sidebar's width: client state, set by a drag and by a config that changes it.
     pub sidebar_width: u16,
+    /// The sidebar's separator being dragged with the mouse.
+    pub(crate) sidebar_drag: Option<SidebarDrag>,
+    /// The first `SessionView` of an attach has not come yet: the client compares its
+    /// viewport with the daemon's then.
+    check_viewport: bool,
     /// The sidebar has the keyboard.
     pub sidebar_focus: bool,
     pub selection: Option<Sel>,
     /// The first sidebar row shown.
     pub sidebar_offset: usize,
+    /// What the pointer is over in the sidebar; client-local.
+    pub(crate) hover: Option<Hover>,
+    /// The last pointer position, to recompute the hover when rows move under it.
+    pub(crate) pointer: Option<(u16, u16)>,
+    /// A left press landed on the `New project` chip; its release starts the flow.
+    pub(crate) chip_down: bool,
     /// Where the client was started, for new projects' directories.
     pub(crate) cwd: PathBuf,
     pub(crate) home: Option<PathBuf>,
@@ -173,15 +191,22 @@ impl App {
             modal: None,
             pending: VecDeque::new(),
             picker: None,
+            menu: None,
+            launch_result: None,
             requests: VecDeque::new(),
             swallow_release: false,
             resize_until: None,
             drag: None,
             sidebar_hidden: !config.sidebar,
-            sidebar_width: config.sidebar_width,
+            sidebar_width: layout::clamp_sidebar_width(size.0, config.sidebar_width),
+            sidebar_drag: None,
+            check_viewport: true,
             sidebar_focus: false,
             selection: None,
             sidebar_offset: 0,
+            hover: None,
+            pointer: None,
+            chip_down: false,
             cwd: PathBuf::from("/"),
             home: None,
             spin: 0,
@@ -212,7 +237,7 @@ impl App {
 
     /// The panel area, in columns and rows: what the daemon sizes terminals for.
     pub fn viewport(&self) -> (u16, u16) {
-        layout::panel_area(self.size, &self.config, !self.sidebar_hidden)
+        layout::panel_area(self.size, self.sidebar_width, !self.sidebar_hidden)
     }
 
     /// Takes in the daemon's config, changing only what differs from the one in force (a
@@ -238,7 +263,7 @@ impl App {
             sized = true;
         }
         if new.sidebar_width != old.sidebar_width {
-            self.sidebar_width = new.sidebar_width;
+            self.sidebar_width = layout::clamp_sidebar_width(self.size.0, new.sidebar_width);
             sized = true;
         }
         if !sized {
@@ -248,6 +273,7 @@ impl App {
             self.sidebar_focus = false;
         }
         self.ensure_visible();
+        self.refresh_hover();
         let (cols, rows) = self.viewport();
         if too_small(self.size) || (cols, rows) == before {
             return Vec::new();
@@ -273,14 +299,23 @@ impl App {
         self.dirty = true;
     }
 
-    fn viewport_msg(&self) -> Out {
+    /// Ends a sidebar drag from outside the mouse: the button may still be down, and the rest
+    /// of the gesture (drags, the release) is not forwarded to a program.
+    fn end_sidebar_drag(&mut self) {
+        if self.sidebar_drag.take().is_some() {
+            self.swallow_release = true;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn viewport_msg(&self) -> Out {
         let (cols, rows) = self.viewport();
         Out::Send(ClientMsg::Viewport { cols, rows })
     }
 
     /// A prompt, a confirmation or an overlay has the keyboard.
     pub fn overlay_open(&self) -> bool {
-        self.modal.is_some() || self.picker.is_some()
+        self.modal.is_some() || self.picker.is_some() || self.menu.is_some()
     }
 
     /// Forgets everything that belongs to the session the client was attached to, for the
@@ -290,7 +325,9 @@ impl App {
         self.mirror = Mirror::default();
         self.modal = None;
         self.picker = None;
+        self.menu = None;
         self.pending.clear();
+        self.launch_result = None;
         self.requests.clear();
         self.armed = false;
         self.scroll_mode = None;
@@ -298,10 +335,14 @@ impl App {
         self.swallow_release = false;
         self.resize_until = None;
         self.drag = None;
+        self.sidebar_drag = None;
+        self.check_viewport = true;
         self.queued.clear();
         self.sidebar_focus = false;
         self.selection = None;
         self.sidebar_offset = 0;
+        self.hover = None;
+        self.chip_down = false;
         self.spin_at = None;
         self.dirty = true;
     }
@@ -391,6 +432,15 @@ impl App {
     }
 
     pub fn on_event(&mut self, event: ct::Event, now: Instant) -> Vec<Out> {
+        let outs = self.handle_event(event, now);
+        // A prompt or an overlay that opened ends the hover.
+        if self.overlay_open() {
+            self.set_hover(None);
+        }
+        outs
+    }
+
+    fn handle_event(&mut self, event: ct::Event, now: Instant) -> Vec<Out> {
         match event {
             ct::Event::Key(key) if !self.configured => {
                 self.typeahead.extend(convert(key));
@@ -401,10 +451,13 @@ impl App {
             ct::Event::Resize(cols, rows) => {
                 self.size = (cols, rows);
                 self.dirty = true;
+                self.end_sidebar_drag();
+                self.sidebar_width = layout::clamp_sidebar_width(cols, self.sidebar_width);
                 if !self.sidebar_visible() {
                     self.sidebar_focus = false;
                 }
                 self.ensure_visible();
+                self.refresh_hover();
                 if too_small(self.size) {
                     return Vec::new();
                 }
@@ -441,18 +494,78 @@ impl App {
         if matches!(event.kind, ct::MouseEventKind::Up(_)) {
             self.swallow_release = false;
         }
+        let before = self.pointer;
+        self.pointer = Some((event.column, event.row));
+        // The press on the chip survives the pointer drifting (a drag with the left button);
+        // anything else but its release ends it.
+        let chip_down = match event.kind {
+            ct::MouseEventKind::Up(_) => std::mem::take(&mut self.chip_down),
+            ct::MouseEventKind::Drag(ct::MouseButton::Left) => false,
+            _ => {
+                self.chip_down = false;
+                false
+            }
+        };
+        // The New menu has the mouse before the sidebar.
+        if self.menu.is_some() && !too_small(self.size) {
+            self.drag = None;
+            self.end_sidebar_drag();
+            return self.menu_mouse(event);
+        }
         if self.overlay_open() || too_small(self.size) {
             self.drag = None;
+            self.end_sidebar_drag();
             return Vec::new();
+        }
+        // The sidebar's separator drag and a border drag are ours from their press to their
+        // release, never a program's.
+        if let Some(outs) = self.sidebar_drag_mouse(event, now) {
+            return outs;
         }
         // A border drag is ours from its press to its release, never a program's.
         if let Some(outs) = self.drag_mouse(event, now) {
             return outs;
         }
         if event.column < self.sidebar_cols() {
-            self.dirty = true;
-            return self.sidebar_mouse(event);
+            return match event.kind {
+                // Motion redraws only when the hover target changed.
+                ct::MouseEventKind::Moved => {
+                    let hover = self.hover_at(event.column, event.row);
+                    self.set_hover(hover);
+                    // The button's colours change when the pointer gets on or off it.
+                    let on =
+                        |p: Option<(u16, u16)>| p.is_some_and(|(c, r)| self.on_button_at(c, r));
+                    if on(before) != on(self.pointer) {
+                        self.dirty = true;
+                    }
+                    Vec::new()
+                }
+                ct::MouseEventKind::Up(ct::MouseButton::Left)
+                    if chip_down
+                        && self.hover_at(event.column, event.row) == Some(Hover::NewProject) =>
+                {
+                    self.dirty = true;
+                    self.hover = None;
+                    self.open_new_project();
+                    Vec::new()
+                }
+                kind => {
+                    self.dirty = true;
+                    let outs = self.sidebar_mouse(event);
+                    // A click ends the hover; a wheel scroll recomputes it for the new rows.
+                    self.hover = None;
+                    if matches!(
+                        kind,
+                        ct::MouseEventKind::ScrollUp | ct::MouseEventKind::ScrollDown
+                    ) {
+                        self.refresh_hover();
+                    }
+                    outs
+                }
+            };
         }
+        // Anything over the panel area ends the hover.
+        self.set_hover(None);
         let Some(Hit { i, grid, cell }) = self.terminal_at(event.column, event.row) else {
             return Vec::new();
         };
@@ -562,6 +675,12 @@ impl App {
     fn on_focus(&mut self, gained: bool) -> Vec<Out> {
         self.focused = gained;
         self.focus_seen = true;
+        if !gained && self.sidebar_drag.take().is_some() {
+            self.dirty = true;
+        }
+        if !gained {
+            self.set_hover(None);
+        }
         let mut outs = vec![Out::Send(ClientMsg::Focus(gained))];
         outs.extend(self.forward_focus(gained));
         outs
@@ -665,11 +784,17 @@ impl App {
 
     fn on_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Out> {
         self.dirty = true;
+        // A key ends a sidebar drag, so an overlay it opens never shows one; the rest of the
+        // gesture is still the drag's and goes to no program.
+        self.end_sidebar_drag();
         if self.modal.is_some() {
             return self.modal_key(key);
         }
         if self.picker.is_some() {
             return self.picker_key(key);
+        }
+        if self.menu.is_some() {
+            return self.menu_key(key);
         }
         if !self.armed {
             if let Some(until) = self.resize_until.take() {
@@ -807,6 +932,12 @@ impl App {
                 self.open_new_project();
                 Vec::new()
             }
+            Action::NewMenu => {
+                if let Some(project) = active_project {
+                    self.open_new_menu(project);
+                }
+                Vec::new()
+            }
             Action::RenameProject => {
                 if let Some(project) = active_project {
                     self.open_rename_project(project);
@@ -866,6 +997,9 @@ impl App {
         }
         if let Some(picker) = &mut self.picker {
             picker.paste(&text);
+            return Vec::new();
+        }
+        if self.menu.is_some() {
             return Vec::new();
         }
         // Scroll mode and the sidebar keep keys and pastes from the terminal.
@@ -958,6 +1092,15 @@ impl App {
     }
 
     pub fn on_server(&mut self, msg: ServerMsg) -> Vec<Out> {
+        let outs = self.handle_server(msg);
+        // A prompt reopened by an answer ends the hover too.
+        if self.overlay_open() {
+            self.set_hover(None);
+        }
+        outs
+    }
+
+    fn handle_server(&mut self, msg: ServerMsg) -> Vec<Out> {
         self.dirty = true;
         match msg {
             ServerMsg::Welcome { config, .. } => {
@@ -1003,6 +1146,7 @@ impl App {
                 self.arm_spinner(Instant::now());
                 self.check_scroll_target();
                 self.check_modal_target(Instant::now());
+                self.check_menu_target(Instant::now());
                 self.normalize_selection();
                 // A wheel-scrolled list stays where it is unless the active panel moved.
                 let after = self
@@ -1014,10 +1158,22 @@ impl App {
                 } else {
                     self.ensure_visible();
                 }
+                self.refresh_hover();
                 if self.panel_area_empty() {
                     self.queued.clear();
                 }
-                self.flush()
+                // The daemon sized the terminals for the config's sidebar; ours may differ
+                // (a width dragged before a switch, a sidebar hidden with the prefix).
+                let mut outs = Vec::new();
+                if std::mem::take(&mut self.check_viewport) && !too_small(self.size) {
+                    let width = layout::clamp_sidebar_width(self.size.0, self.config.sidebar_width);
+                    let shown = self.config.sidebar;
+                    if self.viewport() != layout::panel_area(self.size, width, shown) {
+                        outs.push(self.viewport_msg());
+                    }
+                }
+                outs.extend(self.flush());
+                outs
             }
             ServerMsg::Frame(frame) => {
                 self.follow_scroll(&frame);

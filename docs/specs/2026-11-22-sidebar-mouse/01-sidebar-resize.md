@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Resize the sidebar with the mouse
@@ -29,10 +29,10 @@ Dragging to column 40 in a 100-column window (the separator, drawn in accent, is
  ▾ terminal-multiplexer                  ┃  ╭─ nvim ───────────────────────────────╮
 ▌  editor                                ┃  │                                      │
  …
- SIDEBAR 40  main  terminal-multiplexer › editor                       ⌥Space ? help
+ SIDEBAR 40  terminal-multiplexer › editor                            ⌥Space ? help
 ```
 
-The separator is drawn `┃` in accent while dragging and `│` in `border` otherwise.
+The separator is drawn `┃` in accent while dragging and `│` in `border` otherwise. The `SIDEBAR 40` badge replaces the session name, as the `PREFIX` badge does.
 
 ## Acceptance criteria
 
@@ -58,3 +58,4 @@ The separator is drawn `┃` in accent while dragging and `│` in `border` othe
 
 - The daemon computes the first panel area from the config at attach; today the client sends `Viewport` only on an outer resize and on `toggle_sidebar`, and a `Welcome` with an unchanged config sends nothing, so requirement 6 closes that gap.
 - Several clients on one session: PTY sizes follow the client that most recently sent a viewport (architecture, protocol); the others crop or pad.
+- The client also watches `SIGWINCH` through tokio and feeds a changed size to the app as a resize: crossterm 0.29's poll returns either the TTY or the signal event and drops the other's edge-triggered readiness, so a resize that arrives with typed input was lost and the client kept its old size.

@@ -439,6 +439,12 @@ fn a_collapsed_project_shows_how_many_of_its_panels_wait() {
     h.send_bytes(PREFIX);
     h.send_bytes(b"\t");
     h.send_bytes(b"\x1b[D");
+    // The selected project row shows its `[ New ▾ ]` button over the badge; leaving the
+    // sidebar brings the badge back.
+    wait_until("the button", TIMEOUT, || {
+        rows(&h).get(2).is_some_and(|r| r.contains("[ New"))
+    });
+    h.send_keys("\x1b");
     wait_until("the badge", TIMEOUT, || {
         rows(&h).get(2).is_some_and(|r| r.contains(" !1"))
     });

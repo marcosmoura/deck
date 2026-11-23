@@ -437,6 +437,16 @@ impl App {
         now: std::time::Instant,
     ) {
         let (retry, silent) = self.pending.pop_front().unwrap_or((None, false));
+        match self.launch_result {
+            Some(0) => {
+                self.launch_result = None;
+                if result.is_ok() {
+                    self.sidebar_focus = false;
+                }
+            }
+            Some(n) => self.launch_result = Some(n - 1),
+            None => {}
+        }
         let Err(error) = result else { return };
         if silent {
             return;

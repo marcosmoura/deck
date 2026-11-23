@@ -57,23 +57,56 @@ fn random_ratios(n: usize, seed: &mut u64) -> Ratios {
 
 #[test]
 fn the_panel_area_leaves_the_sidebar_and_the_status_bar() {
-    let config = Config::default();
-    assert_eq!(panel_area((100, 24), &config, true), (71, 23));
-    assert_eq!(panel_area((100, 24), &config, false), (100, 23));
-    assert_eq!(panel_area((100, 0), &config, false), (100, 0));
+    assert_eq!(panel_area((100, 24), 28, true), (71, 23));
+    assert_eq!(panel_area((100, 24), 28, false), (100, 23));
+    assert_eq!(panel_area((100, 0), 28, false), (100, 0));
 }
 
 #[test]
 fn a_narrow_window_hides_the_sidebar() {
-    let config = Config::default();
     // 28 + separator + 20 columns is the narrowest that keeps it.
-    assert_eq!(panel_area((49, 24), &config, true), (20, 23));
-    assert_eq!(panel_area((48, 24), &config, true), (48, 23));
-    let wide = Config {
-        sidebar_width: 40,
-        ..Config::default()
-    };
-    assert_eq!(panel_area((100, 24), &wide, true), (59, 23));
+    assert_eq!(panel_area((49, 24), 28, true), (20, 23));
+    assert_eq!(panel_area((48, 24), 28, true), (48, 23));
+    assert_eq!(panel_area((100, 24), 40, true), (59, 23));
+}
+
+#[test]
+fn sidebar_cols_takes_the_width() {
+    assert_eq!(sidebar_cols(100, 40, true), 41);
+    assert_eq!(sidebar_cols(100, 40, false), 0);
+    assert_eq!(sidebar_cols(60, 40, true), 0);
+}
+
+#[test]
+fn the_sidebar_width_is_clamped_to_the_limits_and_the_panel_area() {
+    // (cols, wanted, expected)
+    let table = [
+        (100, 28, 28),
+        (100, 19, 20),
+        (100, 0, 20),
+        (100, 20, 20),
+        (100, 60, 60),
+        (100, 61, 60),
+        (100, 500, 60),
+        // The panel area keeps its 20 columns: cols - 21 at most.
+        (60, 60, 39),
+        (60, 39, 39),
+        (60, 30, 30),
+        (41, 60, 20),
+        (41, 28, 20),
+        // Under 41 columns the lower bound wins.
+        (40, 60, 20),
+        (40, 28, 20),
+        (20, 28, 20),
+        (0, 28, 20),
+    ];
+    for (cols, wanted, expected) in table {
+        assert_eq!(
+            clamp_sidebar_width(cols, wanted),
+            expected,
+            "{cols}, {wanted}"
+        );
+    }
 }
 
 // --- shape, layout, golden ---
