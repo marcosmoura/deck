@@ -172,6 +172,10 @@ impl Home {
 
 impl Drop for Home {
     fn drop(&mut self) {
+        // Without its `DECK_HOME`, `kill-server` would reach the user's own daemon.
+        if !self.env.iter().any(|(k, _)| k == "DECK_HOME") {
+            return;
+        }
         let _ = self.deck_command(&["kill-server"]).output();
     }
 }
