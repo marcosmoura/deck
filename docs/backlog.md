@@ -8,8 +8,6 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-1. [DECK-13](#deck-13): OpenCode v2 hooks
-
 ### Not ordered yet
 
 Open tasks the user has not placed in the queue: none.
@@ -29,7 +27,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-10 | Sidebar mouse and buttons              | done   | DECK-06          | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
 | DECK-11 | Restore agent sessions                 | done   | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
 | DECK-12 | Agent logos as images                  | done   | DECK-09          | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
-| DECK-13 | OpenCode v2 hooks                      | todo   | DECK-06          | —                                                                            |
+| DECK-13 | OpenCode v2 hooks                      | done   | DECK-06          | —                                                                            |
 
 ### Withdrawn
 
@@ -45,9 +43,9 @@ A task that will not be built moves here from the Tasks table, with the date and
 
 **OpenCode v2 hooks.** Asked on 23 Nov 2026: with OpenCode v2.3.2, the plugin `deck hooks install opencode` writes fails to load ("Plugin must export a default definition with an id and an effect or setup function").
 
-- What: `deck hooks install opencode` writes a plugin in OpenCode v2's server-plugin form: a default export `{ id, setup }` (loader: `packages/core/src/plugin/module.ts` in `anomalyco/opencode`). `setup(ctx)` subscribes to the events through `ctx.event.subscribe()` as background work and returns a cleanup function; it runs `deck agent-event --agent opencode --event <type>` with the event as JSON on stdin, in order and without waiting, through what v2 offers instead of v1's `$` (`ctx.shell` or Bun's `$`, whichever the current source shows works). Check v2's public event names and payload shape (v2 events carry `data`, v1 `properties`) in the current OpenCode source; the daemon's `OpenCodeTracker` (`deck-core::agents`) reads both shapes, so a v1 plugin left installed keeps working. `deck hooks status` reports a v1 `deck.js` written by deck as `stale`, and `install` replaces it. If a single file cannot load in both v1 and v2, v2 only.
+- What: `deck hooks install opencode` writes an OpenCode v2 TUI plugin, `plugins/deck/tui.js` (default export `{ id, setup }`, auto-discovered by `packages/tui/src/plugin/discovery.ts` in `anomalyco/opencode`). It runs in each terminal's own TUI process, so `DECK_TERMINAL_ID` is that terminal's even when several TUIs share one OpenCode server (v2's default; a server plugin runs in that shared server and cannot tell terminals apart). It listens with `ctx.data.listen`, keeps only its own sessions' events (the sessions it has shown, their roots and their subagents; not its tabs, which TUIs of a directory share) and runs `deck agent-event --agent opencode --event <type>` with the event as JSON on stdin, in order and without waiting. The daemon's `OpenCodeTracker` (`deck-core::agents`) reads v2 events (`data`) and still v1's (`properties`). An old deck-written `plugins/deck.js` is reported `stale`, replaced by `install` and removed by `uninstall`; files deck did not write are never touched.
 - Why: OpenCode panels get no `working`/`waiting`/`idle` status and no first-prompt name under v2, and OpenCode shows a plugin error on every start.
-- Acceptance: unit tests of the tracker with v2-shaped events (status, permission, first prompt, subagent sessions) next to the v1 ones; the plugin text test updated; the plugin loads in the installed OpenCode v2 without an error (checked by running OpenCode, or the reason it could not be); `docs/features/agents.md` (the OpenCode hooks paragraph) describes v2, with the date and the sources checked.
+- Acceptance: unit tests of the tracker with v2-shaped events (status, permission, first prompt, subagent sessions) next to the v1 ones; the plugin text test updated; two TUIs sharing one OpenCode v2 server each forward only their own session's events under their own `DECK_TERMINAL_ID` (checked by running OpenCode, or the reason it could not be); `docs/features/agents.md` (the OpenCode hooks paragraph) describes v2, with the date and the sources checked.
 
 ### DECK-07
 

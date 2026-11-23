@@ -498,7 +498,7 @@ fn agent_event_gives_up_on_a_stdin_that_never_closes() {
 }
 
 fn opencode_plugin(sb: &Sandbox) -> PathBuf {
-    sb.path("home/.config/opencode/plugins/deck.js")
+    sb.path("home/.config/opencode/plugins/deck/tui.js")
 }
 
 #[test]
@@ -517,19 +517,18 @@ fn opencode_install_writes_the_plugin_once_and_uninstall_removes_it() {
     let text = fs::read_to_string(opencode_plugin(&sb)).unwrap();
     for event in [
         "session.created",
-        "session.updated",
         "session.status",
         "session.idle",
         "permission.asked",
         "permission.replied",
-        "message.updated",
-        "message.part.updated",
+        "session.inbox.enqueued",
     ] {
         assert!(text.contains(&format!("\"{event}\"")), "{event}");
     }
-    assert!(text.contains("agent-event --agent opencode --event"));
-    // The plugin has no logic of its own: it knows no payload fields.
-    for logic in ["parentID", "sessionID", "role", "properties"] {
+    assert!(text.contains("export default {"), "{text}");
+    assert!(text.contains("\"agent-event\", \"--agent\", \"opencode\", \"--event\""));
+    // It forwards events as they are: no interpreting of what they say.
+    for logic in ["properties", "role", "\"busy\"", "\"idle\""] {
         assert!(!text.contains(logic), "{logic}");
     }
     assert!(sb.ok(&["hooks", "status"]).contains("opencode: installed"));
@@ -564,7 +563,7 @@ fn opencode_plugin_follows_its_config_dir_and_spares_files_that_are_not_deck_s()
     };
     let out = run(&["hooks", "install", "opencode"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(dir.join("plugins/deck.js").is_file());
+    assert!(dir.join("plugins/deck/tui.js").is_file());
     assert!(!opencode_plugin(&sb).exists());
 
     // XDG_CONFIG_HOME moves the default directory.
@@ -574,9 +573,9 @@ fn opencode_plugin_follows_its_config_dir_and_spares_files_that_are_not_deck_s()
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(sb.path("xdg/opencode/plugins/deck.js").is_file());
+    assert!(sb.path("xdg/opencode/plugins/deck/tui.js").is_file());
 
-    // A deck.js of the user's is never overwritten or removed.
+    // A tui.js of the user's is never overwritten or removed.
     write(
         &opencode_plugin(&sb),
         "export const Mine = async () => ({})\n",
@@ -596,6 +595,30 @@ fn opencode_plugin_follows_its_config_dir_and_spares_files_that_are_not_deck_s()
         sb.ok(&["hooks", "status"])
             .contains("opencode: not installed")
     );
+}
+
+#[test]
+fn an_old_v1_deck_js_is_stale_and_replaced_by_an_install_and_removed_by_an_uninstall() {
+    let sb = Sandbox::new();
+    let old = sb.path("home/.config/opencode/plugins/deck.js");
+    let v1 = "// Written by \"deck hooks install opencode\"; do not edit.\nconst DECK = \"deck\";\nexport const DeckPlugin = async ({ $ }) => ({});\n";
+    write(&old, v1);
+    assert!(sb.ok(&["hooks", "status"]).contains("opencode: stale"));
+    let out = sb.ok(&["hooks", "install", "opencode"]);
+    assert!(out.contains("removed the old plugin"), "{out}");
+    assert!(!old.exists());
+    assert!(opencode_plugin(&sb).is_file());
+    assert!(sb.ok(&["hooks", "status"]).contains("opencode: installed"));
+
+    write(&old, v1);
+    let out = sb.ok(&["hooks", "uninstall", "opencode"]);
+    assert!(out.contains("removed"), "{out}");
+    assert!(!old.exists() && !opencode_plugin(&sb).exists());
+
+    // A deck.js of the user's is left alone.
+    write(&old, "export const Mine = async () => ({})\n");
+    sb.ok(&["hooks", "install", "opencode"]);
+    assert!(old.exists());
 }
 
 #[test]
@@ -724,6 +747,8 @@ fn opencode_uninstall_removes_a_symlink_but_not_its_target_and_a_dangling_one_is
 
     // A dangling link: status does not fail and says not installed; uninstall leaves it.
     fs::remove_file(&target).unwrap();
+    // Uninstall removed the empty `plugins/deck` directory too.
+    fs::create_dir_all(opencode_plugin(&sb).parent().unwrap()).unwrap();
     symlink(&target, opencode_plugin(&sb)).unwrap();
     let status = sb.ok(&["hooks", "status"]);
     assert!(status.contains("opencode: not installed"), "{status}");

@@ -2,7 +2,8 @@
 //! it drops subagent sessions and tells what the status, session and first prompt are.
 //! Pure: no I/O, one value per terminal, bounded memory.
 //!
-//! Events are the `{ "type", "properties" }` objects of OpenCode's plugin `event` hook.
+//! Events are the `{ "type", "data" }` objects of OpenCode v2's event stream; the
+//! `{ "type", "properties" }` objects of v1's plugin `event` hook are read too.
 
 use std::collections::VecDeque;
 
@@ -11,15 +12,16 @@ use serde_json::Value;
 use super::{AgentStatus, clip_prompt};
 
 /// The events the plugin subscribes to and the tracker understands.
-pub const OPENCODE_EVENTS: [&str; 8] = [
+///
+/// The plugin subscribes to the v2 ones; the tracker also reads the v1 `session.updated`,
+/// `message.updated` and `message.part.updated`, for a v1 plugin that is still installed.
+pub const OPENCODE_EVENTS: [&str; 6] = [
     "session.created",
-    "session.updated",
     "session.status",
     "session.idle",
     "permission.asked",
     "permission.replied",
-    "message.updated",
-    "message.part.updated",
+    "session.inbox.enqueued",
 ];
 
 /// At most this many subagent session ids are remembered.
@@ -69,12 +71,18 @@ impl OpenCodeTracker {
     /// `None` when it changes nothing.
     pub fn feed(&mut self, doc: &Value) -> Option<OpenCodeUpdate> {
         let kind = text(doc, &["type"])?;
-        let props = doc.get("properties")?;
+        let props = doc.get("data").or_else(|| doc.get("properties"))?;
         if matches!(kind, "session.created" | "session.updated") {
-            if let (Some(id), Some(_)) = (
-                text(props, &["info", "id"]),
-                text(props, &["info", "parentID"]),
-            ) {
+            // v2 puts the session on the payload, v1 under `info`.
+            let (id, parent) = if props.get("info").is_some() {
+                (
+                    text(props, &["info", "id"]),
+                    text(props, &["info", "parentID"]),
+                )
+            } else {
+                (text(props, &["sessionID"]), text(props, &["parentID"]))
+            };
+            if let (Some(id), Some(_)) = (id, parent) {
                 remember(&mut self.children, MAX_CHILDREN, id);
             }
             return None;
@@ -111,6 +119,18 @@ impl OpenCodeTracker {
                     remember(&mut self.user_messages, MAX_USER_MESSAGES, id);
                 }
                 None
+            }
+            // v2: the prompt arrives whole, in the message a user queued.
+            "session.inbox.enqueued" => {
+                if text(props, &["item", "type"]) != Some("user") {
+                    return None;
+                }
+                let prompt = clip_prompt(text(props, &["item", "payload", "text"])?)?;
+                Some(OpenCodeUpdate {
+                    status: None,
+                    session_id: session.map(str::to_string),
+                    prompt: Some(prompt),
+                })
             }
             "message.part.updated" => {
                 if text(props, &["part", "type"]) != Some("text") {
@@ -263,6 +283,105 @@ mod tests {
         );
         // Only once per message.
         assert_eq!(t.feed_raw(&part("m1", "text", "fix the bug now")), None);
+    }
+
+    /// The v2 shapes (checked against OpenCode's `packages/schema`): the payload is `data`,
+    /// `session.created` carries `sessionID` and `parentID`, a prompt is a `session.inbox.enqueued`.
+    #[test]
+    fn v2_events_give_status_permissions_prompt_and_subagents() {
+        let mut t = OpenCodeTracker::default();
+        let v2 =
+            |kind: &str, data: &str| format!(r#"{{"id":"evt","type":"{kind}","data":{data}}}"#);
+        assert_eq!(
+            t.feed_raw(&v2(
+                "session.status",
+                r#"{"sessionID":"s1","status":{"type":"busy"}}"#
+            )),
+            update(Some(AgentStatus::Working), Some("s1"))
+        );
+        assert_eq!(
+            t.feed_raw(&v2(
+                "session.status",
+                r#"{"sessionID":"s1","status":{"type":"idle"}}"#
+            )),
+            update(Some(AgentStatus::Idle), Some("s1"))
+        );
+        assert_eq!(
+            t.feed_raw(&v2("session.idle", r#"{"sessionID":"s1"}"#)),
+            update(Some(AgentStatus::Idle), Some("s1"))
+        );
+        assert_eq!(
+            t.feed_raw(&v2(
+                "permission.asked",
+                r#"{"id":"per_1","sessionID":"s1","action":"bash","resources":["ls"]}"#
+            )),
+            update(Some(AgentStatus::Waiting), Some("s1"))
+        );
+        assert_eq!(
+            t.feed_raw(&v2(
+                "permission.replied",
+                r#"{"sessionID":"s1","requestID":"per_1","reply":"once"}"#
+            )),
+            update(Some(AgentStatus::Working), Some("s1"))
+        );
+        let inbox = |session: &str, kind: &str| {
+            v2(
+                "session.inbox.enqueued",
+                &format!(
+                    r#"{{"sessionID":"{session}","inboxID":"msg_1","item":{{"type":"{kind}","payload":{{"text":"fix the bug\nplease"}},"delivery":"steer"}}}}"#
+                ),
+            )
+        };
+        assert_eq!(
+            t.feed_raw(&inbox("s1", "user")),
+            Some(OpenCodeUpdate {
+                status: None,
+                session_id: Some("s1".into()),
+                prompt: Some("fix the bug".into())
+            })
+        );
+        assert_eq!(t.feed_raw(&inbox("s1", "synthetic")), None);
+        // A subagent session: recorded by its created event, then dropped, except permissions.
+        assert_eq!(
+            t.feed_raw(&v2(
+                "session.created",
+                r#"{"sessionID":"sub1","parentID":"s1","slug":"x","version":"2"}"#
+            )),
+            None
+        );
+        assert_eq!(
+            t.feed_raw(&v2(
+                "session.created",
+                r#"{"sessionID":"root2","slug":"x"}"#
+            )),
+            None
+        );
+        assert_eq!(
+            t.feed_raw(&v2(
+                "session.status",
+                r#"{"sessionID":"sub1","status":{"type":"idle"}}"#
+            )),
+            None
+        );
+        assert_eq!(t.feed_raw(&inbox("sub1", "user")), None);
+        assert_eq!(
+            t.feed_raw(&v2("permission.asked", r#"{"sessionID":"sub1"}"#)),
+            update(Some(AgentStatus::Waiting), None)
+        );
+        assert!(
+            t.feed_raw(&v2(
+                "session.status",
+                r#"{"sessionID":"root2","status":{"type":"busy"}}"#
+            ))
+            .is_some()
+        );
+        assert_eq!(
+            t.feed_raw(&v2(
+                "session.status",
+                r#"{"sessionID":"s1","status":{"type":"retry"}}"#
+            )),
+            None
+        );
     }
 
     #[test]

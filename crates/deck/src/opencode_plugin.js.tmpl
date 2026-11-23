@@ -1,0 +1,55 @@
+@MARKER@; do not edit.
+// An OpenCode v2 TUI plugin: it forwards the events of this terminal's own sessions to deck,
+// which does all the interpreting. It runs in the TUI process, so DECK_TERMINAL_ID is this
+// terminal's, even when several TUIs share one OpenCode server.
+import { spawn } from "node:child_process";
+
+const DECK = @PROGRAM@;
+const EVENTS = new Set([
+@EVENTS@
+]);
+
+// One queue keeps the events in order; nothing waits for it.
+let queue = Promise.resolve();
+
+const send = (event) =>
+  new Promise((done) => {
+    const child = spawn(DECK, ["agent-event", "--agent", "opencode", "--event", event.type], {
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    child.on("error", () => done());
+    child.on("close", () => done());
+    child.stdin.on("error", () => {});
+    child.stdin.end(JSON.stringify(event));
+  });
+
+export default {
+  id: "deck",
+  setup(ctx) {
+    // Every TUI gets the events of every session on the shared server: keep this one's own,
+    // which are the sessions it has shown (and their roots) and the subagents they start.
+    // Not its tabs: OpenCode shares the tab list between the TUIs of a directory.
+    const own = new Set();
+    const claim = (id) => {
+      if (id) own.add(id);
+    };
+    const sync = () => {
+      try {
+        const route = ctx.ui.router.current();
+        if (route.type === "session") {
+          claim(route.sessionID);
+          claim(ctx.data.session.root(route.sessionID));
+        }
+      } catch {}
+    };
+    return ctx.data.listen(({ details: event }) => {
+      if (!EVENTS.has(event.type)) return;
+      if (own.size > 512) own.clear();
+      sync();
+      const id = event.data?.sessionID;
+      if (event.type === "session.created" && own.has(event.data?.parentID)) claim(id);
+      if (!own.has(id)) return;
+      queue = queue.then(() => send(event)).then(() => {}, () => {});
+    });
+  },
+};

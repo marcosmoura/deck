@@ -86,6 +86,7 @@ impl HookAgent {
                     Ok,
                 )?
                 .join("plugins")
+                .join(PLUGIN_DIR)
                 .join(PLUGIN_FILE),
         })
     }
@@ -461,7 +462,17 @@ fn write_safely(
 
 // --- the OpenCode plugin ---------------------------------------------------------------------
 
-const PLUGIN_FILE: &str = "deck.js";
+/// OpenCode v2 loads a TUI plugin from `plugins/<dir>/tui.js`; the TUI runs once per terminal,
+/// where `DECK_TERMINAL_ID` is the terminal's own (a server plugin would run in the one
+/// shared background server).
+const PLUGIN_DIR: &str = "deck";
+const PLUGIN_FILE: &str = "tui.js";
+const PLUGIN_TEMPLATE: &str = include_str!("opencode_plugin.js.tmpl");
+
+/// The `plugins/deck.js` that earlier versions of deck wrote (an OpenCode v1 plugin).
+fn legacy_plugin(path: &Path) -> Option<PathBuf> {
+    Some(path.parent()?.parent()?.join("deck.js"))
+}
 
 /// First line of the plugin; what tells deck's file from one of the user's.
 const PLUGIN_MARKER: &str = "// Written by \"deck hooks install opencode\"";
@@ -474,26 +485,10 @@ fn plugin_source(program: &str) -> anyhow::Result<String> {
         .map(|e| format!("  \"{e}\","))
         .collect::<Vec<_>>()
         .join("\n");
-    Ok(format!(
-        "{PLUGIN_MARKER}; do not edit.\n\
-         // It forwards OpenCode's events to deck, which does all the interpreting.\n\
-         const DECK = {};\n\
-         const EVENTS = new Set([\n{events}\n]);\n\
-         \n\
-         // One queue keeps the events in order; nothing waits for it.\n\
-         let queue = Promise.resolve();\n\
-         \n\
-         export const DeckPlugin = async ({{ $ }}) => ({{\n\
-         \x20 event: async ({{ event }}) => {{\n\
-         \x20   if (!EVENTS.has(event.type)) return;\n\
-         \x20   const body = JSON.stringify(event);\n\
-         \x20   queue = queue\n\
-         \x20     .then(() => $`${{DECK}} agent-event --agent opencode --event ${{event.type}} < ${{new Response(body)}}`.quiet().nothrow())\n\
-         \x20     .then(() => {{}}, () => {{}});\n\
-         \x20 }},\n\
-         }});\n",
-        serde_json::to_string(program)?
-    ))
+    Ok(PLUGIN_TEMPLATE
+        .replace("@MARKER@", PLUGIN_MARKER)
+        .replace("@PROGRAM@", &serde_json::to_string(program)?)
+        .replace("@EVENTS@", &events))
 }
 
 /// Whether a plugin file's text is deck's.
@@ -544,6 +539,13 @@ fn install_plugin(
         "already installed in"
     };
     println!("opencode: {what} {}", real.display());
+    // The v1 file would make OpenCode v2 report a plugin error on every start.
+    if let Some(legacy) = legacy_plugin(path)
+        && let Some(old) = read_plugin(&legacy)?.filter(|t| is_deck_plugin(t))
+    {
+        write_safely_removing(&legacy, &old, env)?;
+        println!("  removed the old plugin {}", legacy.display());
+    }
     if changed && old.is_some() {
         println!(
             "  backup of the previous file in {}",
@@ -559,15 +561,31 @@ fn install_plugin(
     Ok(())
 }
 
-/// Removes the plugin at `path`. When that is a symlink, the link goes and its target stays.
+/// Removes the plugin at `path` and the old `deck.js` when deck wrote it. When one is a
+/// symlink, the link goes and its target stays.
 fn uninstall_plugin(path: &Path, env: EnvLookup<'_>) -> anyhow::Result<()> {
+    let mut removed = false;
     match read_plugin(path)? {
         Some(text) if is_deck_plugin(&text) => {
             write_safely_removing(path, &text, env)?;
             println!("opencode: removed {}", path.display());
+            removed = true;
+            if let Some(dir) = path.parent() {
+                let _ = fs::remove_dir(dir);
+            }
         }
         Some(_) => bail!("{} was not written by deck; left untouched", path.display()),
-        None => println!("opencode: not installed"),
+        None => {}
+    }
+    if let Some(legacy) = legacy_plugin(path)
+        && let Some(text) = read_plugin(&legacy)?.filter(|t| is_deck_plugin(t))
+    {
+        write_safely_removing(&legacy, &text, env)?;
+        println!("opencode: removed {}", legacy.display());
+        removed = true;
+    }
+    if !removed {
+        println!("opencode: not installed");
     }
     Ok(())
 }
@@ -581,7 +599,12 @@ fn write_safely_removing(path: &Path, text: &str, env: EnvLookup<'_>) -> anyhow:
         .map_or(0, |d| d.as_secs());
     write_backup(
         &backups,
-        &format!("opencode-{PLUGIN_FILE}-{secs}"),
+        &format!(
+            "opencode-{}-{secs}",
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(PLUGIN_FILE)
+        ),
         text.as_bytes(),
     )?;
     fs::remove_file(path).with_context(|| format!("cannot remove {}", path.display()))
@@ -589,7 +612,19 @@ fn write_safely_removing(path: &Path, text: &str, env: EnvLookup<'_>) -> anyhow:
 
 /// A dangling symlink reads as no file: `not installed`.
 fn plugin_status(path: &Path, env: EnvLookup<'_>) -> anyhow::Result<String> {
-    let Some(text) = read_plugin(path)?.filter(|t| is_deck_plugin(t)) else {
+    let old = legacy_plugin(path)
+        .map(|legacy| read_plugin(&legacy))
+        .transpose()?
+        .flatten()
+        .is_some_and(|t| is_deck_plugin(&t));
+    let text = read_plugin(path)?.filter(|t| is_deck_plugin(t));
+    if old {
+        return Ok(
+            "stale: an old plugin (OpenCode v1) is installed; run \"deck hooks install opencode\""
+                .to_string(),
+        );
+    }
+    let Some(text) = text else {
         return Ok("not installed".to_string());
     };
     let missing = plugin_program(&text).is_none_or(|program| {
@@ -859,28 +894,57 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_forwards_every_subscribed_event_and_has_no_logic() {
+    fn the_plugin_forwards_every_subscribed_event() {
         let text = plugin_source("/opt/it's/deck").unwrap();
         assert!(is_deck_plugin(&text));
         for event in OPENCODE_EVENTS {
             assert!(text.contains(&format!("\"{event}\"")), "{event}");
         }
-        for logic in ["parentID", "sessionID", "role", "properties"] {
-            assert!(!text.contains(logic), "{logic}");
-        }
+        assert!(!text.contains('@'), "{text}");
         assert_eq!(plugin_program(&text).as_deref(), Some("/opt/it's/deck"));
     }
 
     #[test]
-    fn the_plugin_chains_its_calls_in_order_without_awaiting_them() {
+    fn the_plugin_is_a_v2_tui_plugin_that_chains_its_calls_without_awaiting_them() {
         let text = plugin_source("deck").unwrap();
+        assert!(text.contains("export default {\n  id: \"deck\",\n  setup(ctx) {"));
+        assert!(text.contains("ctx.data.listen(({ details: event }) => {"));
+        assert!(text.contains("ctx.ui.router.current()"));
+        assert!(text.contains(
+            "spawn(DECK, [\"agent-event\", \"--agent\", \"opencode\", \"--event\", event.type]"
+        ));
+        assert!(text.contains("child.stdin.end(JSON.stringify(event));"));
         assert!(text.contains("let queue = Promise.resolve();"));
-        assert!(text.contains("queue = queue\n"), "{text}");
-        assert!(text.contains(".then(() => $`"));
-        assert!(text.contains(".then(() => {}, () => {});"));
-        // The handler itself never awaits a call.
-        assert!(!text.contains("await $"));
-        assert!(!text.contains("await queue"));
+        assert!(text.contains("queue = queue.then(() => send(event)).then(() => {}, () => {});"));
+        // Only the events of this TUI's own sessions go on.
+        assert!(text.contains("if (!own.has(id)) return;"));
+        // Not the tab list, which OpenCode shares between the TUIs of a directory.
+        assert!(!text.contains("ui.tabs"));
+        // v1 forms are gone, and the handler never awaits a call.
+        assert!(!text.contains("export const"));
+        assert!(!text.contains("$`"));
+        assert!(!text.contains("await "));
+    }
+
+    #[test]
+    fn an_old_v1_plugin_is_stale_and_goes_with_an_install() {
+        let dir = std::env::temp_dir().join(format!("deck-hooks-v1-{}", std::process::id()));
+        let file = dir.join("plugins/deck/tui.js");
+        let old = dir.join("plugins/deck.js");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(
+            &old,
+            format!("{PLUGIN_MARKER}; do not edit.\nconst DECK = \"/bin/sh\";\n"),
+        )
+        .unwrap();
+        let env = |_: &str| None;
+        assert_eq!(legacy_plugin(&file).as_deref(), Some(old.as_path()));
+        assert!(plugin_status(&file, &env).unwrap().contains("OpenCode v1"));
+        fs::remove_file(&old).unwrap();
+        assert_eq!(plugin_status(&file, &env).unwrap(), "not installed");
+        fs::write(&file, plugin_source("/bin/sh").unwrap()).unwrap();
+        assert_eq!(plugin_status(&file, &env).unwrap(), "installed");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
