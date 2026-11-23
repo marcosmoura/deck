@@ -1282,6 +1282,9 @@ impl Shared {
             }
             drop(st);
             if none_left {
+                tracing::info!(
+                    "shutting down: the last session ended, its first terminal exited at once"
+                );
                 self.request_shutdown();
             }
             return;
@@ -1438,6 +1441,7 @@ impl Shared {
                     }
                 };
                 if self.kill_session(|s| s.model.id == sid, answer)? {
+                    tracing::info!("shutting down: last session killed from an attached client");
                     self.request_shutdown();
                 }
                 Ok(())

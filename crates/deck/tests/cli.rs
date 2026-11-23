@@ -75,6 +75,11 @@ fn kill_server_stops_the_daemon_and_waits_for_the_lock() {
     assert_eq!(stdout(&kill), "");
     assert!(!home.daemon_running());
     wait_until("the daemon to exit", TIMEOUT, || !sys::alive(pid));
+    let log = fs::read_to_string(home.log_file()).unwrap();
+    assert!(
+        log.contains("shutting down: kill-server from pid ") && log.contains("(outside deck)"),
+        "{log}"
+    );
 
     // The session the probe created was saved when the daemon stopped.
     assert_eq!(
@@ -106,6 +111,28 @@ fn a_daemon_of_another_version_is_reported_and_stopped_by_sigterm() {
     let kill = home.run_deck(&["kill-server"]);
     assert!(kill.status.success(), "{}", stderr(&kill));
     assert!(!home.daemon_running());
+    let log = fs::read_to_string(home.log_file()).unwrap();
+    assert!(log.contains("shutting down: SIGTERM"), "{log}");
+}
+
+#[test]
+fn kill_server_from_a_deck_terminal_logs_that_terminal() {
+    let home = Home::new();
+    assert!(home.run_deck(&["_probe"]).status.success());
+    let kill = home
+        .deck_command(&["kill-server"])
+        .env("DECK_SESSION_ID", "1")
+        .env("DECK_PANEL_ID", "3")
+        .env("DECK_TERMINAL_ID", "4")
+        .output()
+        .unwrap();
+    assert!(kill.status.success(), "{}", stderr(&kill));
+    let log = fs::read_to_string(home.log_file()).unwrap();
+    assert!(
+        log.contains("shutting down: kill-server from pid ")
+            && log.contains("(session 1, panel 3, terminal 4)"),
+        "{log}"
+    );
 }
 
 #[test]

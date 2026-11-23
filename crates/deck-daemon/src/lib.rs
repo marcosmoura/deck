@@ -333,8 +333,8 @@ impl Daemon {
                         tokio::time::sleep(Duration::from_millis(50)).await;
                     }
                 },
+                // The embedder (`deck daemon`) logs why it asked.
                 () = &mut shutdown => {
-                    tracing::info!("shutting down");
                     shared.request_shutdown();
                     break;
                 }

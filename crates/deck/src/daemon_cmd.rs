@@ -83,10 +83,13 @@ fn serve(
         let mut hup = signal(SignalKind::hangup())?;
         let shutdown = async move {
             tokio::select! {
-                _ = term.recv() => {}
-                _ = int.recv() => {}
-                _ = hup.recv() => {}
-                () = parent_gone(parent) => {}
+                _ = term.recv() => tracing::info!("shutting down: SIGTERM"),
+                _ = int.recv() => tracing::info!("shutting down: SIGINT"),
+                _ = hup.recv() => tracing::info!("shutting down: SIGHUP"),
+                () = parent_gone(parent) => tracing::info!(
+                    "shutting down: parent process {} exited",
+                    parent.unwrap_or_default()
+                ),
             }
         };
         let on_locked = || {

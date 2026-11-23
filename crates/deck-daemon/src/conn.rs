@@ -13,7 +13,7 @@ use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::task::JoinSet;
 
-use crate::env::Env;
+use crate::env::{Env, lookup};
 use crate::queue::{Next, Queue};
 use crate::server::{AttachRequest, ClientId, Shared, WriterGuard};
 
@@ -67,8 +67,8 @@ async fn bye_direct(half: &mut OwnedWriteHalf, reason: ByeReason) {
 }
 
 pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
-    match stream.peer_cred() {
-        Ok(cred) if cred.uid() == uid => {}
+    let pid = match stream.peer_cred() {
+        Ok(cred) if cred.uid() == uid => cred.pid(),
         Ok(cred) => {
             tracing::warn!(
                 peer_uid = cred.uid(),
@@ -80,7 +80,7 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
             tracing::warn!("cannot read the peer's credentials: {e}");
             return;
         }
-    }
+    };
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = Reader::new(read_half);
 
@@ -125,7 +125,10 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
         guard,
     ));
 
-    let hello = Hello { env: env.clone() };
+    let hello = Hello {
+        env: env.clone(),
+        pid,
+    };
     if let Role::Attach {
         session,
         create,
@@ -174,9 +177,31 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
     }
 }
 
-/// What a connection's `Hello` said about the client's environment.
+/// What a connection's `Hello` said about the client's environment, and the client's pid.
 struct Hello {
     env: Env,
+    pid: Option<i32>,
+}
+
+impl Hello {
+    /// Who sent a request, for the log: `from pid 12 (session 1, panel 3, terminal 4)`, or
+    /// `(outside deck)` for a client that runs in no deck terminal. Only the ids are read
+    /// from the environment.
+    fn requester(&self) -> String {
+        let pid = self
+            .pid
+            .map_or_else(|| "an unknown pid".to_string(), |p| format!("pid {p}"));
+        let id = |key| lookup(&self.env, key).map(|v| v.to_string_lossy().into_owned());
+        let place = match (
+            id("DECK_SESSION_ID"),
+            id("DECK_PANEL_ID"),
+            id("DECK_TERMINAL_ID"),
+        ) {
+            (Some(s), Some(p), Some(t)) => format!("session {s}, panel {p}, terminal {t}"),
+            _ => "outside deck".to_string(),
+        };
+        format!("from {pid} ({place})")
+    }
 }
 
 /// Handles one message; false ends the connection.
@@ -202,6 +227,7 @@ async fn dispatch(
         }
         Ok(ClientMsg::Request(Request::KillServer)) => {
             queue.push_msg(ServerMsg::Response(Response::Ok));
+            tracing::info!("shutting down: kill-server {}", hello.requester());
             shared.request_shutdown();
         }
         Ok(ClientMsg::Request(Request::NewSession { name, cwd })) => {
@@ -214,7 +240,13 @@ async fn dispatch(
         Ok(ClientMsg::Request(Request::KillSession { name })) => {
             let answer = || queue.push_msg(ServerMsg::Response(Response::Ok));
             match shared.kill_session_named(&name, answer) {
-                Ok(true) => shared.request_shutdown(),
+                Ok(true) => {
+                    tracing::info!(
+                        "shutting down: last session {name:?} killed {}",
+                        hello.requester()
+                    );
+                    shared.request_shutdown();
+                }
                 Ok(false) => {}
                 Err(e) => queue.push_msg(ServerMsg::Response(Response::Error(e.to_string()))),
             }
