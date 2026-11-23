@@ -13,6 +13,8 @@ pub enum Action {
     Detach,
     Sessions,
     RenameSession,
+    /// Opens the Restore dialog.
+    Restore,
     Scroll,
     NewTerminal,
     CloseTerminal,
@@ -46,6 +48,7 @@ impl Action {
             "detach" => Self::Detach,
             "sessions" => Self::Sessions,
             "rename_session" => Self::RenameSession,
+            "restore" => Self::Restore,
             "scroll" => Self::Scroll,
             "new_terminal" => Self::NewTerminal,
             "close_terminal" => Self::CloseTerminal,

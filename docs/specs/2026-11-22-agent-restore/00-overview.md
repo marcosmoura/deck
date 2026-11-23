@@ -44,9 +44,9 @@ The `Restore` button at the right of the sidebar's bottom bar opens a dialog wit
 
 | Sub-spec                    | Type       | Crate                  | Summary                                                                                          | Depends          | Status |
 | --------------------------- | ---------- | ---------------------- | ------------------------------------------------------------------------------------------------ | ---------------- | ------ |
-| [01](01-session-parsers.md) | foundation | deck-core              | Pure parsers for the three sources, ordering, filter, project choice, age text; fixtures         | DECK-06          | todo   |
-| [02](02-daemon-listing.md)  | foundation | deck-core, deck-daemon | `ListAgentSessions`, directory walks on the blocking pool, OpenCode via its CLI, `Resume` launch | 01, DECK-10 (03) | todo   |
-| [03](03-restore-dialog.md)  | shippable  | deck-tui, deck-core    | The `Restore` button and the three-column dialog; resume into a new panel                        | 02, DECK-10 (02) | todo   |
+| [01](01-session-parsers.md) | foundation | deck-core              | Pure parsers for the three sources, ordering, filter, project choice, age text; fixtures         | DECK-06          | done   |
+| [02](02-daemon-listing.md)  | foundation | deck-core, deck-daemon | `ListAgentSessions`, directory walks on the blocking pool, OpenCode via its CLI, `Resume` launch | 01, DECK-10 (03) | done   |
+| [03](03-restore-dialog.md)  | shippable  | deck-tui, deck-core    | The `Restore` button and the three-column dialog; resume into a new panel                        | 02, DECK-10 (02) | done   |
 
 ## Affected docs
 

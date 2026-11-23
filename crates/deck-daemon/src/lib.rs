@@ -116,6 +116,19 @@ impl std::fmt::Debug for ForegroundQuery {
     }
 }
 
+/// What the agent-session listings read (`Request::ListAgentSessions`), for tests that check
+/// the bounds: nothing else reads these counters.
+#[derive(Debug, Default)]
+pub struct ListingStats {
+    /// Session files opened.
+    pub files_opened: AtomicUsize,
+    /// Bytes read from them.
+    pub bytes_read: AtomicUsize,
+    /// The most OpenCode listing children that ran at the same time.
+    pub max_children: AtomicUsize,
+    pub(crate) running: AtomicUsize,
+}
+
 /// How often the config file is looked at.
 const CONFIG_POLL: Duration = Duration::from_secs(1);
 
@@ -136,6 +149,8 @@ pub struct Options {
     pub foreground_query: ForegroundQuery,
     /// Counts the pending `wait` requests, for tests that check none is left behind.
     pub waiters: Arc<AtomicUsize>,
+    /// Counts what the agent-session listings read, for tests.
+    pub listing: Arc<ListingStats>,
 }
 
 impl Default for Options {
@@ -150,6 +165,7 @@ impl Default for Options {
             agent_poll: AGENT_POLL,
             foreground_query: ForegroundQuery::default(),
             waiters: Arc::default(),
+            listing: Arc::default(),
         }
     }
 }
@@ -274,6 +290,7 @@ impl Daemon {
             server::Probes {
                 cwd: options.cwd_query,
                 foreground: options.foreground_query,
+                listing: options.listing,
             },
             options.waiters,
         );

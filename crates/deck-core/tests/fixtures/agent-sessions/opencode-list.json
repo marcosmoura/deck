@@ -1,0 +1,23 @@
+[
+  {
+    "id": "ses_0123abc",
+    "title": "Refactor the router",
+    "updated": 1766000000,
+    "created": 1765000000,
+    "projectId": "p1",
+    "directory": "/home/u/work/api",
+    "extra": { "x": 1 }
+  },
+  {
+    "id": "ses_0456def",
+    "title": "Seconds vs millis",
+    "updated": 1766000000000,
+    "created": 1765000000000,
+    "projectId": "p1",
+    "directory": "/home/u/work/web"
+  },
+  { "id": "ses_0789ghi", "title": "", "updated": 1766000000, "directory": "/home/u/work/api" },
+  { "id": "-p", "title": "Bad id", "updated": 1766000000, "directory": "/home/u/work/api" },
+  { "id": "ses_nodir", "title": "No directory", "updated": 1766000000, "directory": "" },
+  "junk"
+]

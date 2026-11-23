@@ -92,6 +92,12 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
         "Rename the session",
     ),
     def(
+        "restore",
+        &["R"],
+        HelpGroup::Session,
+        "Restore an agent session",
+    ),
+    def(
         "scroll",
         &["["],
         HelpGroup::Terminal,
@@ -1009,6 +1015,7 @@ mod tests {
             ("close_panel", "X"),
             ("new_project", "P"),
             ("new_menu", "N"),
+            ("restore", "R"),
             ("rename_project", "."),
             ("close_project", "Q"),
             ("toggle_sidebar", "b"),
@@ -1033,6 +1040,19 @@ mod tests {
         assert_eq!(Config::default().keys["new_menu"], [spec("N")]);
         let p = Config::parse("[keys]\nnew_menu = \"M\"").unwrap();
         assert_eq!(p.config.keys["new_menu"], [spec("M")]);
+        assert!(p.warnings.is_empty());
+    }
+
+    #[test]
+    fn restore_defaults_to_r_in_the_session_group_and_can_be_overridden() {
+        let def = DEFAULT_BINDINGS
+            .iter()
+            .find(|d| d.name == "restore")
+            .unwrap();
+        assert_eq!(def.group, HelpGroup::Session);
+        assert_eq!(Config::default().keys["restore"], [spec("R")]);
+        let p = Config::parse("[keys]\nrestore = \"Z\"").unwrap();
+        assert_eq!(p.config.keys["restore"], [spec("Z")]);
         assert!(p.warnings.is_empty());
     }
 

@@ -185,6 +185,18 @@ impl App {
 
     /// The daemon's answer to the oldest request sent.
     pub(crate) fn response(&mut self, response: Response, now: Instant) -> Vec<Out> {
+        // A session listing arrives when it is done, out of order, and is routed by its kind:
+        // it is never the answer of the oldest request. The restore dialog takes it, or
+        // drops it when the dialog is closed.
+        if let Response::AgentSessions {
+            kind,
+            sessions,
+            error,
+        } = response
+        {
+            self.restore_response(kind, sessions, error);
+            return Vec::new();
+        }
         let req = self.requests.pop_front();
         match (req, response) {
             (_, Response::Sessions(list)) => {
@@ -755,6 +767,23 @@ mod tests {
         );
         assert!(a.modal.is_none());
         assert_eq!(a.picker.as_ref().unwrap().filter.text(), "work");
+    }
+
+    #[test]
+    fn an_agent_session_listing_never_takes_the_place_of_a_pending_request() {
+        let mut a = app();
+        a.open_picker();
+        // The listing of another request arrives before the picker's own answer.
+        a.on_server(ServerMsg::Response(Response::AgentSessions {
+            kind: deck_core::agents::AgentKind::Codex,
+            sessions: Vec::new(),
+            error: Some("timed out".into()),
+        }));
+        assert_eq!(a.requests.len(), 1, "the picker's request is still pending");
+        assert!(!a.flash_error);
+        a.on_server(ServerMsg::Response(Response::Sessions(sessions())));
+        assert!(a.requests.is_empty());
+        assert_eq!(a.picker.as_ref().unwrap().visible().len(), 4);
     }
 
     #[test]

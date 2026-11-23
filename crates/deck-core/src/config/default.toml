@@ -38,6 +38,7 @@ resume_agents = true
 detach = "d" # Detach from the session
 sessions = "s" # Switch, create or kill sessions
 rename_session = "$" # Rename the session
+restore = "R" # Restore an agent session
 scroll = "[" # Scroll back through the history
 new_terminal = "t" # New terminal in the panel
 close_terminal = "x" # Close the focused terminal

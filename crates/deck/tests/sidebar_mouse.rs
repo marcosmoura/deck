@@ -326,13 +326,13 @@ fn wait_bar(h: &Harness) {
 }
 
 #[test]
-fn the_bottom_bar_shows_the_new_project_chip_and_nothing_at_the_right() {
+fn the_bottom_bar_shows_the_new_project_chip_and_the_restore_chip_at_the_right() {
     let h = attached();
     wait_bar(&h);
     let screen = rows(&h);
     let bar = &screen[BAR_ROW];
     let sidebar: String = bar.chars().take(28).collect();
-    assert_eq!(sidebar.trim_end(), "  + New project", "{bar:?}");
+    assert_eq!(sidebar.trim_end(), "  + New project    Restore", "{bar:?}");
     assert!(screen[BAR_ROW - 1].chars().take(28).all(|c| c == ' '));
     h.capture("bottom-bar");
 }

@@ -1,0 +1,4 @@
+{"timestamp":"2026-11-02T09:00:00Z","type":"session_meta","payload":{"id":"0b2c3d4e-2222-4333-8444-555566667777","timestamp":"2026-11-02T09:00:00Z","cwd":"/home/u/work/web","originator":"codex_cli"}}
+{"type":"response_item","payload":{"type":"message"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"not me"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"Port the form to hooks\nplease"}}

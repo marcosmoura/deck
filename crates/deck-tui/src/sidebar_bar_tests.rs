@@ -77,7 +77,7 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
 const BAR: u16 = 22;
 
 #[test]
-fn the_bar_shows_the_chip_at_the_left_and_nothing_at_the_right() {
+fn the_bar_shows_the_chip_at_the_left_and_the_restore_chip_at_the_right() {
     for (cols, width, label) in [
         (100, 20, " + "),
         (100, 25, " + "),
@@ -88,10 +88,9 @@ fn the_bar_shows_the_chip_at_the_left_and_nothing_at_the_right() {
         let a = app_at((cols, 24), width, mockup());
         let buf = draw_app(&a);
         let text = row_text(&buf, BAR, width);
-        let expected = format!(
-            " {label}{}",
-            " ".repeat(usize::from(width) - 1 - label.len())
-        );
+        let restore = if width < 26 { " ↻ " } else { " Restore " };
+        let gap = usize::from(width) - 2 - label.len() - restore.chars().count();
+        let expected = format!(" {label}{}{restore} ", " ".repeat(gap));
         assert_eq!(text, expected, "width {width}");
         // The spacer above is blank.
         assert_eq!(
@@ -120,7 +119,7 @@ fn the_chip_is_muted_when_idle_and_in_the_selection_colours_under_the_pointer() 
     assert_ne!(hot[(2, BAR)], idle[(2, BAR)]);
     // The cell after the chip is untouched.
     assert_eq!(hot[(16, BAR)], idle[(16, BAR)]);
-    moved(&mut a, 20, BAR);
+    moved(&mut a, 17, BAR);
     assert_eq!(a.hover, None);
     assert_eq!(draw_app(&a)[(2, BAR)], idle[(2, BAR)]);
 }
@@ -195,7 +194,7 @@ fn clicking_the_chip_starts_the_new_project_flow() {
     assert_eq!(a.hover, None);
     // A click on the bar outside the chip, or on the spacer, does nothing.
     let mut a = app();
-    assert!(click(&mut a, 20, BAR).is_empty());
+    assert!(click(&mut a, 17, BAR).is_empty());
     assert!(click(&mut a, 5, BAR - 1).is_empty());
     assert!(a.modal.is_none());
     // A press on the chip released elsewhere does nothing.
@@ -241,10 +240,10 @@ fn a_move_that_keeps_the_hover_target_does_not_mark_the_screen_dirty() {
         assert!(!a.take_dirty(), "column {x}");
     }
     // Off it: one redraw.
-    moved(&mut a, 20, BAR);
+    moved(&mut a, 17, BAR);
     assert!(a.take_dirty());
     assert!(!{
-        moved(&mut a, 21, BAR);
+        moved(&mut a, 16, BAR);
         a.take_dirty()
     });
     // Motion over the panel area with no hover to clear does not redraw either.

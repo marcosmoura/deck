@@ -93,6 +93,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         );
     }
     crate::menu::draw(frame.buffer_mut(), app, theme);
+    crate::restore::draw(frame.buffer_mut(), app, theme);
     if !app.truecolor {
         downsample(frame.buffer_mut());
     }
@@ -547,6 +548,10 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
     let (right, right_style) = match &app.flash {
         // A long message (a config error with its location) is cut to the bar.
         Some((text, _)) => (truncate(text, bar.width), flash_style),
+        None if app.restore.is_some() => (
+            crate::restore::hints(app).to_string(),
+            Style::new().fg(color(theme.muted)),
+        ),
         None if app.scroll_mode.is_some() => (
             SCROLL_HINTS.to_string(),
             Style::new().fg(color(theme.muted)),

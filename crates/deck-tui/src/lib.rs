@@ -24,6 +24,9 @@ mod reload_tests;
 mod resize;
 #[cfg(test)]
 mod resize_tests;
+mod restore;
+#[cfg(test)]
+mod restore_tests;
 mod sidebar;
 #[cfg(test)]
 mod sidebar_bar_tests;

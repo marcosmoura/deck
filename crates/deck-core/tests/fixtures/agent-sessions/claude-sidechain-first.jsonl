@@ -1,0 +1,2 @@
+{"type":"user","cwd":"/home/u/work/api","isSidechain":true,"message":{"role":"user","content":"Subagent task text"}}
+{"type":"user","cwd":"/home/u/work/api","message":{"role":"user","content":"Main thread prompt"}}

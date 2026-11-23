@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"0a1b2c3d-1111-4222-8333-444455556666","cwd":"/home/u/work/api","isSidechain":false,"message":{"role":"user","content":"Add a retry to the client\nsecond line"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Sure"}]}}

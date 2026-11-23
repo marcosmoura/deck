@@ -1,0 +1,1 @@
+{"type":"user","cwd":"/home/u/work/api","message":{"role":"user","content":[{"type":"text","text":"<ide_opened_file>The user opened a file</ide_opened_file>"},{"type":"text","text":"  "},{"type":"text","text":"Real prompt after the wrapper"}]}}

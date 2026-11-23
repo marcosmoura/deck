@@ -256,6 +256,10 @@ async fn dispatch(
                 queue.push_msg(ServerMsg::Response(response));
             });
         }
+        Ok(ClientMsg::Request(Request::ListAgentSessions { kind, limit })) => {
+            // Answered when the listing is done, from its own task: never in order.
+            shared.spawn_listing(cid, kind, limit, queue, waits);
+        }
         Ok(ClientMsg::Request(Request::AgentEvent {
             terminal,
             kind,

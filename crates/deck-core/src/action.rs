@@ -13,10 +13,18 @@ use crate::model::{PanelId, ProjectId, TerminalId};
 pub const MAX_NAME_LEN: usize = 64;
 
 /// What a new panel starts, resolved by the daemon from the config.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PanelLaunch {
     /// The agent's `[agents.<kind>] command`, run directly in the project root.
     Agent(AgentKind),
+    /// The agent's `[agents.<kind>] resume` template with `session_id`, run directly in `cwd`
+    /// (the project root when `cwd` no longer exists).
+    Resume {
+        kind: AgentKind,
+        session_id: String,
+        #[serde(with = "crate::wire::path")]
+        cwd: PathBuf,
+    },
 }
 
 /// What an action changes, on the attached session.
@@ -142,6 +150,8 @@ pub enum ActionError {
     },
     #[error("{0}")]
     LaunchFailed(String),
+    #[error("not a valid session id")]
+    InvalidSessionId,
 }
 
 /// What a name names; session and project names may not contain `/`.
@@ -239,6 +249,10 @@ mod tests {
             "\"opencode\" not found in PATH (set [agents.opencode] command)"
         );
         assert_eq!(
+            ActionError::InvalidSessionId.to_string(),
+            "not a valid session id"
+        );
+        assert_eq!(
             ActionError::LaunchFailed("Permission denied".into()).to_string(),
             "Permission denied"
         );
@@ -294,6 +308,14 @@ mod tests {
                 project: ProjectId(1),
                 launch: PanelLaunch::Agent(AgentKind::OpenCode),
             },
+            Action::NewPanelWith {
+                project: ProjectId(1),
+                launch: PanelLaunch::Resume {
+                    kind: AgentKind::Claude,
+                    session_id: "0a1b2c3d-1111".into(),
+                    cwd: PathBuf::from("/w/api"),
+                },
+            },
             Action::RenamePanel {
                 panel: PanelId(2),
                 name: "x".into(),
@@ -333,6 +355,7 @@ mod tests {
             Err(ActionError::NoSuchPanel(PanelId(4))),
             Err(ActionError::Spawn("boom".into())),
             Err(ActionError::NoRoom),
+            Err(ActionError::InvalidSessionId),
             Err(ActionError::NoSuchTerminal(TerminalId(3))),
             Err(ActionError::LayoutChanged),
             Err(ActionError::InvalidRatios),

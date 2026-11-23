@@ -160,7 +160,12 @@ fn an_unbound_key_after_the_prefix_flashes_and_sends_nothing() {
     wait_until("the byte of `a`", TIMEOUT, || {
         rows(&h).iter().any(|r| r.contains("61"))
     });
-    assert!(!h.screen_text().contains("78"), "{}", h.screen_text());
+    // `od` reads one byte: a leaked `z` (0x7a) would print instead of `61`. Only the
+    // terminal's side of each row is checked, since the sidebar shows a random project name.
+    let leaked = rows(&h)
+        .iter()
+        .any(|r| r.rsplit('│').next().map(str::trim) == Some("7a"));
+    assert!(!leaked, "{}", h.screen_text());
 }
 
 #[test]

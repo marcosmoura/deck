@@ -21,6 +21,7 @@ tokio = { workspace = true, features = [
   "io-util",
   "sync",
   "time",
+  "process",
   "macros",
 ] }
 tracing = { workspace = true }

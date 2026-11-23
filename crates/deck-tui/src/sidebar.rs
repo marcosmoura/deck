@@ -41,8 +41,6 @@ pub enum Sel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
     NewProject,
-    // Set by DECK-11.
-    #[expect(dead_code, reason = "Restore is set by DECK-11")]
     Restore,
     /// A project row, with its New button on show.
     ProjectNew(ProjectId),
@@ -74,6 +72,23 @@ fn chip(width: u16) -> &'static str {
     } else {
         " + New project "
     }
+}
+
+/// The `Restore` chip: `" Restore "`, or `" ↻ "` in a narrow sidebar.
+fn restore_chip(width: u16) -> &'static str {
+    if width < BAR_WIDE {
+        " ↻ "
+    } else {
+        " Restore "
+    }
+}
+
+/// The columns the `Restore` chip takes in a sidebar `w` columns wide: right-aligned, with a
+/// margin of one column.
+fn restore_span(w: u16) -> std::ops::Range<u16> {
+    let cells = width(restore_chip(w));
+    let x = w.saturating_sub(1 + cells);
+    x..x + cells
 }
 
 impl Sel {
@@ -177,9 +192,13 @@ impl App {
             return None;
         }
         let chip_w = width(chip(self.sidebar_width));
-        (1..1 + chip_w)
-            .contains(&column)
-            .then_some(Hover::NewProject)
+        if (1..1 + chip_w).contains(&column) {
+            Some(Hover::NewProject)
+        } else if restore_span(self.sidebar_width).contains(&column) {
+            Some(Hover::Restore)
+        } else {
+            None
+        }
     }
 
     /// Sets the hover, redrawing only when it changed.
@@ -344,6 +363,7 @@ impl App {
                 self.open_new_project();
                 Vec::new()
             }
+            KeyCode::Char('R') => self.open_restore(std::time::Instant::now()),
             KeyCode::Char('r') => {
                 match sel {
                     Some(Sel::Panel(_, panel)) => self.open_rename_panel(panel),
@@ -399,8 +419,9 @@ impl App {
                 Vec::new()
             }
             ct::MouseEventKind::Down(ct::MouseButton::Left) => {
-                if self.hover_at(event.column, event.row) == Some(Hover::NewProject) {
-                    self.chip_down = true;
+                let target = self.hover_at(event.column, event.row);
+                if matches!(target, Some(Hover::NewProject | Hover::Restore)) {
+                    self.chip_down = target;
                     return Vec::new();
                 }
                 let Some(line) = event.row.checked_sub(HEADER_ROWS) else {
@@ -663,14 +684,24 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     }
     if bar_rows(area.height) > 0 {
         let y = area.y + area.height - 1;
-        let style = if app.hover == Some(Hover::NewProject) {
-            selection(theme, base)
-        } else {
-            muted
+        let style_of = |hover| {
+            if app.hover == Some(hover) {
+                selection(theme, base)
+            } else {
+                muted
+            }
         };
+        let style = style_of(Hover::NewProject);
         let text = chip(w);
         let cells = width(text);
         buf.set_style(Rect::new(area.x + 1, y, cells, 1), style);
         put(buf, y, 1, text, style);
+        let style = style_of(Hover::Restore);
+        let span = restore_span(w);
+        buf.set_style(
+            Rect::new(area.x + span.start, y, span.end - span.start, 1),
+            style,
+        );
+        put(buf, y, span.start, restore_chip(w), style);
     }
 }

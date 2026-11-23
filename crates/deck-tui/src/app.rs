@@ -26,6 +26,7 @@ use crate::mirror::Mirror;
 use crate::modal::{Modal, PromptKind, Retry};
 use crate::picker::{Picker, Req};
 use crate::resize::{Drag, SidebarDrag};
+use crate::restore::Restore;
 use crate::sidebar::{Hover, Sel};
 
 /// Below this many columns or rows the client shows only a message.
@@ -106,6 +107,8 @@ pub struct App {
     pub picker: Option<Picker>,
     /// The New menu, open over the sidebar.
     pub menu: Option<NewMenu>,
+    /// The Restore dialog.
+    pub restore: Option<Restore>,
     /// How many answers come before the one of the launch the menu sent; its success ends
     /// the sidebar focus.
     pub(crate) launch_result: Option<usize>,
@@ -135,8 +138,8 @@ pub struct App {
     pub(crate) hover: Option<Hover>,
     /// The last pointer position, to recompute the hover when rows move under it.
     pub(crate) pointer: Option<(u16, u16)>,
-    /// A left press landed on the `New project` chip; its release starts the flow.
-    pub(crate) chip_down: bool,
+    /// A left press landed on a chip of the bottom bar; its release on the same chip acts.
+    pub(crate) chip_down: Option<Hover>,
     /// Where the client was started, for new projects' directories.
     pub(crate) cwd: PathBuf,
     pub(crate) home: Option<PathBuf>,
@@ -192,6 +195,7 @@ impl App {
             pending: VecDeque::new(),
             picker: None,
             menu: None,
+            restore: None,
             launch_result: None,
             requests: VecDeque::new(),
             swallow_release: false,
@@ -206,7 +210,7 @@ impl App {
             sidebar_offset: 0,
             hover: None,
             pointer: None,
-            chip_down: false,
+            chip_down: None,
             cwd: PathBuf::from("/"),
             home: None,
             spin: 0,
@@ -315,7 +319,10 @@ impl App {
 
     /// A prompt, a confirmation or an overlay has the keyboard.
     pub fn overlay_open(&self) -> bool {
-        self.modal.is_some() || self.picker.is_some() || self.menu.is_some()
+        self.modal.is_some()
+            || self.picker.is_some()
+            || self.menu.is_some()
+            || self.restore.is_some()
     }
 
     /// Forgets everything that belongs to the session the client was attached to, for the
@@ -326,6 +333,7 @@ impl App {
         self.modal = None;
         self.picker = None;
         self.menu = None;
+        self.restore = None;
         self.pending.clear();
         self.launch_result = None;
         self.requests.clear();
@@ -342,7 +350,7 @@ impl App {
         self.selection = None;
         self.sidebar_offset = 0;
         self.hover = None;
-        self.chip_down = false;
+        self.chip_down = None;
         self.spin_at = None;
         self.dirty = true;
     }
@@ -457,6 +465,7 @@ impl App {
                     self.sidebar_focus = false;
                 }
                 self.ensure_visible();
+                self.restore_fit();
                 self.refresh_hover();
                 if too_small(self.size) {
                     return Vec::new();
@@ -499,13 +508,19 @@ impl App {
         // The press on the chip survives the pointer drifting (a drag with the left button);
         // anything else but its release ends it.
         let chip_down = match event.kind {
-            ct::MouseEventKind::Up(_) => std::mem::take(&mut self.chip_down),
-            ct::MouseEventKind::Drag(ct::MouseButton::Left) => false,
+            ct::MouseEventKind::Up(_) => self.chip_down.take(),
+            ct::MouseEventKind::Drag(ct::MouseButton::Left) => None,
             _ => {
-                self.chip_down = false;
-                false
+                self.chip_down = None;
+                None
             }
         };
+        // The Restore dialog has the mouse before everything else.
+        if self.restore.is_some() && !too_small(self.size) {
+            self.drag = None;
+            self.end_sidebar_drag();
+            return self.restore_mouse(event);
+        }
         // The New menu has the mouse before the sidebar.
         if self.menu.is_some() && !too_small(self.size) {
             self.drag = None;
@@ -541,11 +556,14 @@ impl App {
                     Vec::new()
                 }
                 ct::MouseEventKind::Up(ct::MouseButton::Left)
-                    if chip_down
-                        && self.hover_at(event.column, event.row) == Some(Hover::NewProject) =>
+                    if chip_down.is_some()
+                        && self.hover_at(event.column, event.row) == chip_down =>
                 {
                     self.dirty = true;
                     self.hover = None;
+                    if chip_down == Some(Hover::Restore) {
+                        return self.open_restore(now);
+                    }
                     self.open_new_project();
                     Vec::new()
                 }
@@ -796,6 +814,9 @@ impl App {
         if self.menu.is_some() {
             return self.menu_key(key);
         }
+        if self.restore.is_some() {
+            return self.restore_key(key, now);
+        }
         if !self.armed {
             if let Some(until) = self.resize_until.take() {
                 // The resize keys act without the prefix for a while; any other key ends it.
@@ -858,6 +879,7 @@ impl App {
                 outs
             }
             Action::Sessions => self.open_picker(),
+            Action::Restore => self.open_restore(now),
             Action::RenameSession => {
                 let name = self.session_name();
                 let kind = PromptKind::RenameSession {
@@ -997,6 +1019,11 @@ impl App {
         }
         if let Some(picker) = &mut self.picker {
             picker.paste(&text);
+            return Vec::new();
+        }
+        if let Some(restore) = &mut self.restore {
+            restore.paste(&text);
+            self.restore_settle(true, None);
             return Vec::new();
         }
         if self.menu.is_some() {

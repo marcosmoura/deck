@@ -38,6 +38,7 @@ mod agents;
 mod control;
 mod cwd;
 mod launch;
+mod listing;
 mod restore;
 mod terminal_io;
 mod waiting;
@@ -474,12 +475,17 @@ pub struct Shared {
     pub(crate) hostname: String,
     cwd_query: CwdQuery,
     foreground_query: ForegroundQuery,
+    /// What the session listings read, for tests.
+    listing: Arc<crate::ListingStats>,
+    /// Free places for OpenCode listing children, daemon-wide.
+    opencode_slots: Arc<tokio::sync::Semaphore>,
 }
 
 /// What the daemon asks the operating system about its terminals' processes.
 pub struct Probes {
     pub cwd: CwdQuery,
     pub foreground: ForegroundQuery,
+    pub listing: Arc<crate::ListingStats>,
 }
 
 impl std::fmt::Debug for Shared {
@@ -527,6 +533,8 @@ impl Shared {
             hostname: crate::platform::hostname(),
             cwd_query: probes.cwd,
             foreground_query: probes.foreground,
+            listing: probes.listing,
+            opencode_slots: Arc::new(tokio::sync::Semaphore::new(listing::OPENCODE_PARALLEL)),
         });
         for notice in notices {
             shared.notify(notice.level, notice.text);
@@ -577,6 +585,14 @@ impl Shared {
             while st.notices.len() > MAX_PENDING_NOTICES {
                 st.notices.pop_front();
             }
+        }
+    }
+
+    /// Shows a message to one client only, without logging it or keeping it for a later
+    /// client: for text that holds a directory.
+    pub fn notify_client(&self, cid: ClientId, level: NoticeLevel, text: String) {
+        if let Some(client) = self.st().clients.get(&cid) {
+            client.queue.push_msg(ServerMsg::Notice { level, text });
         }
     }
 
@@ -1405,7 +1421,7 @@ impl Shared {
                     .map(|_| ())
             }
             Action::NewPanelWith { project, launch } => {
-                self.new_panel_with(sid, project, launch).await
+                self.new_panel_with(cid, sid, project, launch).await
             }
             Action::NewTerminal { panel } => self
                 .add_terminal(sid, panel, None, true, false)

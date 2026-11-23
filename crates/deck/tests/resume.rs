@@ -421,7 +421,7 @@ fn new_panel_with(home: &Home, launch: PanelLaunch) -> Result<(), deck_core::act
                     sent = true;
                     let action = Action::NewPanelWith {
                         project: view.projects[0].id,
-                        launch,
+                        launch: launch.clone(),
                     };
                     stream
                         .write_all(&encode(&ClientMsg::Action(action)).unwrap())

@@ -29,6 +29,7 @@ Pressed after the prefix.
 | `detach`             | `d`         | Detach from the session ([sessions](sessions.md))                                                     |
 | `sessions`           | `s`         | Open the session picker ([sessions](sessions.md#switching-sessions))                                  |
 | `rename_session`     | `$`         | Rename the session you are in                                                                         |
+| `restore`            | `R`         | Open the [restore dialog](agents.md#the-restore-dialog): resume an agent session in a new panel       |
 | `scroll`             | `[`         | Enter [scroll mode](#scroll-mode) for the focused terminal                                            |
 | `new_terminal`       | `t`         | New terminal in the active panel ([layout](layout.md))                                                |
 | `close_terminal`     | `x`         | Close the focused terminal, after a confirmation                                                      |
@@ -61,6 +62,19 @@ A key you set replaces the same key on any other action's default keys, with a w
 ## Help overlay
 
 `Option+Space ?` lists every binding. When the window is too short to show all of them, `Up` / `k`, `Down` / `j`, `PageUp`, `PageDown`, `Home` and `End` scroll the list, and the bottom border says how many lines are hidden (`↓ 1 more · esc close`, and `↑ n more` once scrolled). `Esc`, `q` and `?` close it. These keys are fixed; they are not under `[keys]`.
+
+## Restore dialog
+
+`Option+Space R` (or `R` in sidebar focus, or the `Restore` button) opens the [restore dialog](agents.md#the-restore-dialog). Its keys are fixed, and the prefix key is ordinary text there:
+
+| Keys                                  | What they do                                                                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Left` / `Right`, `Tab` / `Shift+Tab` | Move between the columns (the arrows skip empty columns; `Tab` visits every column, empty or failed ones too, and wraps around) |
+| `Up` / `Down`, `Ctrl+p` / `Ctrl+n`    | Move between the rows                                                                                                           |
+| `PageUp` / `PageDown`, `Home` / `End` | Move by a page, to the first or the last row                                                                                    |
+| Printable keys, `Backspace`, `Ctrl+u` | Edit the filter, which applies to all three columns; `Ctrl+u` clears it                                                         |
+| `Enter`                               | Resume the selected session in a new panel                                                                                      |
+| `Esc`                                 | Clear the filter; with an empty filter, close the dialog                                                                        |
 
 ## Scroll mode
 

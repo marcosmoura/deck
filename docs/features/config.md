@@ -34,7 +34,7 @@ Save the file and, within about a second, the colours, border style, glyphs, key
 
 ## Key conflicts
 
-`[keys]` covers the prefix bindings only. A key you set for an action replaces the same key on another action's default keys, with a warning. A key you set for two actions is an error naming both actions and the key. `detach = []` unbinds an action. See [keys](keys.md).
+`[keys]` covers the prefix bindings only. A key you set for an action replaces the same key on another action's default keys, with a warning. A key you set for two actions is an error naming both actions and the key. `detach = []` unbinds an action. See [keys](keys.md). `restore = "R"` (the [restore dialog](agents.md#the-restore-dialog)) is one of them.
 
 `notify` (`"osc9"`, the default, `"bell"` or `"none"`) is how the client tells you through the outer terminal that an agent needs you or finished while you were not looking; see [agents](agents.md#attention). `[theme.glyphs] unseen` is the marker of such a panel.
 

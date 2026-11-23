@@ -8,12 +8,13 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionError};
+use crate::agent_sessions::AgentSession;
 use crate::agents::{AgentKind, AgentStatus};
 use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -180,6 +181,13 @@ pub enum Request {
         prompt: Option<String>,
         raw: Option<String>,
     },
+    /// Lists an agent's recent sessions, newest first, at most `limit` (clamped to 1 to 100).
+    /// Needs an attached session. Answered by `Response::AgentSessions`, which is not in
+    /// order with the other answers: the client routes it by `kind`.
+    ListAgentSessions {
+        kind: AgentKind,
+        limit: u16,
+    },
 }
 
 /// What a `Request::Wait` waits for.
@@ -315,6 +323,13 @@ pub enum Response {
     Tree(Vec<SessionView>),
     Captured(Captured),
     Waited(Waited),
+    /// The answer to `Request::ListAgentSessions`, sent when the listing is done and so out of
+    /// order with the answers to other requests. `error` says why `sessions` may be empty.
+    AgentSessions {
+        kind: AgentKind,
+        sessions: Vec<AgentSession>,
+        error: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -778,7 +793,19 @@ mod tests {
                 prompt: None,
                 raw: None,
             }),
+            ClientMsg::Request(Request::ListAgentSessions {
+                kind: AgentKind::OpenCode,
+                limit: 50,
+            }),
             ClientMsg::Action(Action::KillSession),
+            ClientMsg::Action(Action::NewPanelWith {
+                project: crate::model::ProjectId(2),
+                launch: crate::action::PanelLaunch::Resume {
+                    kind: AgentKind::Codex,
+                    session_id: "0b2c3d4e-2222".into(),
+                    cwd: PathBuf::from(OsString::from_vec(b"/w/\xe9".to_vec())),
+                },
+            }),
             ClientMsg::Scroll {
                 terminal: TerminalId(3),
                 to: ScrollTo::Lines(-7),
@@ -872,6 +899,23 @@ mod tests {
             ServerMsg::Response(Response::Waited(Waited::Text("ready".into()))),
             ServerMsg::Response(Response::Waited(Waited::Idle)),
             ServerMsg::Response(Response::Waited(Waited::TimedOut)),
+            ServerMsg::Response(Response::AgentSessions {
+                kind: AgentKind::Claude,
+                sessions: vec![AgentSession {
+                    kind: AgentKind::Claude,
+                    id: "0a1b2c3d-1111-4222-8333-444455556666".into(),
+                    title: "Fix ✓".into(),
+                    cwd: PathBuf::from(OsString::from_vec(b"/w/\xff".to_vec())),
+                    updated: 1_766_000_000,
+                }],
+                error: None,
+            }),
+            ServerMsg::Response(Response::AgentSessions {
+                kind: AgentKind::OpenCode,
+                sessions: Vec::new(),
+                error: Some("timed out".into()),
+            }),
+            ServerMsg::ActionResult(Err(ActionError::InvalidSessionId)),
         ]
     }
 
