@@ -22,7 +22,7 @@ In Ghostty and kitty, the sidebar and the status bar show the real logos of Clau
 - Images in the session picker, the help overlay, terminal borders or DECK-10's menu.
 - Images through tmux or screen when deck itself runs inside them (they get the text icon).
 - Asking the terminal whether it supports graphics (a query and its reply on stdin); detection is by environment only.
-- Logos in brand colours (see Open questions).
+- Logos in brand colours; a later `icon_images = "brand"` could add them.
 
 ## Decisions
 
@@ -30,6 +30,7 @@ In Ghostty and kitty, the sidebar and the status bar show the real logos of Clau
 - **Logos are alpha masks tinted at runtime.** Each logo ships as a 64×64 8-bit alpha mask (4096 bytes, `include_bytes!`) made once from its SVG. The client tints it with the colour the text icon would have had (the row's colour: `sidebar_fg`, `accent` for the active panel, and so on), resolved to RGB with the terminal's own answers (OSC 10 for the default foreground, OSC 4 for the 16 base colours), and sends raw RGBA (`f=32`). One image is transmitted per (logo, colour) pair, at most a handful.
 - **Sources.** Claude and OpenAI from [Simple Icons](https://simpleicons.org) 15.22.0 (CC0). OpenCode from its repository's brand files (`services/site/public/brand/files/` in `anomalyco/opencode`). The SVGs are committed next to the masks. The logos are trademarks of their owners, used only to identify the program that runs.
 - **Detection by environment** of the client process: on when `TERM` is `xterm-kitty` or `xterm-ghostty`, or `TERM_PROGRAM` is `ghostty`, or `KITTY_WINDOW_ID` is set; off inside tmux, Zellij or a deck panel, and without 24-bit colour. A config key forces it off.
+- **Row colours, not brand colours.** A logo is tinted with its row's colour, like the text icons, so the active panel's logo is in `accent`.
 - **No new crate.** Base64 (about 30 lines) and the escape sequences are written in `deck-tui`.
 
 ## Sub-specs
@@ -44,8 +45,6 @@ In Ghostty and kitty, the sidebar and the status bar show the real logos of Clau
 - `docs/features/config.md` and `default.toml`: `icon_images`.
 - `docs/architecture.md#client`: images through the kitty graphics protocol, the OSC 4 query, the colour exception for placeholder cells, the `crates/deck-tui/assets/logos/` directory with its licence and trademark note, and the e2e harness clearing terminal-detection variables.
 
-## Open questions
-
-- **Colour**: tint with the row's colour (like the text icons, so the active panel's logo is accent) or the brand colours (Claude's orange, OpenAI black or white, OpenCode grey). Recommendation: the row's colour, matching the rest of the sidebar; brand colours can be a later `icon_images = "brand"`. Choosing brand colours now would drop the OSC 4 query from the sub-spec.
-
 Reviewed by spec-reviewer on 23 Nov 2026.
+
+Approved by the user on 23 Nov 2026.
