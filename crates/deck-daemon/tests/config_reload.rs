@@ -118,7 +118,10 @@ async fn a_save_through_a_rename_and_a_deletion_are_seen() {
 async fn an_invalid_file_keeps_the_config_and_names_the_line() {
     let daemon = watching("").await;
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
-    fs::write(daemon.config_file(), text("[theme]\naccent = \"purple\"\n")).unwrap();
+    save(
+        &daemon.config_file(),
+        text("[theme]\naccent = \"purple\"\n"),
+    );
     client.wait(|c| !c.notices().is_empty()).await;
     let [(level, notice)] = client.notices()[..] else {
         panic!("{:?}", client.notices())

@@ -400,8 +400,12 @@ async fn a_kept_terminal_that_exits_loses_its_agent_state_and_ignores_later_even
     let (daemon, _clock, _fg) = manual(argv(&["claude"])).await;
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
     // One with a process-sourced state, one with a hook state.
-    let by_process = kept(&mut client, "sleep 1").await;
-    let by_hook = kept(&mut client, "sleep 1").await;
+    // Both run until the flag file exists, so neither exits before its state was seen,
+    // however slow the machine is.
+    let flag = daemon.home.path().join("exit-now");
+    let script = format!("while [ ! -e '{}' ]; do sleep 0.05; done", flag.display());
+    let by_process = kept(&mut client, &script).await;
+    let by_hook = kept(&mut client, &script).await;
     client
         .wait(|c| agent(c, by_process).is_some_and(|a| a.source == AgentSource::Process))
         .await;
@@ -410,6 +414,7 @@ async fn a_kept_terminal_that_exits_loses_its_agent_state_and_ignores_later_even
         .wait(|c| is(c, by_hook, AgentStatus::Working, AgentSource::Hooks))
         .await;
 
+    std::fs::write(&flag, "").unwrap();
     client
         .wait(|c| agent(c, by_process).is_none() && agent(c, by_hook).is_none())
         .await;

@@ -109,7 +109,10 @@ fn a_resize_key_grows_the_terminal_and_the_next_one_repeats_without_the_prefix()
 
     prefixed(&mut h, "L");
     wait_corner(&h, 2, (0, 55));
-    assert!(status(&h).starts_with(" RESIZE "), "{}", status(&h));
+    wait_until("the resize badge", TIMEOUT, || {
+        let status = status(&h);
+        status.starts_with(" RESIZE ") && status.trim_end().ends_with("H J K L resize  = reset")
+    });
     assert!(
         status(&h).trim_end().ends_with("H J K L resize  = reset"),
         "{}",

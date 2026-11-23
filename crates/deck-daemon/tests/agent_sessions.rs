@@ -201,7 +201,7 @@ fn fake_agent(sb: &Sb, name: &str) {
     script(
         &sb.bin().join(name),
         &format!(
-            "#!/bin/sh\nout=\"$(pwd -P)\n$DECK_PANEL_ID\"\nfor a; do out=\"$out\n$a\"; done\necho \"$out\" > '{}'\nread line\n",
+            "#!/bin/sh\nout=\"$(pwd -P)\n$DECK_PANEL_ID\"\nfor a; do out=\"$out\n$a\"; done\necho \"$out\nEND\" > '{}'\nread line\n",
             rec.display()
         ),
     );
@@ -211,10 +211,11 @@ async fn recorded(sb: &Sb, name: &str) -> Vec<String> {
     let rec = sb.bin().join(format!("{name}.rec"));
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
+        // The agent writes `END` last: without it the file is only partly written.
         if let Ok(text) = fs::read_to_string(&rec)
-            && !text.is_empty()
+            && let Some(done) = text.trim_end().strip_suffix("\nEND")
         {
-            return text.lines().map(str::to_string).collect();
+            return done.lines().map(str::to_string).collect();
         }
         assert!(Instant::now() < deadline, "{name} did not run");
         tokio::time::sleep(Duration::from_millis(20)).await;

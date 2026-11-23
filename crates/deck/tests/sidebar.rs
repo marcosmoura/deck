@@ -305,6 +305,8 @@ fn sidebar_focus_opens_a_panel_and_folds_a_project() {
     assert!(!rows(&h).iter().any(|r| r.starts_with("▌  ❯  2")));
     h.capture("sidebar-focus");
     h.send_keys(ESC);
+    // Esc must be handled before the next prefix, or the two merge into one key.
+    wait_gone(&h, "SIDEBAR");
     wait_until("the panel count", TIMEOUT, || {
         rows(&h)
             .iter()

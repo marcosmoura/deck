@@ -223,7 +223,9 @@ fn the_sessions_panels_and_grid_come_back_after_kill_server() {
     let other = h.run_deck(&["new", "other", "-d"]);
     assert!(other.status.success(), "{}", stderr(&other));
     wait_until("the grid to settle", TIMEOUT, || {
-        h.screen_text().matches('╭').count() >= 5
+        let screen = h.screen_text();
+        // Every shell has drawn its prompt, or `before` is a half-drawn screen.
+        screen.matches('╭').count() >= 5 && screen.matches("│$").count() >= 5
     });
     let before = h.screen_text();
     h.capture("before");

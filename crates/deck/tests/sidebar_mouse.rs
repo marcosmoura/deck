@@ -271,25 +271,30 @@ fn a_drag_keeps_the_ratios_of_the_terminals() {
     prefixed(&mut h, "\x1b[D");
     prefixed(&mut h, "L");
     h.send_keys("L");
-    let before = wait_for_corner(&h, &corner, 71);
-    drag(&mut h, 28, 40);
-    let after = wait_for_corner(&h, &corner, 59);
-    // The left terminal's share of the panel area is the same in both.
+    // The left terminal's share of the panel area, in thousandths.
     let share = |at: usize, sidebar: usize, panel: usize| (at - sidebar) * 1000 / panel;
-    let (a, b) = (share(before, 29, 71), share(after, 41, 59));
+    let wait_share =
+        |h: &Harness, what: &str, sidebar: usize, panel: usize, ok: &dyn Fn(usize) -> bool| {
+            wait_until(what, TIMEOUT, || {
+                corner(h).is_some_and(|c| c > sidebar && c < 100 && ok(share(c, sidebar, panel)))
+            });
+            corner(h).unwrap()
+        };
+    // Two resize steps move the split past 520 (the settled layout is 535); the layout
+    // passes through smaller shares on the way.
+    let before = wait_share(&h, "the split moved by both steps", 29, 71, &|a| a >= 520);
+    drag(&mut h, 28, 40);
+    let a = share(before, 29, 71);
+    let after = wait_share(
+        &h,
+        &format!("the share after the drag to be within 20 of {a}"),
+        41,
+        59,
+        &|b| a.abs_diff(b) <= 20,
+    );
+    let b = share(after, 41, 59);
     assert!(a.abs_diff(b) <= 20, "{a} vs {b}");
     assert!(a > 510, "the split was moved: {a}");
-}
-
-/// Waits for the second terminal's box to start where a panel area of `panel` columns
-/// puts it, and returns its column.
-fn wait_for_corner(h: &Harness, corner: &dyn Fn(&Harness) -> Option<usize>, panel: usize) -> usize {
-    let start = 100 - panel;
-    wait_until("the box to settle", TIMEOUT, || {
-        corner(h).is_some_and(|c| c > start && c < 100)
-    });
-    sleep(Duration::from_millis(150));
-    corner(h).unwrap()
 }
 
 /// crossterm drops a SIGWINCH that becomes ready together with typed input, so the client

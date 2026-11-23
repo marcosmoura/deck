@@ -284,6 +284,18 @@ fn clicking_restore_opens_three_columns_newest_first_with_title_directory_and_ag
     ] {
         h.wait_for_text(title, TIMEOUT);
     }
+    for text in [
+        "Claude Code (2)",
+        "OpenCode (1)",
+        "Codex (1)",
+        "2h ago",
+        "5d ago",
+        "3d ago",
+        "1m ago",
+        "⏎ resume  ←→ column  ↑↓ row  type to filter  esc close",
+    ] {
+        h.wait_for_text(text, TIMEOUT);
+    }
     let screen = h.screen_text();
     assert!(screen.contains("Claude Code (2)"), "{screen}");
     assert!(screen.contains("OpenCode (1)") && screen.contains("Codex (1)"));
@@ -364,7 +376,7 @@ fn a_failing_opencode_shows_its_error_in_the_column() {
     let mut h = start(&sb);
     open_by_click(&mut h);
     h.wait_for_text("could not run opencode", TIMEOUT);
-    assert!(h.screen_text().contains("Fix the login redirect"));
+    h.wait_for_text("Fix the login redirect", TIMEOUT);
 }
 
 #[test]
@@ -539,6 +551,9 @@ fn mouse_selects_resumes_closes_and_the_wheel_scrolls_one_column() {
     for _ in 0..3 {
         wheel_down(&mut h, 12, 10);
     }
+    // Three wheel steps of two sessions each: wait for the last one, not the first.
+    // The page ends on session 10 only once the last step is drawn.
+    h.wait_for_text("Session 10 of many", TIMEOUT);
     wait_gone(&h, "Session 00 of many");
     assert!(h.screen_text().contains("Rework login form"));
     assert!(h.screen_text().contains("Write the parser"));
