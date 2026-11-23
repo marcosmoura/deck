@@ -46,13 +46,22 @@ pub(crate) fn truncate(text: &str, max: u16) -> String {
     out
 }
 
-/// Draws the whole screen; the cursor is shown where the focused terminal's cursor is.
+/// Draws the whole screen; the cursor is shown where the focused terminal's cursor is (the
+/// client draws through `App::draw_frame`).
+#[cfg(test)]
 pub fn draw(frame: &mut Frame, app: &App) {
+    if let Some(pos) = draw_screen(frame, app) {
+        frame.set_cursor_position(pos);
+    }
+}
+
+/// Draws the whole screen and returns where the cursor goes, if it is shown.
+pub(crate) fn draw_screen(frame: &mut Frame, app: &App) -> Option<Position> {
     let theme = &app.theme;
     let area = frame.area();
     if too_small((area.width, area.height)) {
         draw_too_small(frame.buffer_mut(), area);
-        return;
+        return None;
     }
     let side = app.sidebar_cols();
     if side > 0 {
@@ -85,12 +94,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         downsample(frame.buffer_mut());
     }
     // The cursor stays hidden on a cell the floating bar covers.
-    if !app.overlay_open()
-        && let Some(pos) = cursor
-        && !app.bar_covers(pos.x, pos.y)
-    {
-        frame.set_cursor_position(pos);
-    }
+    cursor.filter(|pos| !app.overlay_open() && !app.bar_covers(pos.x, pos.y))
 }
 
 /// The ratatui border set of a theme's border style.
@@ -330,16 +334,18 @@ fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
             .render(area, buf);
         let title_style = Style::new().fg(color(title_color));
         let room = rect.width.saturating_sub(3);
-        match agent::title_mark(view, app.spin, theme) {
-            // An agent's glyph and name take the place of the number: `╭─ <glyph> claude · title ─╮`.
-            Some((glyph, glyph_style, kind)) => {
+        match agent::title_mark(view, theme) {
+            // An agent's status slot and name take the place of the number:
+            // `╭─ <status slot> <kind> · title ─╮`.
+            Some((icon, icon_style, kind)) => {
                 let (x, _) =
                     buf.set_stringn(rect.x + 2, rect.y, " ", usize::from(room), title_style);
-                let (x, _) = buf.set_stringn(x, rect.y, &glyph, usize::from(room), glyph_style);
+                let (slot, slot_style) = sidebar::icon_slot(app, icon, icon_style);
+                let (x, _) = buf.set_stringn(x, rect.y, &slot, usize::from(room), slot_style);
                 let used = x.saturating_sub(rect.x + 2);
                 let label = truncate(
                     &format!("{kind} · {name}"),
-                    rect.width.saturating_sub(6 + width(&glyph)),
+                    rect.width.saturating_sub(6 + sidebar::ICON_CELLS),
                 );
                 buf.set_stringn(
                     x,

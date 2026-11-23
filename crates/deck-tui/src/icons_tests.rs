@@ -15,6 +15,7 @@ use ratatui::style::Modifier;
 use crate::app::App;
 use crate::draw::draw;
 use crate::mirror::tests::{frame, mockup, panel, project};
+use crate::tier::Tier;
 
 pub(crate) fn agent(kind: AgentKind, status: AgentStatus) -> AgentState {
     AgentState {
@@ -83,6 +84,11 @@ fn sidebar(rows: &[String]) -> Vec<String> {
     rows.iter().map(|r| r.chars().take(29).collect()).collect()
 }
 
+/// A panel row with its status slot on the right, before the margin.
+fn st(text: &str, status: &str) -> String {
+    format!("{text:<25}{status}")
+}
+
 fn pad(text: &str) -> String {
     format!("{text}{}│", " ".repeat(28 - text.chars().count()))
 }
@@ -92,21 +98,21 @@ fn the_sidebar_of_the_spec_at_28_columns() {
     let a = app_with("", titled());
     let (buf, rows) = render(&a);
     let side = sidebar(&rows);
-    assert_eq!(side[0], pad(" main          + New space  "));
+    assert_eq!(side[0], pad(" main         +  New space  "));
     assert_eq!(side[1], pad(""));
-    assert_eq!(side[2], pad(" ▾ terminal-multiplexer"));
-    assert_eq!(side[3], pad(" ⠋ ✻  Fix login bug"));
-    assert_eq!(side[4], pad("   ✎  nvim"));
-    assert_eq!(side[5], pad(" ! ◎  Review the API chang…"));
-    assert_eq!(side[6], pad("   ❯  ~/Projects/terminal-…"));
-    assert_eq!(side[7], pad("   ±  api"));
+    assert_eq!(side[2], pad(" terminal-multiplexer    ▾"));
+    assert_eq!(side[3], pad(&st(" ✻  Fix login bug", "⠋")));
+    assert_eq!(side[4], pad(" ✎  nvim"));
+    assert_eq!(side[5], pad(&st(" ◎  Review the API chan…", "!")));
+    assert_eq!(side[6], pad(" ❯  ~/Projects/terminal-mu…"));
+    assert_eq!(side[7], pad(" ±  api"));
     // The icon has the style of its row: the selection band, bold, for the active panel.
     assert!(
-        buf[(3, 3)]
+        buf[(1, 3)]
             .modifier
             .contains(Modifier::BOLD | Modifier::REVERSED)
     );
-    assert!(!buf[(3, 4)].modifier.contains(Modifier::REVERSED));
+    assert!(!buf[(1, 4)].modifier.contains(Modifier::REVERSED));
 }
 
 #[test]
@@ -117,39 +123,58 @@ fn a_terminal_count_and_a_long_name_leave_room_for_the_icon() {
     view.projects[0].panels[1].terminals.push(extra);
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad("   ✎  a-very-long-panel-… 2 "));
+    assert_eq!(sidebar(&rows)[4], pad(" ✎  a-very-long-panel-na… 2 "));
 }
 
 #[test]
-fn icons_none_draws_the_plain_rows() {
+fn the_nerd_tier_draws_the_nerd_glyphs_in_the_same_cells() {
+    let mut a = app_with("", titled());
+    a.tier = Tier::Nerd;
+    let (_, rows) = render(&a);
+    let side = sidebar(&rows);
+    assert_eq!(side[2], pad(" terminal-multiplexer    \u{eab4}"));
+    assert_eq!(side[3], pad(&st(" \u{ec82}  Fix login bug", "\u{ee06}")));
+    assert_eq!(side[4], pad(" \u{f040}  nvim"));
+    assert_eq!(
+        side[5],
+        pad(&st(" \u{ec81}  Review the API chan…", "\u{f06a}"))
+    );
+    assert_eq!(side[7], pad(" \u{f126}  api"));
+}
+
+#[test]
+fn the_image_tier_without_a_sent_image_draws_the_nerd_glyphs() {
+    let mut a = app_with("", titled());
+    a.tier = Tier::Image;
+    let (_, rows) = render(&a);
+    let side = sidebar(&rows);
+    assert_eq!(side[3], pad(&st(" \u{ec82}  Fix login bug", "\u{ee06}")));
+    assert_eq!(side[4], pad(" \u{f040}  nvim"));
+}
+
+#[test]
+fn the_spinner_wraps_at_each_tiers_frame_count() {
+    for (tier, frames) in [(Tier::Unicode, 10), (Tier::Nerd, 6)] {
+        let mut a = app_with("", titled());
+        a.tier = tier;
+        a.spin = 0;
+        let (buf, _) = render(&a);
+        let first = buf[(25, 3)].symbol().to_string();
+        a.spin = 1;
+        assert_ne!(render(&a).0[(25, 3)].symbol(), first, "{tier:?}");
+        a.spin = frames;
+        assert_eq!(render(&a).0[(25, 3)].symbol(), first, "{tier:?}");
+    }
+}
+
+#[test]
+fn the_removed_icon_keys_still_load_and_change_nothing() {
     let a = app_with(
         "[theme]\nicons = \"none\"\n[theme.icon_glyphs]\nclaude = \"C\"",
         titled(),
     );
-    let (_, rows) = render(&a);
-    let side = sidebar(&rows);
-    assert_eq!(side[3], pad(" ⠋ Fix login bug"));
-    assert_eq!(side[4], pad("   nvim"));
-    assert_eq!(side[5], pad(" ! Review the API changes"));
-    assert_eq!(side[7], pad("   api"));
-}
-
-#[test]
-fn the_nerd_preset_and_overrides_pick_the_glyphs() {
-    let a = app_with("[theme]\nicons = \"nerd\"", titled());
-    let (_, rows) = render(&a);
-    let side = sidebar(&rows);
-    assert_eq!(side[3], pad(" ⠋ \u{ec82}  Fix login bug"));
-    assert_eq!(side[4], pad("   \u{f040}  nvim"));
-    assert_eq!(side[5], pad(" ! \u{ec81}  Review the API chang…"));
-    assert_eq!(side[7], pad("   \u{f126}  api"));
-
-    let a = app_with("[theme.icon_glyphs]\nclaude = \"C\"\ngit = \"G\"", titled());
-    let (_, rows) = render(&a);
-    let side = sidebar(&rows);
-    assert_eq!(side[3], pad(" ⠋ C  Fix login bug"));
-    assert_eq!(side[7], pad("   G  api"));
-    assert_eq!(side[4], pad("   ✎  nvim"));
+    let b = app_with("", titled());
+    assert_eq!(render(&a).0, render(&b).0);
 }
 
 #[test]
@@ -159,7 +184,7 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].active_panel = Some(PanelId(7));
     let mut a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad("   ±  api"));
+    assert_eq!(sidebar(&rows)[7], pad(" ±  api"));
 
     // The program ends: the name stays, the icon follows what is left.
     let mut view = a.mirror.view().unwrap().clone();
@@ -167,7 +192,7 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].panels[4].terminals[0].title = Some("api".into());
     a.on_server(ServerMsg::SessionView(view));
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad("   ❯  api"));
+    assert_eq!(sidebar(&rows)[7], pad(" ❯  api"));
 }
 
 #[test]
@@ -177,33 +202,76 @@ fn a_panel_without_terminals_has_no_icon() {
     view.projects[0].panels[1].focused_terminal = None;
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad("      nvim"));
+    assert_eq!(sidebar(&rows)[4], pad("    nvim"));
 }
 
 #[test]
 fn agent_icons_take_their_icon_colour() {
     use ratatui::style::Color;
     let claude = Color::Rgb(0xd9, 0x77, 0x57);
+    for tier in [Tier::Unicode, Tier::Nerd, Tier::Image] {
+        let mut a = app_with("", titled());
+        a.tier = tier;
+        let (buf, _) = render(&a);
+        // The active Claude row is reversed: the colour goes in the background, which it shows
+        // as text. The name keeps the row's style.
+        assert!(buf[(1, 3)].modifier.contains(Modifier::REVERSED));
+        assert_eq!(buf[(1, 3)].bg, claude, "{tier:?}");
+        assert_ne!(buf[(4, 3)].bg, claude);
+        // Codex takes the row's colour, so does an editor.
+        assert_eq!(buf[(1, 5)].fg, buf[(4, 5)].fg);
+        assert_eq!(buf[(1, 4)].fg, buf[(4, 4)].fg);
+        // Outside the band the colour is the text's.
+        let mut view = titled();
+        view.active_panel = Some(PanelId(4));
+        let mut a = app_with("", view);
+        a.tier = tier;
+        let (buf, _) = render(&a);
+        assert_eq!(buf[(1, 3)].fg, claude, "{tier:?}");
+        // Codex on the active row is in the row's colour, not a brand colour.
+        let mut view = titled();
+        view.active_panel = Some(PanelId(5));
+        let mut a = app_with("", view);
+        a.tier = tier;
+        let (buf, _) = render(&a);
+        assert_eq!(buf[(1, 5)].fg, buf[(4, 5)].fg);
+        assert_eq!(buf[(1, 5)].bg, buf[(4, 5)].bg);
+    }
+}
+
+#[test]
+fn the_status_marks_keep_their_roles() {
     let a = app_with("", titled());
     let (buf, _) = render(&a);
-    // The active Claude row is reversed: the colour goes in the background, which it shows
-    // as text. The name keeps the row's style.
-    assert!(buf[(3, 3)].modifier.contains(Modifier::REVERSED));
-    assert_eq!(buf[(3, 3)].bg, claude);
-    assert_ne!(buf[(6, 3)].bg, claude);
-    // Codex has no colour by default, nor has an editor: the row's colour.
-    assert_eq!(buf[(3, 5)].fg, buf[(6, 5)].fg);
-    assert_eq!(buf[(3, 4)].fg, buf[(6, 4)].fg);
-    // Outside the band the colour is the text's.
+    // Spinner: accent. Waiting: warning, bold. Both are the row's colours on a reversed
+    // band only for the active row.
+    assert_eq!(buf[(25, 3)].symbol(), "⠋");
+    let (buf, _) = render(&app_with("", {
+        let mut v = titled();
+        v.active_panel = Some(PanelId(4));
+        v
+    }));
+    use crate::draw::color;
+    assert_eq!(buf[(25, 3)].fg, color(a.theme.accent));
+    assert_eq!(buf[(25, 5)].fg, color(a.theme.warning));
+    assert!(buf[(25, 5)].modifier.contains(Modifier::BOLD));
+    // The caret of a space is muted.
+    assert_eq!(buf[(25, 2)].symbol(), "▾");
+    assert_eq!(buf[(25, 2)].fg, color(a.theme.muted));
+    assert_eq!(buf[(26, 2)].symbol(), " ");
+}
+
+#[test]
+fn the_name_is_cut_before_the_unseen_slot_the_count_and_the_status_slot() {
     let mut view = titled();
-    view.active_panel = Some(PanelId(4));
-    let (buf, _) = render(&app_with("[theme.icon_colors]\ncodex = \"#010203\"", view));
-    assert_eq!(buf[(3, 3)].fg, claude);
-    assert_eq!(buf[(3, 5)].fg, Color::Rgb(1, 2, 3));
-    // `none` draws Claude in its row's colour.
-    let (buf, _) = render(&app_with(
-        "[theme.icon_colors]\nclaude = \"none\"",
-        titled(),
-    ));
-    assert_eq!(buf[(3, 3)].bg, buf[(6, 3)].bg);
+    // Panel 4 has a working agent; it is also unseen, with a count and a long name.
+    let panel = &mut view.projects[0].panels[0];
+    panel.name = "a-very-long-panel-name-indeed".into();
+    panel.unseen = true;
+    let extra = panel.terminals[0].clone();
+    panel.terminals.push(extra);
+    let a = app_with("", view);
+    let (_, rows) = render(&a);
+    // Name from column 4, then the unseen slot, the count and the status slot, one space each.
+    assert_eq!(sidebar(&rows)[3], pad(&st(" ✻  a-very-long-pa… •  2", "⠋")));
 }

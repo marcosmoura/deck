@@ -1,6 +1,6 @@
-//! Agent logos as images, through the kitty graphics protocol (Ghostty and kitty).
+//! Icons as images, through the kitty graphics protocol (Ghostty and kitty).
 //!
-//! Each logo is a 64x64 alpha mask (`assets/logos`). The client tints it with the colour its
+//! Each icon is a 64x64 alpha mask (`assets/icons`). The client tints it with the colour its
 //! text icon would have had and sends it once as a virtual placement of two cells
 //! (`U=1,c=2,r=1`, direct RGBA). The image is then drawn like text: a cell holding the
 //! placeholder character U+10EEEE with the row and column diacritics of its top-left cell,
@@ -9,19 +9,23 @@
 //!
 //! Every command has `q=2`, so the terminal never answers into the input.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::sync::OnceLock;
 
 use deck_core::base64;
-use deck_core::icons::IconKind;
-use deck_core::model::PanelView;
-use deck_core::theme::{IconImages, IconPreset};
+use deck_core::icons::{Icon, IconKind};
+use ratatui::Terminal;
+use ratatui::backend::Backend;
+#[cfg(test)]
+use ratatui::backend::TestBackend;
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::app::App;
 use crate::colors::{Palette, Rgb};
 use crate::convert::{self, Resolved};
-use crate::sidebar::{self, Row};
+use crate::tier::Tier;
 
 /// The placeholder character of the kitty protocol's Unicode placeholders.
 pub const PLACEHOLDER: char = '\u{10EEEE}';
@@ -61,74 +65,142 @@ const XTERM: [Rgb; 16] = [
     (0xff, 0xff, 0xff),
 ];
 
-/// Whether logos are drawn as images: `icon_images` is `auto`, the outer terminal is Ghostty or
+/// Whether icons are drawn as images: the outer terminal is Ghostty or
 /// kitty (by `TERM`, `TERM_PROGRAM` or `KITTY_WINDOW_ID`), not behind tmux, Zellij, screen or
 /// another deck, and it draws in 24-bit colour.
-pub fn detect(env: &HashMap<String, String>, icon_images: IconImages, truecolor: bool) -> bool {
+pub fn detect(env: &HashMap<String, String>, truecolor: bool) -> bool {
     let var = |name: &str| env.get(name).map(String::as_str).filter(|v| !v.is_empty());
-    if icon_images != IconImages::Auto || !truecolor {
+    if !truecolor || multiplexed(env) {
         return false;
     }
-    if ["TMUX", "ZELLIJ", "DECK"]
-        .into_iter()
-        .any(|n| var(n).is_some())
-    {
-        return false;
-    }
-    let term = var("TERM").unwrap_or("");
-    if term.starts_with("screen") || term.starts_with("tmux") {
-        return false;
-    }
-    matches!(term, "xterm-kitty" | "xterm-ghostty")
+    matches!(var("TERM"), Some("xterm-kitty" | "xterm-ghostty"))
         || var("TERM_PROGRAM") == Some("ghostty")
         || var("KITTY_WINDOW_ID").is_some()
 }
 
-/// A logo with a mask.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Logo {
-    Claude,
-    Openai,
-    Opencode,
+/// Whether deck runs behind tmux, Zellij, screen or another deck, where images are off.
+pub fn multiplexed(env: &HashMap<String, String>) -> bool {
+    let var = |name: &str| env.get(name).map(String::as_str).filter(|v| !v.is_empty());
+    let term = var("TERM").unwrap_or("");
+    ["TMUX", "ZELLIJ", "DECK"]
+        .into_iter()
+        .any(|n| var(n).is_some())
+        || term.starts_with("screen")
+        || term.starts_with("tmux")
 }
 
-impl Logo {
-    /// The logo of an icon kind, if it has one.
-    pub fn of(kind: IconKind) -> Option<Self> {
-        match kind {
-            IconKind::Claude => Some(Self::Claude),
-            IconKind::Codex => Some(Self::Openai),
-            IconKind::OpenCode => Some(Self::Opencode),
-            _ => None,
-        }
-    }
+/// The bytes of a mask.
+const MASK_LEN: usize = SIDE * SIDE;
 
-    /// The 64x64 alpha mask, row-major.
-    pub fn mask(self) -> &'static [u8] {
-        match self {
-            Self::Claude => include_bytes!("../assets/logos/claude.mask"),
-            Self::Openai => include_bytes!("../assets/logos/openai.mask"),
-            Self::Opencode => include_bytes!("../assets/logos/opencode.mask"),
-        }
-    }
+/// The 64x64 alpha mask of an icon, row-major; none for the icons that stay text (the drop
+/// caret).
+pub fn mask(icon: Icon) -> Option<&'static [u8; MASK_LEN]> {
+    Some(match icon {
+        Icon::Kind(kind) => match kind {
+            IconKind::Claude => include_bytes!("../assets/icons/claude.mask"),
+            IconKind::Codex => include_bytes!("../assets/icons/openai.mask"),
+            IconKind::OpenCode => include_bytes!("../assets/icons/opencode.mask"),
+            IconKind::Terminal => include_bytes!("../assets/icons/terminal.mask"),
+            IconKind::Editor => include_bytes!("../assets/icons/editor.mask"),
+            IconKind::Git => include_bytes!("../assets/icons/git.mask"),
+            IconKind::Monitor => include_bytes!("../assets/icons/monitor.mask"),
+            IconKind::Remote => include_bytes!("../assets/icons/remote.mask"),
+            IconKind::Build => include_bytes!("../assets/icons/build.mask"),
+            IconKind::Pager => include_bytes!("../assets/icons/pager.mask"),
+            IconKind::Repl => include_bytes!("../assets/icons/repl.mask"),
+        },
+        Icon::Expanded => include_bytes!("../assets/icons/expanded.mask"),
+        Icon::Collapsed => include_bytes!("../assets/icons/collapsed.mask"),
+        Icon::Spinner => include_bytes!("../assets/icons/spinner.mask"),
+        Icon::Waiting => include_bytes!("../assets/icons/waiting.mask"),
+        Icon::Idle => include_bytes!("../assets/icons/idle.mask"),
+        Icon::Quiet => include_bytes!("../assets/icons/quiet.mask"),
+        Icon::Unseen => include_bytes!("../assets/icons/unseen.mask"),
+        Icon::New => include_bytes!("../assets/icons/new.mask"),
+        Icon::Resume => include_bytes!("../assets/icons/resume.mask"),
+        Icon::DropTarget => return None,
+    })
 }
 
-/// An image: a logo in one colour.
+/// Whether an icon is drawn as an image in the `Image` tier: all but the drop caret.
+pub fn has_image(icon: Icon) -> bool {
+    !matches!(icon, Icon::DropTarget)
+}
+
+/// How many frames one revolution of the loader has: one per degree step of 6.
+pub const SPINNER_FRAMES: usize = 60;
+
+/// The centre of a mask, in pixel coordinates.
+const CENTRE: f32 = (SIDE as f32 - 1.0) / 2.0;
+
+/// The `spinner` mask turned clockwise by `6 * k` degrees around its centre, sampled bilinearly,
+/// pixels outside the source transparent. `k` wraps at 60. Computed once and cached.
+pub fn spinner_frame(k: usize) -> [u8; MASK_LEN] {
+    static FRAMES: OnceLock<Vec<[u8; MASK_LEN]>> = OnceLock::new();
+    let frames = FRAMES.get_or_init(|| {
+        let source = include_bytes!("../assets/icons/spinner.mask");
+        (0..SPINNER_FRAMES).map(|k| rotate(source, k)).collect()
+    });
+    frames
+        .get(k % SPINNER_FRAMES)
+        .copied()
+        .unwrap_or([0; MASK_LEN])
+}
+
+/// Frame `k` of the loader: `source` turned clockwise by `6 * k` degrees.
+fn rotate(source: &[u8; MASK_LEN], k: usize) -> [u8; MASK_LEN] {
+    let angle = (k * 360 / SPINNER_FRAMES) as f32 * std::f32::consts::PI / 180.0;
+    let (sin, cos) = angle.sin_cos();
+    let at = |x: i64, y: i64| -> f32 {
+        let side = SIDE as i64;
+        if (0..side).contains(&x) && (0..side).contains(&y) {
+            source
+                .get((y * side + x) as usize)
+                .copied()
+                .map_or(0.0, f32::from)
+        } else {
+            0.0
+        }
+    };
+    let mut out = [0u8; MASK_LEN];
+    for y in 0..SIDE {
+        for x in 0..SIDE {
+            // The source point that lands on this pixel: the inverse turn.
+            let (dx, dy) = (x as f32 - CENTRE, y as f32 - CENTRE);
+            let sx = CENTRE + cos * dx + sin * dy;
+            let sy = CENTRE - sin * dx + cos * dy;
+            let (x0, y0) = (sx.floor(), sy.floor());
+            let (fx, fy) = (sx - x0, sy - y0);
+            let (x0, y0) = (x0 as i64, y0 as i64);
+            let top = at(x0, y0) * (1.0 - fx) + at(x0 + 1, y0) * fx;
+            let bottom = at(x0, y0 + 1) * (1.0 - fx) + at(x0 + 1, y0 + 1) * fx;
+            let value = top * (1.0 - fy) + bottom * fy;
+            if let Some(px) = out.get_mut(y * SIDE + x) {
+                *px = value.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// An image: an icon in one colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pair {
-    pub logo: Logo,
+    pub icon: Icon,
     pub rgb: Rgb,
+    /// The loader's frame (0..60); 0 for every other icon.
+    pub frame: u8,
 }
 
 impl Pair {
     /// The tinted image as RGBA: the colour in every pixel, the mask as alpha.
     pub fn rgba(&self) -> Vec<u8> {
         let (r, g, b) = self.rgb;
-        self.logo
-            .mask()
-            .iter()
-            .flat_map(|&alpha| [r, g, b, alpha])
-            .collect()
+        let tint = |mask: &[u8; MASK_LEN]| mask.iter().flat_map(|&a| [r, g, b, a]).collect();
+        if self.icon == Icon::Spinner {
+            return tint(&spinner_frame(usize::from(self.frame)));
+        }
+        mask(self.icon).map(tint).unwrap_or_default()
     }
 }
 
@@ -185,6 +257,8 @@ pub struct Images {
     pub(crate) order: Vec<(u32, Pair)>,
     sent: usize,
     pub(crate) next: u32,
+    /// The pairs the drawing asked for since the last pre-pass.
+    wanted: RefCell<Vec<Pair>>,
 }
 
 impl Images {
@@ -197,6 +271,7 @@ impl Images {
             order: Vec::new(),
             sent: 0,
             next: FIRST_ID,
+            wanted: RefCell::new(Vec::new()),
         }
     }
 
@@ -254,6 +329,16 @@ impl Images {
         )
     }
 
+    /// Notes that the drawing wants `pair` (the pre-pass registers it).
+    pub fn want(&self, pair: Pair) {
+        self.wanted.borrow_mut().push(pair);
+    }
+
+    /// The pairs wanted since the last call.
+    fn take_wanted(&self) -> Vec<Pair> {
+        std::mem::take(&mut *self.wanted.borrow_mut())
+    }
+
     /// The id of an image already registered.
     pub fn id(&self, pair: &Pair) -> Option<u32> {
         self.ids.get(pair).copied()
@@ -307,86 +392,77 @@ fn cube(n: u8) -> Rgb {
 }
 
 impl App {
-    /// The images, when the logos are drawn as images now: the terminal shows them, the
-    /// theme asks for them and has icons, and the colours are 24-bit.
-    pub(crate) fn logos(&self) -> Option<&Images> {
-        self.images.as_ref().filter(|_| {
-            self.theme.icon_images == IconImages::Auto
-                && self.theme.icons != IconPreset::None
-                && self.truecolor
-        })
+    /// The images, when the icons are drawn as images now: the tier is `Image` and the
+    /// colours are 24-bit.
+    pub(crate) fn live_images(&self) -> Option<&Images> {
+        self.images
+            .as_ref()
+            .filter(|_| self.tier == Tier::Image && self.truecolor)
     }
 
-    /// The images the next frame draws, as the drawing picks them: every panel row of the
-    /// sidebar in its row colour.
-    fn wanted_pairs(&self) -> Vec<Pair> {
-        let (Some(images), Some(view)) = (self.logos(), self.mirror.view()) else {
-            return Vec::new();
-        };
-        let theme = &self.theme;
-        let base = sidebar::base_style(theme);
-        let selected = self.sidebar_focus.then_some(self.selection).flatten();
-        let pair = |panel: &PanelView, style: Style| {
-            let kind = sidebar::panel_icon_kind(panel, theme)?;
-            Some(Pair {
-                logo: Logo::of(kind)?,
-                rgb: images.cell_for(sidebar::icon_style(theme, kind, style)).0,
-            })
-        };
-        let dragged = self.row_drag.map(|d| d.item);
-        let mut out = Vec::new();
-        for row in sidebar::rows(view, 0) {
-            let Row::Panel(_, id) = row else { continue };
-            let Some((_, panel)) = self.mirror.find_panel(id) else {
-                continue;
-            };
-            let is_selected = row.sel().is_some() && row.sel() == selected;
-            let active = view.active_panel == Some(id);
-            let band = is_selected || (active && !self.sidebar_focus);
-            let style = if row.sel().is_some() && row.sel() == dragged {
-                sidebar::dimmed_style(theme, base)
-            } else {
-                sidebar::panel_style(theme, base, band, active)
-            };
-            out.extend(pair(panel, style));
+    /// Draws a frame. Every image slot (`sidebar::icon_slot`) notes the pair it wants, in the
+    /// colour it draws in; when the frame brought a pair the terminal does not have, the pair is
+    /// sent (flushed, so it goes out before any cell of the frame) and the frame is drawn again,
+    /// now with the image. In the steady state the frame is drawn once.
+    pub fn draw_frame<B>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()>
+    where
+        B: Backend<Error = io::Error> + Write,
+    {
+        terminal.autoresize()?;
+        if let Some(images) = self.live_images() {
+            images.take_wanted();
         }
-        // The menu's items and the restore dialog's headings, as they are drawn.
-        let kind_pair = |kind: IconKind, style: Style| {
-            Some(Pair {
-                logo: Logo::of(kind)?,
-                rgb: images.cell_for(sidebar::icon_style(theme, kind, style)).0,
-            })
-        };
-        if self.menu.is_some() {
-            for (i, kind) in crate::menu::ICONS.iter().enumerate() {
-                let selected = self.menu.as_ref().is_some_and(|m| m.selected == i);
-                out.extend(kind_pair(*kind, crate::menu::item_style(theme, selected)));
-            }
+        let mut cursor = crate::draw::draw_screen(&mut terminal.get_frame(), self);
+        if self.send_wanted(terminal.backend_mut())? {
+            terminal.current_buffer_mut().reset();
+            cursor = crate::draw::draw_screen(&mut terminal.get_frame(), self);
         }
-        if let (Some(restore), Some(g)) = (&self.restore, self.restore_geometry()) {
-            for i in g.shown(restore.active) {
-                let Some(kind) = crate::restore::COLUMNS.get(i) else {
-                    continue;
-                };
-                let style = crate::restore::heading_style(theme, i == restore.active || g.narrow);
-                out.extend(kind_pair(crate::restore::agent_icon_kind(*kind), style));
-            }
-        }
-        out
+        terminal.apply_buffer_with_cursor(cursor)?;
+        Ok(())
     }
 
-    /// Before a frame: sends the images it draws that the terminal does not have yet.
-    pub fn send_images(&mut self, out: &mut impl Write) -> io::Result<()> {
-        let pairs = self.wanted_pairs();
-        match &mut self.images {
-            Some(images) if !pairs.is_empty() => {
-                for pair in pairs {
-                    images.register(pair);
+    /// Registers the pairs the last draw wanted and sends the new ones; whether there were any.
+    fn send_wanted(&mut self, out: &mut impl Write) -> io::Result<bool> {
+        let Some(images) = self.live_images() else {
+            return Ok(false);
+        };
+        let pairs = images.take_wanted();
+        let Some(images) = &mut self.images else {
+            return Ok(false);
+        };
+        let mut fresh = false;
+        for pair in pairs {
+            if pair.icon == Icon::Spinner {
+                // All 60 frames of a colour go out together, before the first one is drawn.
+                for frame in 0..SPINNER_FRAMES {
+                    let frame = Pair {
+                        frame: u8::try_from(frame).unwrap_or(0),
+                        ..pair
+                    };
+                    fresh |= images.id(&frame).is_none() && images.register(frame);
                 }
-                images.send_pending(out)
+            } else {
+                fresh |= images.id(&pair).is_none() && images.register(pair);
             }
-            _ => Ok(()),
         }
+        if fresh {
+            images.send_pending(out)?;
+        }
+        Ok(fresh)
+    }
+
+    /// Sends the images a frame draws, as the pre-pass of a test: draws once into a scratch
+    /// buffer.
+    #[cfg(test)]
+    pub fn send_images(&mut self, out: &mut impl Write) -> io::Result<()> {
+        let Some(images) = self.live_images() else {
+            return Ok(());
+        };
+        images.take_wanted();
+        let Ok(mut scratch) = Terminal::new(TestBackend::new(self.size.0, self.size.1));
+        let _ = scratch.draw(|f| crate::draw::draw(f, self));
+        self.send_wanted(out)?;
+        Ok(())
     }
 
     /// On the way out: deletes the images that were sent.

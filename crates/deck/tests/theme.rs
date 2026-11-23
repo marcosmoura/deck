@@ -57,9 +57,9 @@ fn is_palette(color: Color) -> bool {
 #[test]
 fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     let mut h = themed(THEMED, &[]);
-    h.wait_for_active_row("   ❯  sh", TIMEOUT);
+    h.wait_for_active_row(" ❯  sh", TIMEOUT);
     // The active panel row is a bold band; the session name is in the accent.
-    assert!(h.cell(3, 3).bold() && h.cell(3, 3).inverse());
+    assert!(h.cell(3, 4).bold() && h.cell(3, 4).inverse());
     assert_eq!(h.cell(0, 1).fg, ACCENT, "the session name");
     assert_eq!(h.cell(0, 3).fg, ACCENT, "the sidebar header");
     // The sidebar's background, on empty cells of its rows.
@@ -83,7 +83,7 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
 #[test]
 fn without_truecolor_the_theme_and_the_programs_use_the_palette() {
     let mut h = themed(THEMED, &[("COLORTERM", None)]);
-    h.wait_for_active_row("   ❯  sh", TIMEOUT);
+    h.wait_for_active_row(" ❯  sh", TIMEOUT);
     assert!(is_palette(h.cell(0, 1).fg));
     assert_eq!(h.cell(1, 20).bg, Color::Indexed(236));
 
@@ -144,15 +144,10 @@ fn a_double_border_style_reaches_the_help_overlay_and_the_session_picker() {
 }
 
 #[test]
-fn glyphs_follow_the_theme() {
-    let mut h = themed(r#"{ glyphs = { expanded = "v", collapsed = ">" } }"#, &[]);
-    h.wait_for_active_row("   ❯  sh", TIMEOUT);
-    assert!(rows(&h)[2].starts_with(" v dk"), "{}", rows(&h)[2]);
-    h.capture("glyphs");
-    prefixed(&mut h, "\t");
-    h.wait_for_text("SIDEBAR", TIMEOUT);
-    h.send_keys("h");
-    wait_until("the collapsed marker", TIMEOUT, || {
-        rows(&h).iter().any(|r| r.starts_with(" > dk"))
-    });
+fn a_removed_icon_key_loads_with_a_warning_and_the_default_icons() {
+    let h = themed(r#"{ icons = "nerd" }"#, &[]);
+    h.wait_for_active_row(" ❯  sh", TIMEOUT);
+    h.wait_for_text("theme.icons was removed: deck ships its own icons", TIMEOUT);
+    assert!(rows(&h)[2].starts_with(" dk"), "{}", rows(&h)[2]);
+    h.capture("removed-icons");
 }

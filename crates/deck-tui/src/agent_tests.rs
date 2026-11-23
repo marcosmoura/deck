@@ -75,19 +75,19 @@ fn mixed() -> SessionView {
 fn the_sidebar_status_column_shows_each_panels_glyph() {
     let a = app_with(mixed());
     let buf = render(&a);
-    let side = |y| row(&buf, y).chars().take(14).collect::<String>();
-    assert_eq!(side(3), " ⠋ ✻  editor  ");
-    assert_eq!(side(4), " ! ✻  claude  ");
-    assert_eq!(side(5), " ● ✻  tests   ");
-    assert_eq!(side(7), " ○ ✻  api     ");
+    let side = |y| row(&buf, y).chars().take(28).collect::<String>();
+    assert_eq!(side(3), " ✻  editor               ⠋  ");
+    assert_eq!(side(4), " ✻  claude               !  ");
+    assert_eq!(side(5), " ✻  tests                ●  ");
+    assert_eq!(side(7), " ✻  api                  ○  ");
     // Roles: waiting is a bold warning, idle is ok, quiet is muted; working is the accent, but
     // on the reversed band of the active row it keeps the row's text colour.
     let theme = &a.theme;
-    assert_eq!(buf[(1, 3)].fg, buf[(6, 3)].fg);
-    assert_eq!(buf[(1, 4)].fg, color(theme.warning));
-    assert!(buf[(1, 4)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(1, 5)].fg, color(theme.ok));
-    assert_eq!(buf[(1, 7)].fg, color(theme.muted));
+    assert_eq!(buf[(25, 3)].fg, buf[(4, 3)].fg);
+    assert_eq!(buf[(25, 4)].fg, color(theme.warning));
+    assert!(buf[(25, 4)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(25, 5)].fg, color(theme.ok));
+    assert_eq!(buf[(25, 7)].fg, color(theme.muted));
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn a_grid_title_carries_the_glyph_and_the_kind() {
     let a = app_with(view);
     let buf = render(&a);
     let top = row(&buf, 0);
-    assert!(top.contains("╭─ ! claude · sh "), "{top}");
+    assert!(top.contains("╭─ !  claude · sh "), "{top}");
     // The other terminal keeps its number.
     assert!(top.contains(" 2 · sh "), "{top}");
     let at = top.chars().position(|c| c == '!').unwrap();
@@ -124,6 +124,51 @@ fn a_grid_title_carries_the_glyph_and_the_kind() {
             .modifier
             .contains(Modifier::BOLD)
     );
+}
+
+#[test]
+fn a_grid_title_has_a_two_cell_status_slot_in_every_tier() {
+    use crate::tier::Tier;
+    for (tier, mark) in [
+        (Tier::Unicode, "!"),
+        (Tier::Nerd, "\u{f06a}"),
+        (Tier::Image, "\u{f06a}"),
+    ] {
+        let mut view = mockup();
+        view.projects[0].panels[0] = panel(3, "editor", 2);
+        set(&mut view, 31, AgentStatus::Waiting);
+        let mut a = app_with(view);
+        a.tier = tier;
+        let top = row(&render(&a), 0);
+        assert!(
+            top.contains(&format!("╭─ {mark}  claude · sh ")),
+            "{tier:?} {top}"
+        );
+    }
+}
+
+#[test]
+fn in_the_image_tier_a_grid_title_of_an_idle_agent_holds_a_placeholder_pair() {
+    use crate::tier::Tier;
+    let mut view = mockup();
+    view.projects[0].panels[0] = panel(3, "editor", 2);
+    set(&mut view, 31, AgentStatus::Idle);
+    let mut a = app_with(view);
+    a.truecolor = true;
+    a.tier = Tier::Image;
+    a.images = Some(crate::graphics::Images::new(None, None, [None; 16]));
+    let mut sink = Vec::new();
+    a.send_images(&mut sink).unwrap();
+    assert!(!sink.is_empty());
+    let buf = render(&a);
+    // `╭─ ` then the slot: the two placeholder cells, then the space and the name.
+    let x = (0..buf.area.width)
+        .find(|&x| buf[(x, 0)].symbol().starts_with('\u{10EEEE}'))
+        .expect("a placeholder in the top row");
+    assert_eq!(buf[(x - 1, 0)].symbol(), " ");
+    assert_eq!(buf[(x, 0)].symbol(), "\u{10EEEE}\u{0305}\u{0305}");
+    assert_eq!(buf[(x + 1, 0)].symbol(), "\u{10EEEE}\u{0305}\u{030D}");
+    assert!(row(&buf, 0).contains("claude · sh "), "{}", row(&buf, 0));
 }
 
 #[test]
@@ -155,11 +200,11 @@ fn the_spinner_advances_every_100_ms_and_only_while_something_spins() {
     let at = a.wake_deadline().expect("a timer for the spinner");
     a.tick(at - Duration::from_millis(1));
     assert!(!a.take_dirty());
-    assert_eq!(row(&render(&a), 3).chars().nth(1), Some('⠋'));
+    assert_eq!(row(&render(&a), 3).chars().nth(25), Some('⠋'));
 
     a.tick(at);
     assert!(a.take_dirty());
-    assert_eq!(row(&render(&a), 3).chars().nth(1), Some('⠙'));
+    assert_eq!(row(&render(&a), 3).chars().nth(25), Some('⠙'));
     assert_eq!(a.wake_deadline(), Some(at + SPIN_EVERY));
 
     // The agent finished: the last tick stops the timer.
@@ -181,9 +226,9 @@ fn a_process_detected_agent_spins_in_the_accent_colour() {
     set(&mut view, 31, AgentStatus::Active);
     let a = app_with(view);
     let buf = render(&a);
-    assert_eq!(buf[(1, 3)].symbol(), "⠋");
+    assert_eq!(buf[(25, 3)].symbol(), "⠋");
     // The active row has the reversed band: the glyph keeps the row's text colour.
-    assert_eq!(buf[(1, 3)].fg, buf[(6, 3)].fg);
+    assert_eq!(buf[(25, 3)].fg, buf[(4, 3)].fg);
     assert!(a.wake_deadline().is_some());
 }
 
@@ -194,14 +239,15 @@ fn an_unseen_panel_is_bold_with_the_glyph_after_its_name() {
     view.projects[0].panels[1].unseen = true;
     let a = app_with(view);
     let buf = render(&a);
-    let side = |y| row(&buf, y).chars().take(14).collect::<String>();
-    assert_eq!(side(4), " ! ✻  claude •");
-    assert_eq!(side(5), "   ❯  tests   ");
-    for x in 6..12 {
+    let side = |y| row(&buf, y).chars().take(28).collect::<String>();
+    assert_eq!(side(4), " ✻  claude •             !  ");
+    assert_eq!(side(5), " ❯  tests                   ");
+    for x in 4..10 {
         assert!(buf[(x, 4)].modifier.contains(Modifier::BOLD), "{x}");
     }
-    assert!(!buf[(6, 5)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(13, 4)].fg, color(a.theme.accent));
+    assert!(!buf[(4, 5)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(11, 4)].fg, color(a.theme.accent));
+    assert_eq!(buf[(12, 4)].symbol(), " ");
 }
 
 #[test]
@@ -213,8 +259,8 @@ fn a_collapsed_project_counts_its_waiting_panels() {
     let a = app_with(view);
     let buf = render(&a);
     let line = row(&buf, 10).chars().take(28).collect::<String>();
-    assert!(line.starts_with(" ▸ dotfiles !1"), "{line}");
-    assert!(line.ends_with("2 "), "{line}");
+    assert!(line.starts_with(" dotfiles !1"), "{line}");
+    assert!(line.ends_with("2 ▸  "), "{line}");
     let at = u16::try_from(line.chars().position(|c| c == '!').unwrap()).unwrap();
     assert_eq!(buf[(at, 10)].fg, color(a.theme.warning));
     // An expanded project shows the panels' own glyphs instead.

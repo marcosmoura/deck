@@ -6,10 +6,9 @@ use std::time::Instant;
 
 use deck_core::action::{Action as Act, PanelLaunch};
 use deck_core::agents::AgentKind;
-use deck_core::icons::IconKind;
+use deck_core::icons::{Icon, IconKind};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::model::ProjectId;
-use deck_core::theme::IconPreset;
 use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
@@ -19,7 +18,7 @@ use ratatui::widgets::{Block, Clear, Widget};
 
 use crate::app::{App, Out};
 use crate::draw::{border_type, color, selection, truncate, width};
-use crate::sidebar::{ICON_CELLS, kind_icon_cell};
+use crate::sidebar::{ICON_CELLS, icon_slot};
 
 /// The menu's items, in order; the digit that chooses one is its position from 1.
 pub const ITEMS: [&str; 4] = ["Terminal", "Claude", "OpenCode", "Codex"];
@@ -293,17 +292,13 @@ pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
         let selected = i == menu.selected;
         let style = item_style(theme, selected);
         buf.set_style(Rect::new(rect.x + 1, y, inner_w, 1), style);
-        // ` <icon, two cells> <label>`; without icons the label follows the space.
-        let label_x = if theme.icons == IconPreset::None {
-            rect.x + 2
-        } else {
-            let (icon, icon_style) = ICONS
-                .get(i)
-                .map(|kind| kind_icon_cell(app, theme, *kind, style))
-                .unwrap_or_default();
-            buf.set_stringn(rect.x + 2, y, icon, usize::from(ICON_CELLS), icon_style);
-            rect.x + 2 + ICON_CELLS + 1
-        };
+        // ` <icon, two cells> <label>`.
+        let (icon, icon_style) = ICONS
+            .get(i)
+            .map(|kind| icon_slot(app, Icon::Kind(*kind), style))
+            .unwrap_or_default();
+        buf.set_stringn(rect.x + 2, y, icon, usize::from(ICON_CELLS), icon_style);
+        let label_x = rect.x + 2 + ICON_CELLS + 1;
         buf.set_stringn(
             label_x,
             y,

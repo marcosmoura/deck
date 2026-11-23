@@ -241,6 +241,11 @@ fn row_of(h: &Harness, text: &str) -> usize {
         .unwrap_or_else(|| panic!("{text:?} not on the screen:\n{}", h.screen_text()))
 }
 
+/// Whether a sidebar row (its 28 columns) is a space row: its caret closes it on the right.
+fn is_project_row(side: &str) -> bool {
+    side.trim_end().ends_with(['▾', '▸'])
+}
+
 /// The sidebar's projects and their panel rows, from its 28 columns.
 fn projects(h: &Harness) -> Vec<(String, Vec<String>)> {
     let mut found: Vec<(String, Vec<String>)> = Vec::new();
@@ -250,9 +255,12 @@ fn projects(h: &Harness) -> Vec<(String, Vec<String>)> {
         if trimmed.is_empty() {
             continue;
         }
-        if side.starts_with(" ▾") || side.starts_with(" ▸") {
+        if is_project_row(&side) {
             found.push((
-                side[side.find(' ').unwrap_or(0)..].trim().to_string(),
+                side.trim_end()
+                    .trim_end_matches(['▾', '▸'])
+                    .trim()
+                    .to_string(),
                 Vec::new(),
             ));
         } else if let Some((_, panels)) = found.last_mut() {
@@ -315,7 +323,7 @@ fn the_button_sits_at_the_right_of_the_bar_and_highlights_on_hover() {
     let mut h = start(&sb);
     let bar = rows(&h)[usize::from(BAR_ROW)].clone();
     let side: String = bar.chars().take(28).collect();
-    assert_eq!(side.trim_end(), "  + New             Resume", "{bar:?}");
+    assert_eq!(side.trim_end(), "  +  New         ↻  Resume", "{bar:?}");
     hover_at(&mut h, CHIP, BAR_ROW);
     // The hovered chip is drawn in the selection colours: its cells change colour.
     let idle = h.cell(usize::from(BAR_ROW), usize::from(CHIP));
@@ -344,7 +352,7 @@ fn a_narrow_sidebar_shows_the_button_as_a_glyph() {
     let bar = rows(&h)[usize::from(BAR_ROW)].clone();
     assert_eq!(
         bar.chars().take(20).collect::<String>().trim_end(),
-        "  +              ↻",
+        "  +             ↻",
         "{bar:?}"
     );
 }
@@ -456,7 +464,7 @@ fn a_session_opens_in_the_project_that_holds_its_directory_else_in_the_active_on
         // The band is on a panel row of the first project, above the next project's row.
         let rows = rows(&h);
         let next = (3..rows.len())
-            .find(|&y| rows[y].starts_with(" ▾") || rows[y].starts_with(" ▸"))
+            .find(|&y| is_project_row(&rows[y].chars().take(28).collect::<String>()))
             .unwrap_or(rows.len());
         (3..next).any(|y| h.is_active_row(y))
     });
@@ -485,7 +493,9 @@ fn a_session_opens_in_the_project_that_holds_its_directory_else_in_the_active_on
     h.send_keys("\r");
     sb.wait_start("codex");
     wait_until("the panel in the active project", TIMEOUT, || {
-        projects(&h)[0].1.iter().any(|r| r.contains("codex"))
+        projects(&h)
+            .first()
+            .is_some_and(|(_, panels)| panels.iter().any(|r| r.contains("codex")))
     });
 }
 
@@ -504,7 +514,9 @@ fn a_session_outside_every_project_opens_in_the_active_project() {
     let start = sb.wait_start("codex");
     assert_eq!(start, format!("{}|resume {UUID_X}", elsewhere.display()));
     wait_until("the panel in the only project", TIMEOUT, || {
-        projects(&h)[0].1.iter().any(|r| r.contains("codex"))
+        projects(&h)
+            .first()
+            .is_some_and(|(_, panels)| panels.iter().any(|r| r.contains("codex")))
     });
 }
 

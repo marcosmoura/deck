@@ -108,7 +108,7 @@ fn text(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
     (from..to).map(|x| buf[(x, y)].symbol()).collect()
 }
 
-/// The bottom bar of the 24-row window is on row 23; its `+ New` chip is on columns 1..8.
+/// The bottom bar of the 24-row window is on row 23; its `+ New` chip is on columns 1..9.
 const BAR: u16 = 23;
 const NEW_CHIP: u16 = 3;
 
@@ -139,10 +139,10 @@ fn project_rows_have_no_button_and_keep_their_counts_under_the_pointer() {
         ..mockup()
     };
     let mut a = app_with(&config(), (100, 24), view);
-    assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-multiplexer   1 │");
+    assert_eq!(text(&buffer(&a), 2, 0, 29), " terminal-multiplexer  1 ▸  │");
     moved(&mut a, 10, 2);
     assert_eq!(a.hover, Some(Hover::Row(Sel::Project(ProjectId(1)))));
-    assert_eq!(text(&buffer(&a), 2, 0, 29), " ▸ terminal-multiplexer   1 │");
+    assert_eq!(text(&buffer(&a), 2, 0, 29), " terminal-multiplexer  1 ▸  │");
     // Selecting it in sidebar focus does not add a button either.
     prefix(&mut a);
     press(&mut a, ct::KeyCode::Tab);
@@ -156,7 +156,7 @@ fn project_rows_have_no_button_and_keep_their_counts_under_the_pointer() {
 fn the_new_chip_has_the_hover_background_under_the_pointer_and_is_muted_otherwise() {
     let mut a = app();
     let buf = buffer(&a);
-    assert_eq!(text(&buf, BAR, 0, 29), "  + New             Resume  │");
+    assert_eq!(text(&buf, BAR, 0, 29), "  +  New         ↻  Resume  │");
     assert_eq!(buf[(NEW_CHIP, BAR)].fg, color(a.theme.muted));
     moved(&mut a, NEW_CHIP, BAR);
     assert_eq!(a.hover, Some(Hover::New));
@@ -226,7 +226,7 @@ fn the_menu_sits_above_the_bottom_bar_with_its_icons_and_no_gutter() {
             "│ ◎  Codex         4 │",
             "│ ⏎ choose  esc close│",
             "╰────────────────────╯",
-            "  + New             Re",
+            "  +  New         ↻  Re",
         ]
     );
 }
@@ -623,6 +623,7 @@ fn the_menu_is_part_of_the_projects_help_group() {
 fn menu_with_images() -> App {
     let mut a = open_by_click();
     a.truecolor = true;
+    a.tier = crate::tier::Tier::Image;
     a.images = Some(crate::graphics::Images::new(
         Some((10, 20, 30)),
         Some((1, 1, 1)),
@@ -650,12 +651,12 @@ fn logo_at(buf: &Buffer, x: u16, y: u16) -> Option<u32> {
 fn with_images_the_menu_items_draw_logos_sent_before_the_frame() {
     let mut a = menu_with_images();
     // Not sent yet: text icons.
-    assert_eq!(text(&buffer(&a), 18, 2, 4), "✻ ");
+    assert_eq!(text(&buffer(&a), 18, 2, 4), "\u{ec82} ");
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
     let buf = buffer(&a);
-    // Terminal keeps its glyph; the three agents have logos at columns 2 and 3.
-    assert_eq!(text(&buf, 17, 2, 4), "❯ ");
+    // The terminal and the three agents have images at columns 2 and 3.
+    assert!(logo_at(&buf, 2, 17).is_some());
     let ids: Vec<u32> = (18..21)
         .map(|y| logo_at(&buf, 2, y).unwrap_or_else(|| panic!("no logo on row {y}")))
         .collect();
@@ -706,14 +707,4 @@ fn the_highlighted_logo_is_sent_in_the_selection_colour() {
         .find(|(i, _)| *i == other)
         .unwrap();
     assert_ne!(other_pair.rgb, pair.rgb);
-}
-
-#[test]
-fn icons_none_menu_has_no_icon_column() {
-    let config = Config::parse("[theme]\nicons = \"none\"").unwrap().config;
-    let mut a = app_with(&config, (100, 24), mockup());
-    a.open_new_menu(ProjectId(2));
-    let buf = buffer(&a);
-    assert_eq!(text(&buf, 17, 0, 22), "│ Terminal         1 │");
-    assert_eq!(text(&buf, 18, 0, 22), "│ Claude           2 │");
 }

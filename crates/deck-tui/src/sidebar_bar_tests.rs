@@ -84,12 +84,12 @@ const CHIP: u16 = 14;
 fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right() {
     // (sidebar width, the left part as shown, the chip's glyph text)
     for (width, left, chip) in [
-        (40, " main", " + New space "),
-        (30, " main", " + New space "),
-        (28, " main", " + New space "),
-        (26, " main", " + New space "),
-        (25, " main", " + "),
-        (20, " main", " + "),
+        (40, " main", " +  New space "),
+        (30, " main", " +  New space "),
+        (28, " main", " +  New space "),
+        (26, " main", " +  New space "),
+        (25, " main", " +  "),
+        (20, " main", " +  "),
     ] {
         let a = app_at((100, 24), width, mockup());
         let buf = draw_app(&a);
@@ -109,16 +109,20 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right()
 #[test]
 fn the_bar_shows_the_chip_at_the_left_and_the_resume_chip_at_the_right() {
     for (cols, width, label) in [
-        (100, 20, " + "),
-        (100, 25, " + "),
-        (100, 26, " + New "),
-        (100, 28, " + New "),
-        (100, 60, " + New "),
+        (100, 20, " +  "),
+        (100, 25, " +  "),
+        (100, 26, " +  New "),
+        (100, 28, " +  New "),
+        (100, 60, " +  New "),
     ] {
         let a = app_at((cols, 24), width, mockup());
         let buf = draw_app(&a);
         let text = row_text(&buf, BAR, width);
-        let resume = if width < 26 { " ↻ " } else { " Resume " };
+        let resume = if width < 26 {
+            " ↻  "
+        } else {
+            " ↻  Resume "
+        };
         let gap = usize::from(width) - 2 - label.len() - resume.chars().count();
         let expected = format!(" {label}{}{resume} ", " ".repeat(gap));
         assert_eq!(text, expected, "width {width}");
@@ -139,15 +143,15 @@ fn the_chip_is_muted_when_idle_and_has_the_hover_background_under_the_pointer() 
     moved(&mut a, 5, BAR);
     assert_eq!(a.hover, Some(Hover::New));
     let hot = draw_app(&a);
-    for x in 1..8 {
+    for x in 1..9 {
         let cell = &hot[(x, BAR)];
         assert_eq!(cell.bg, color(a.theme.hover), "column {x}: {cell:?}");
         assert_eq!(cell.fg, color(a.theme.sidebar_fg), "column {x}: {cell:?}");
     }
     assert_ne!(hot[(2, BAR)], idle[(2, BAR)]);
     // The cell after the chip is untouched.
-    assert_eq!(hot[(8, BAR)], idle[(8, BAR)]);
-    moved(&mut a, 10, BAR);
+    assert_eq!(hot[(9, BAR)], idle[(9, BAR)]);
+    moved(&mut a, 12, BAR);
     assert_eq!(a.hover, None);
     assert_eq!(draw_app(&a)[(2, BAR)], idle[(2, BAR)]);
 }
@@ -180,7 +184,7 @@ fn a_short_sidebar_has_no_bar_and_the_list_uses_the_full_height() {
     // 8 rows: the bar appears and the list loses two rows.
     let a = app_at((100, 8), 28, view);
     let buf = draw_app(&a);
-    assert!(row_text(&buf, 7, 28).contains("+ New"));
+    assert!(row_text(&buf, 7, 28).contains("+  New"));
     assert!(
         row_text(&buf, 5, 28).contains("p3"),
         "{}",
@@ -202,14 +206,14 @@ fn the_list_scrolls_inside_a_list_area_two_rows_shorter() {
     // The list shows rows 2..=21 (20 rows); the bar stays at the bottom.
     assert!(row_text(&buf, 21, 28).contains("proj20"));
     assert!(!row_text(&buf, 22, 28).contains("proj"));
-    assert!(row_text(&buf, BAR, 28).contains("+ New"));
+    assert!(row_text(&buf, BAR, 28).contains("+  New"));
     for _ in 0..20 {
         a.on_event(mouse(ct::MouseEventKind::ScrollDown, 5, 5), Instant::now());
     }
     assert_eq!(a.sidebar_offset, 30 - 20);
     let buf = draw_app(&a);
     assert!(row_text(&buf, 21, 28).contains("proj30"));
-    assert!(row_text(&buf, BAR, 28).contains("+ New"));
+    assert!(row_text(&buf, BAR, 28).contains("+  New"));
 }
 
 #[test]
@@ -412,7 +416,7 @@ fn a_config_reload_that_narrows_the_sidebar_recomputes_the_hover() {
         ..Config::default()
     };
     a.apply_config(config);
-    assert_eq!(a.hover, None, "the chip is three cells now, at the right");
+    assert_eq!(a.hover, None, "the chip is four cells now, at the right");
 }
 
 #[test]
@@ -436,7 +440,7 @@ fn motion_over_the_sidebar_never_reaches_a_program_but_motion_over_it_does() {
 #[test]
 fn the_chips_are_hit_where_they_are_drawn_at_any_width() {
     // Both padding cells are part of the chip.
-    for (width, start) in [(20, 16), (28, 14), (40, 26)] {
+    for (width, start) in [(20, 15), (28, 13), (40, 25)] {
         let mut a = app_at((100, 24), width, mockup());
         for column in [start, width - 2] {
             moved(&mut a, column, 0);
@@ -447,11 +451,11 @@ fn the_chips_are_hit_where_they_are_drawn_at_any_width() {
             assert_eq!(a.hover, None, "width {width}");
         }
     }
-    // `+ New` takes columns 1..4 at 20 columns (` + `).
+    // `+ New` takes columns 1..5 at 20 columns (` +  `).
     let mut a = app_at((100, 24), 20, mockup());
-    moved(&mut a, 3, BAR);
-    assert_eq!(a.hover, Some(Hover::New));
     moved(&mut a, 4, BAR);
+    assert_eq!(a.hover, Some(Hover::New));
+    moved(&mut a, 5, BAR);
     assert_eq!(a.hover, None);
 }
 
@@ -474,13 +478,13 @@ fn the_active_panels_row_is_a_bold_band_across_the_width() {
     // Default selection colours: reversed. The active panel is `editor`, row 3.
     let a = app();
     let buf = draw_app(&a);
-    assert_eq!(row_text(&buf, 3, 28), "   ❯  editor                ");
+    assert_eq!(row_text(&buf, 3, 28), " ❯  editor                  ");
     assert!(!(0..24).any(|y| row_text(&buf, y, 28).contains('▌')));
     for x in 0..28 {
         assert!(buf[(x, 3)].modifier.contains(Modifier::REVERSED), "{x}");
     }
-    assert!(buf[(6, 3)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(6, 3)].fg, color(a.theme.sidebar_fg));
+    assert!(buf[(4, 3)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(4, 3)].fg, color(a.theme.sidebar_fg));
     // The separator and the other rows are not part of it.
     assert!(!buf[(28, 3)].modifier.contains(Modifier::REVERSED));
     for y in [2, 4, 6] {
@@ -496,7 +500,7 @@ fn the_active_panels_row_is_a_bold_band_across_the_width() {
             (color(a.theme.selection_fg), color(a.theme.selection_bg))
         );
     }
-    assert!(buf[(6, 3)].modifier.contains(Modifier::BOLD));
+    assert!(buf[(4, 3)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(28, 3)].bg, color(a.theme.sidebar_bg));
 }
 
@@ -509,9 +513,9 @@ fn in_sidebar_focus_only_the_selection_has_the_band() {
     // The selected row has the band; the active row has none, in the accent, bold.
     assert_eq!(buf[(20, 4)].bg, color(a.theme.selection_bg));
     assert_eq!(buf[(20, 3)].bg, color(a.theme.sidebar_bg));
-    assert_eq!(buf[(6, 3)].fg, color(a.theme.accent));
-    assert!(buf[(6, 3)].modifier.contains(Modifier::BOLD));
-    assert!(!buf[(6, 3)].modifier.contains(Modifier::REVERSED));
+    assert_eq!(buf[(4, 3)].fg, color(a.theme.accent));
+    assert!(buf[(4, 3)].modifier.contains(Modifier::BOLD));
+    assert!(!buf[(4, 3)].modifier.contains(Modifier::REVERSED));
     // With default selection colours the selection is reversed and the active row is not.
     let mut a = app();
     a.enter_sidebar();
@@ -525,9 +529,9 @@ fn in_sidebar_focus_only_the_selection_has_the_band() {
 fn rows_and_chips_under_the_pointer_have_the_hover_background() {
     let mut a = app_at((100, 24), 28, with_agent(mockup(), 6, AgentStatus::Quiet));
     // The quiet glyph is muted when idle and the sidebar text under the pointer.
-    assert_eq!(draw_app(&a)[(1, 7)].fg, color(a.theme.muted));
+    assert_eq!(draw_app(&a)[(25, 7)].fg, color(a.theme.muted));
     moved(&mut a, 5, 7);
-    assert_eq!(draw_app(&a)[(1, 7)].fg, color(a.theme.sidebar_fg));
+    assert_eq!(draw_app(&a)[(25, 7)].fg, color(a.theme.sidebar_fg));
     let hover = color(a.theme.hover);
     // A space row, with its count on `dotfiles` turned from muted to the sidebar text.
     moved(&mut a, 5, 6);
@@ -537,12 +541,12 @@ fn rows_and_chips_under_the_pointer_have_the_hover_background() {
     assert_eq!(buf[(28, 6)].bg, color(a.theme.sidebar_bg));
     assert!((0..28).all(|x| buf[(x, 5)].bg != hover && buf[(x, 7)].bg != hover));
     // The glyph is muted when idle and the sidebar text under the pointer.
-    assert_eq!(buf[(1, 6)].fg, color(a.theme.sidebar_fg));
-    assert_eq!(draw_app(&app())[(1, 6)].fg, color(a.theme.muted));
+    assert_eq!(buf[(25, 6)].fg, color(a.theme.sidebar_fg));
+    assert_eq!(draw_app(&app())[(25, 6)].fg, color(a.theme.muted));
     moved(&mut a, 5, 10);
     let buf = draw_app(&a);
-    assert_eq!(buf[(26, 10)].symbol(), "2");
-    assert_eq!(buf[(26, 10)].fg, color(a.theme.sidebar_fg));
+    assert_eq!(buf[(23, 10)].symbol(), "2");
+    assert_eq!(buf[(23, 10)].fg, color(a.theme.sidebar_fg));
     assert_eq!(buf[(26, 10)].bg, hover);
     // A panel row.
     moved(&mut a, 5, 7);
@@ -553,7 +557,7 @@ fn rows_and_chips_under_the_pointer_have_the_hover_background() {
     let buf = draw_app(&a);
     assert!((0..28).all(|x| buf[(x, 7)].bg == hover));
     // The chips: their own cells only.
-    for (x, y, from, to) in [(CHIP, 0, 14, 27), (5, BAR, 1, 8), (20, BAR, 19, 27)] {
+    for (x, y, from, to) in [(CHIP, 0, 13, 27), (5, BAR, 1, 9), (20, BAR, 16, 27)] {
         moved(&mut a, x, y);
         let buf = draw_app(&a);
         assert!((from..to).all(|c| buf[(c, y)].bg == hover), "{x}");
@@ -659,11 +663,11 @@ fn glyphs_on_a_reversed_band_keep_the_text_colour() {
     view.projects[0].panels[0].terminals.push(extra);
     let a = app_at((100, 24), 28, view);
     let buf = draw_app(&a);
-    // The status glyph (column 1), the name and the terminal count (column 26).
-    assert_eq!(buf[(1, 3)].symbol(), "●");
-    assert_eq!(buf[(26, 3)].symbol(), "2");
-    let name = &buf[(6, 3)];
-    for x in [1, 26] {
+    // The status glyph (column 25), the name and the terminal count (column 23).
+    assert_eq!(buf[(25, 3)].symbol(), "●");
+    assert_eq!(buf[(23, 3)].symbol(), "2");
+    let name = &buf[(4, 3)];
+    for x in [25, 23] {
         assert_eq!(buf[(x, 3)].fg, name.fg, "column {x}");
         assert!(
             buf[(x, 3)].modifier.contains(Modifier::REVERSED),

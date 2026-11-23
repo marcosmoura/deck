@@ -410,7 +410,7 @@ fn the_header_shows_the_session_name_and_a_rename_updates_it_at_once() {
     assert!(rows[0].starts_with(" work "), "{}", rows[0]);
     assert_eq!(buf[(1, 0)].fg, color(a.theme.accent));
     assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
-    assert!(rows[0].contains("+ New space"));
+    assert!(rows[0].contains("+  New space"));
     let mut view = mockup();
     view.name = "play".into();
     a.on_server(ServerMsg::SessionView(view));
@@ -423,7 +423,7 @@ fn the_header_shows_the_session_name_and_a_rename_updates_it_at_once() {
     );
     let (_, _, rows) = render(&a);
     assert!(rows[0].contains("… "), "{}", rows[0]);
-    assert!(rows[0].contains("+ New space"), "{}", rows[0]);
+    assert!(rows[0].contains("+  New space"), "{}", rows[0]);
     // Before the first session view the title is empty.
     let a = App::new(&Config::default(), (100, 24), &[]);
     let (_, _, rows) = render(&a);

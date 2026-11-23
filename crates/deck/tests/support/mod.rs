@@ -104,9 +104,20 @@ impl Home {
         set("TERM", Some("xterm-256color"));
         // The terminal of the developer running the tests must not change the results (the
         // client draws logos as images in Ghostty and kitty); a test opts in with `.env(...)`.
-        for key in ["TERM_PROGRAM", "KITTY_WINDOW_ID", "TMUX", "ZELLIJ", "DECK"] {
+        for key in [
+            "TERM_PROGRAM",
+            "KITTY_WINDOW_ID",
+            "GHOSTTY_RESOURCES_DIR",
+            "WEZTERM_EXECUTABLE",
+            "TMUX",
+            "ZELLIJ",
+            "DECK",
+        ] {
             set(key, None);
         }
+        // The fonts installed on a developer's machine must not change the results either: the
+        // client skips its font checks (`defaults`, `fc-list`).
+        set("DECK_TEST_NO_FONT_CHECK", Some("1"));
         set("DECK_HOME", Some(&dir.path().to_string_lossy()));
         set(
             "DECK_TEST_PARENT_PID",

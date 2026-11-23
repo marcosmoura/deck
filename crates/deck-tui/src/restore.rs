@@ -8,11 +8,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use deck_core::action::{Action as Act, PanelLaunch};
 use deck_core::agent_sessions::{AgentSession, age, matches, project_for, short_dir};
 use deck_core::agents::AgentKind;
-use deck_core::icons::IconKind;
+use deck_core::icons::{Icon, IconKind};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::model::ProjectId;
 use deck_core::protocol::{ClientMsg, Request};
-use deck_core::theme::{IconPreset, Theme};
+use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
 use ratatui::layout::Rect;
@@ -22,7 +22,7 @@ use ratatui::widgets::{Block, Clear, Widget};
 use crate::app::{App, Out};
 use crate::draw::{border_type, color, selection, truncate, width};
 use crate::modal::Editor;
-use crate::sidebar::{ICON_CELLS, kind_icon_cell};
+use crate::sidebar::{ICON_CELLS, icon_slot};
 
 /// The columns, left to right.
 pub const COLUMNS: [AgentKind; 3] = [AgentKind::Claude, AgentKind::OpenCode, AgentKind::Codex];
@@ -746,18 +746,16 @@ pub fn draw(buf: &mut Buffer, app: &App, theme: &Theme) {
             at += 2;
         }
         let kind = agent_icon_kind(COLUMNS.get(i).copied().unwrap_or(AgentKind::Claude));
-        if theme.icons != IconPreset::None {
-            let (icon, icon_style) = kind_icon_cell(app, theme, kind, style);
-            put(
-                buf,
-                at,
-                g.header_y,
-                &icon,
-                cw.saturating_sub(at - cx),
-                icon_style,
-            );
-            at += ICON_CELLS + 1;
-        }
+        let (icon, icon_style) = icon_slot(app, Icon::Kind(kind), style);
+        put(
+            buf,
+            at,
+            g.header_y,
+            &icon,
+            cw.saturating_sub(at - cx),
+            icon_style,
+        );
+        at += ICON_CELLS + 1;
         let tail = if g.narrow {
             format!("{name}{count} ›")
         } else {

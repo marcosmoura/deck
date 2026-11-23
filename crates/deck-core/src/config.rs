@@ -802,30 +802,14 @@ mod tests {
             assert!(theme.contains_key(role), "theme.{role} missing");
         }
         assert!(theme.contains_key("border_style"));
-        assert!(theme.contains_key("icons"));
-        assert!(theme.contains_key("icon_images"));
-        assert!(theme.contains_key("icon_glyphs"));
-        assert!(theme.contains_key("icon_colors"));
-        let glyphs = theme["glyphs"].as_table().unwrap();
-        for name in [
-            "expanded",
-            "collapsed",
-            "spinner",
-            "waiting",
-            "idle",
-            "quiet",
-            "unseen",
+        for removed in [
+            "icons",
+            "icon_images",
+            "glyphs",
+            "icon_glyphs",
+            "icon_colors",
         ] {
-            assert!(glyphs.contains_key(name), "theme.glyphs.{name} missing");
-        }
-        // Each commented icon line names its kind's `unicode` glyph.
-        let unicode = crate::theme::IconGlyphs::preset(crate::theme::IconPreset::Unicode);
-        for kind in crate::icons::IconKind::ALL {
-            let want = format!("# {} = \"{}\"", kind.name(), unicode.get(kind));
-            assert!(
-                DEFAULT_CONFIG_TOML.lines().any(|l| l.starts_with(&want)),
-                "default.toml lacks `{want}`"
-            );
+            assert!(!theme.contains_key(removed), "theme.{removed} is removed");
         }
     }
 

@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::graphics::Images;
+use crate::graphics::{Images, SPINNER_FRAMES};
 use deck_core::action::Action as Act;
 use deck_core::config::Config;
 use deck_core::keys::{KeyCode, KeyEvent, Modifiers, encode};
@@ -31,6 +31,7 @@ use crate::resize::{Drag, SidebarDrag};
 use crate::restore::Restore;
 use crate::select::{self, MULTI_CLICK_MS, TextSel, Unit};
 use crate::sidebar::{Hover, Reorder, RowDrag, Sel};
+use crate::tier::Tier;
 
 /// Below this many columns or rows the client shows only a message.
 pub const MIN_SIZE: (u16, u16) = (20, 5);
@@ -80,8 +81,12 @@ pub struct App {
     pub config: Config,
     /// The outer terminal does truecolor; if not, RGB colours are drawn as palette colours.
     pub truecolor: bool,
+    /// The form the icons are drawn in (see [`crate::tier`]).
+    pub(crate) tier: Tier,
+    /// The font check answered (it answers once; later answers change nothing).
+    pub(crate) font_answered: bool,
     /// The logos as images; `None` unless the outer terminal is one that shows them (see
-    /// [`crate::graphics::detect`]).
+    /// [`crate::caps::plan`]).
     pub(crate) images: Option<Images>,
     /// The outer terminal's size in columns and rows.
     pub size: (u16, u16),
@@ -160,10 +165,14 @@ pub struct App {
     /// Where the client was started, for new projects' directories.
     pub(crate) cwd: PathBuf,
     pub(crate) home: Option<PathBuf>,
-    /// The spinner's frame counter, advanced every [`SPIN_EVERY`] while a terminal spins.
+    /// The spinner's tick counter, advanced on every spinner tick while a terminal spins.
     pub(crate) spin: usize,
     /// When the spinner moves next; `None` while nothing spins (no timer runs then).
-    spin_at: Option<Instant>,
+    pub(crate) spin_at: Option<Instant>,
+    /// When the client started: the loader's frame is picked from the time since.
+    pub(crate) started: Instant,
+    /// The loader image's frame (0..60) as of the last tick; every spinner shows it.
+    pub(crate) spin_frame: u8,
     /// The outer terminal has focus, as far as its focus events told.
     focused: bool,
     /// The first line of the help overlay shown.
@@ -201,6 +210,8 @@ impl App {
             theme: config.theme.clone(),
             config: config.clone(),
             truecolor: true,
+            tier: Tier::Unicode,
+            font_answered: false,
             images: None,
             size,
             armed: false,
@@ -242,6 +253,8 @@ impl App {
             home: None,
             spin: 0,
             spin_at: None,
+            started: Instant::now(),
+            spin_frame: 0,
             focused: true,
             help_scroll: 0,
             focus_seen: false,
@@ -438,6 +451,18 @@ impl App {
             .min()
     }
 
+    /// The font check's answer: a late `Nerd` upgrade redraws. Only the first answer counts.
+    pub fn on_font_answer(&mut self, found: bool) {
+        if std::mem::replace(&mut self.font_answered, true) {
+            return;
+        }
+        let tier = self.tier.with_font(found);
+        if tier != self.tier {
+            self.tier = tier;
+            self.dirty = true;
+        }
+    }
+
     pub fn take_dirty(&mut self) -> bool {
         self.configured && std::mem::take(&mut self.dirty)
     }
@@ -445,14 +470,35 @@ impl App {
     /// Starts the spinner's timer when a terminal spins and none runs yet.
     fn arm_spinner(&mut self, now: Instant) {
         if self.spin_at.is_none() && self.mirror.view().is_some_and(agent::view_spins) {
-            self.spin_at = Some(now + agent::SPIN_EVERY);
+            self.spin_at = Some(if self.live_images().is_some() {
+                self.next_frame_at(now)
+            } else {
+                now + agent::SPIN_EVERY
+            });
         }
+    }
+
+    /// The loader image's frame at `now`: `floor(elapsed * 60) mod 60`.
+    fn frame_at(&self, now: Instant) -> u8 {
+        let elapsed = now.saturating_duration_since(self.started).as_nanos();
+        let frame = elapsed * SPINNER_FRAMES as u128 / 1_000_000_000 % SPINNER_FRAMES as u128;
+        u8::try_from(frame).unwrap_or(0)
+    }
+
+    /// The next 1/60 s boundary of the time since the start, after `now`.
+    fn next_frame_at(&self, now: Instant) -> Instant {
+        let frames = SPINNER_FRAMES as u128;
+        let elapsed = now.saturating_duration_since(self.started).as_nanos();
+        let next = elapsed * frames / 1_000_000_000 + 1;
+        let nanos = (next * 1_000_000_000).div_ceil(frames);
+        self.started + Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
     }
 
     /// Moves the spinner and drops an expired flash message.
     pub fn tick(&mut self, now: Instant) {
         if self.spin_at.is_some_and(|at| now >= at) {
             self.spin = self.spin.wrapping_add(1);
+            self.spin_frame = self.frame_at(now);
             self.spin_at = None;
             self.arm_spinner(now);
             self.dirty = true;

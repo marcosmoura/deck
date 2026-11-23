@@ -1,12 +1,10 @@
-//! The colours, border style and glyphs of deck's own UI (`[theme]` in `config.toml`):
+//! The colours and border style of deck's own UI (`[theme]` in `config.toml`):
 //! colour syntax, role references and the resolved [`Theme`].
 
 use serde::{Deserialize, Serialize};
 use toml::{Table, Value};
-use unicode_width::UnicodeWidthStr;
 
 use crate::config::Warning;
-use crate::icons::IconKind;
 use crate::protocol::Color;
 
 /// The colour roles, in the order of [`Theme::colors`].
@@ -118,225 +116,6 @@ impl BorderStyle {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Glyphs {
-    pub expanded: String,
-    pub collapsed: String,
-    /// The frames of the spinner of a working agent, one cell wide each.
-    pub spinner: Vec<String>,
-    /// An agent that needs the user.
-    pub waiting: String,
-    /// An agent that finished its turn.
-    pub idle: String,
-    /// An agent found by its process that is not printing.
-    pub quiet: String,
-    /// Marks a panel whose agent needed the user or finished while nobody looked.
-    pub unseen: String,
-}
-
-/// The default spinner: braille frames.
-const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-impl Default for Glyphs {
-    fn default() -> Self {
-        Self {
-            expanded: "▾".into(),
-            collapsed: "▸".into(),
-            spinner: SPINNER.iter().map(ToString::to_string).collect(),
-            waiting: "!".into(),
-            idle: "●".into(),
-            quiet: "○".into(),
-            unseen: "•".into(),
-        }
-    }
-}
-
-/// Which glyphs the program icons use: `[theme] icons`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IconPreset {
-    /// Plain Unicode that every font has.
-    Unicode,
-    /// Font Awesome glyphs of the Nerd Fonts.
-    Nerd,
-    /// No icons are drawn.
-    None,
-}
-
-impl IconPreset {
-    fn parse(text: &str) -> Option<Self> {
-        match text {
-            "unicode" => Some(Self::Unicode),
-            "nerd" => Some(Self::Nerd),
-            "none" => Some(Self::None),
-            _ => None,
-        }
-    }
-}
-
-/// Whether the agents' logos are drawn as images where the terminal can: `[theme] icon_images`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IconImages {
-    /// Images in Ghostty and kitty, text icons elsewhere.
-    Auto,
-    /// Text icons only.
-    Off,
-}
-
-impl IconImages {
-    fn parse(text: &str) -> Option<Self> {
-        match text {
-            "auto" => Some(Self::Auto),
-            "off" => Some(Self::Off),
-            _ => None,
-        }
-    }
-}
-
-/// The glyph of each icon kind, one cell wide.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IconGlyphs {
-    pub claude: String,
-    pub codex: String,
-    pub opencode: String,
-    pub terminal: String,
-    pub editor: String,
-    pub git: String,
-    pub monitor: String,
-    pub remote: String,
-    pub build: String,
-    pub pager: String,
-    pub repl: String,
-}
-
-impl IconGlyphs {
-    /// The glyphs of a preset (`None` has the `Unicode` ones; they are not drawn).
-    pub fn preset(preset: IconPreset) -> Self {
-        let g = |text: &str| text.to_string();
-        match preset {
-            IconPreset::Unicode | IconPreset::None => Self {
-                claude: g("✻"),
-                codex: g("◎"),
-                opencode: g("◇"),
-                terminal: g("❯"),
-                editor: g("✎"),
-                git: g("±"),
-                monitor: g("◔"),
-                remote: g("⇄"),
-                build: g("▲"),
-                pager: g("¶"),
-                repl: g("λ"),
-            },
-            // Codicons for the agents and Font Awesome for the rest, checked against Nerd
-            // Fonts' `glyphnames.json` (3.5.1). Nerd Fonts has no OpenCode logo: `▣` stands in.
-            IconPreset::Nerd => Self {
-                claude: g("\u{ec82}"),   // nf-cod-claude
-                codex: g("\u{ec81}"),    // nf-cod-openai
-                opencode: g("▣"),        // no Nerd Font glyph
-                terminal: g("\u{f120}"), // nf-fa-terminal
-                editor: g("\u{f040}"),   // nf-fa-pencil
-                git: g("\u{f126}"),      // nf-fa-code_fork
-                monitor: g("\u{f0e4}"),  // nf-fa-tachometer
-                remote: g("\u{f0ec}"),   // nf-fa-exchange
-                build: g("\u{f013}"),    // nf-fa-cog
-                pager: g("\u{f02d}"),    // nf-fa-book
-                repl: g("\u{f121}"),     // nf-fa-code
-            },
-        }
-    }
-
-    pub fn get(&self, kind: IconKind) -> &str {
-        match kind {
-            IconKind::Claude => &self.claude,
-            IconKind::Codex => &self.codex,
-            IconKind::OpenCode => &self.opencode,
-            IconKind::Terminal => &self.terminal,
-            IconKind::Editor => &self.editor,
-            IconKind::Git => &self.git,
-            IconKind::Monitor => &self.monitor,
-            IconKind::Remote => &self.remote,
-            IconKind::Build => &self.build,
-            IconKind::Pager => &self.pager,
-            IconKind::Repl => &self.repl,
-        }
-    }
-
-    fn set(&mut self, kind: IconKind, glyph: String) {
-        let slot = match kind {
-            IconKind::Claude => &mut self.claude,
-            IconKind::Codex => &mut self.codex,
-            IconKind::OpenCode => &mut self.opencode,
-            IconKind::Terminal => &mut self.terminal,
-            IconKind::Editor => &mut self.editor,
-            IconKind::Git => &mut self.git,
-            IconKind::Monitor => &mut self.monitor,
-            IconKind::Remote => &mut self.remote,
-            IconKind::Build => &mut self.build,
-            IconKind::Pager => &mut self.pager,
-            IconKind::Repl => &mut self.repl,
-        };
-        *slot = glyph;
-    }
-}
-
-/// The colour of each agent icon; `None` draws the icon in its row's colour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IconColors {
-    pub claude: Option<Color>,
-    pub codex: Option<Color>,
-    pub opencode: Option<Color>,
-}
-
-/// Claude's brand colour, the default of `claude`.
-const CLAUDE_COLOR: Color = Color::Rgb(0xd9, 0x77, 0x57);
-
-impl Default for IconColors {
-    fn default() -> Self {
-        Self {
-            claude: Some(CLAUDE_COLOR),
-            codex: None,
-            opencode: None,
-        }
-    }
-}
-
-impl IconColors {
-    /// The colour of an icon kind; only the agents have one.
-    pub fn get(&self, kind: IconKind) -> Option<Color> {
-        match kind {
-            IconKind::Claude => self.claude,
-            IconKind::Codex => self.codex,
-            IconKind::OpenCode => self.opencode,
-            _ => None,
-        }
-    }
-}
-
-/// A glyph: a string one cell wide.
-fn one_cell(path: &str, value: &toml::Value) -> Result<String, ThemeError> {
-    let text = value
-        .as_str()
-        .ok_or_else(|| bad(path, "expected a string"))?;
-    let cells = text.width();
-    if cells != 1 {
-        return Err(bad(
-            path,
-            format!("a glyph must be one cell wide, `{text}` is {cells}"),
-        ));
-    }
-    Ok(text.to_string())
-}
-
-/// The spinner: a non-empty array of glyphs.
-fn spinner_frames(path: &str, value: &toml::Value) -> Result<Vec<String>, ThemeError> {
-    let items = value
-        .as_array()
-        .ok_or_else(|| bad(path, "expected an array of glyphs"))?;
-    if items.is_empty() {
-        return Err(bad(path, "the spinner needs at least one frame"));
-    }
-    items.iter().map(|v| one_cell(path, v)).collect()
-}
-
 /// A `[theme]` value that cannot be used; `key` is its full name, e.g. `theme.accent`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeError {
@@ -370,11 +149,6 @@ pub struct Theme {
     pub overlay_bg: Color,
     pub hover: Color,
     pub border_style: BorderStyle,
-    pub glyphs: Glyphs,
-    pub icons: IconPreset,
-    pub icon_images: IconImages,
-    pub icon_glyphs: IconGlyphs,
-    pub icon_colors: IconColors,
 }
 
 /// The default of each role, in the order of [`ROLES`].
@@ -396,20 +170,6 @@ const DEFAULTS: [ThemeColor; 16] = [
     ThemeColor::Default,
     ThemeColor::Indexed(8),
 ];
-
-/// A colour whose role references are resolved, given the resolved roles.
-fn resolved(c: ThemeColor, roles: &[Color; 16]) -> Color {
-    match c {
-        ThemeColor::Default => Color::Default,
-        ThemeColor::Indexed(n) => Color::Indexed(n),
-        ThemeColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
-        ThemeColor::Role(name) => ROLES
-            .iter()
-            .zip(roles)
-            .find(|(role, _)| **role == name)
-            .map_or(Color::Default, |(_, c)| *c),
-    }
-}
 
 /// Follows role references until a colour; a loop is an error naming the keys in it.
 fn resolve(raw: &[ThemeColor; 16]) -> Result<[Color; 16], ThemeError> {
@@ -446,15 +206,7 @@ fn resolve(raw: &[ThemeColor; 16]) -> Result<[Color; 16], ThemeError> {
 }
 
 impl Theme {
-    fn from_parts(
-        c: [Color; 16],
-        border_style: BorderStyle,
-        glyphs: Glyphs,
-        icons: IconPreset,
-        icon_images: IconImages,
-        icon_glyphs: IconGlyphs,
-        icon_colors: IconColors,
-    ) -> Self {
+    fn from_parts(c: [Color; 16], border_style: BorderStyle) -> Self {
         let [
             accent,
             muted,
@@ -491,11 +243,6 @@ impl Theme {
             overlay_bg,
             hover,
             border_style,
-            glyphs,
-            icons,
-            icon_images,
-            icon_glyphs,
-            icon_colors,
         }
     }
 
@@ -503,11 +250,6 @@ impl Theme {
     pub fn parse(table: &Table, warnings: &mut Vec<Warning>) -> Result<Self, ThemeError> {
         let mut raw = DEFAULTS;
         let mut border_style = BorderStyle::Rounded;
-        let mut glyphs = Glyphs::default();
-        let mut icons = IconPreset::Unicode;
-        let mut icon_images = IconImages::Auto;
-        let mut overrides = Vec::new();
-        let mut colors: Vec<(IconKind, Option<ThemeColor>)> = Vec::new();
         for (key, value) in table {
             let path = format!("theme.{key}");
             if let Some((_, slot)) = ROLES
@@ -528,118 +270,16 @@ impl Theme {
                             )
                         })?;
                 }
-                "glyphs" => {
-                    let table = value
-                        .as_table()
-                        .ok_or_else(|| bad(&path, "expected a table"))?;
-                    for (name, value) in table {
-                        let path = format!("{path}.{name}");
-                        if name == "spinner" {
-                            glyphs.spinner = spinner_frames(&path, value)?;
-                            continue;
-                        }
-                        let slot = match name.as_str() {
-                            "expanded" => &mut glyphs.expanded,
-                            "collapsed" => &mut glyphs.collapsed,
-                            "waiting" => &mut glyphs.waiting,
-                            "idle" => &mut glyphs.idle,
-                            "quiet" => &mut glyphs.quiet,
-                            "unseen" => &mut glyphs.unseen,
-                            _ => {
-                                warnings.push(Warning::unknown_key(&path));
-                                continue;
-                            }
-                        };
-                        *slot = one_cell(&path, value)?;
-                    }
-                }
-                "icons" => {
-                    icons = value
-                        .as_str()
-                        .and_then(IconPreset::parse)
-                        .ok_or_else(|| bad(&path, "expected \"unicode\", \"nerd\" or \"none\""))?;
-                }
-                "icon_images" => {
-                    icon_images = value
-                        .as_str()
-                        .and_then(IconImages::parse)
-                        .ok_or_else(|| bad(&path, "expected \"auto\" or \"off\""))?;
-                }
-                "icon_glyphs" => {
-                    let table = value
-                        .as_table()
-                        .ok_or_else(|| bad(&path, "expected a table"))?;
-                    for (name, value) in table {
-                        let path = format!("{path}.{name}");
-                        let kind = IconKind::parse(name).ok_or_else(|| {
-                            let kinds = IconKind::ALL.map(IconKind::name).join(", ");
-                            bad(
-                                &path,
-                                format!("unknown icon `{name}`; expected one of {kinds}"),
-                            )
-                        })?;
-                        overrides.push((kind, one_cell(&path, value)?));
-                    }
-                }
-                "icon_colors" => {
-                    let table = value
-                        .as_table()
-                        .ok_or_else(|| bad(&path, "expected a table"))?;
-                    for (name, value) in table {
-                        let path = format!("{path}.{name}");
-                        let kind = match name.as_str() {
-                            "claude" => IconKind::Claude,
-                            "codex" => IconKind::Codex,
-                            "opencode" => IconKind::OpenCode,
-                            _ => {
-                                return Err(bad(
-                                    &path,
-                                    format!(
-                                        "unknown icon `{name}`; expected claude, codex or opencode"
-                                    ),
-                                ));
-                            }
-                        };
-                        let color = if value.as_str() == Some("none") {
-                            None
-                        } else {
-                            Some(ThemeColor::from_value(value).map_err(|m| {
-                                bad(&path, format!("{m}, or \"none\" for the row's colour"))
-                            })?)
-                        };
-                        colors.push((kind, color));
-                    }
+                "icons" | "icon_images" | "glyphs" | "icon_glyphs" | "icon_colors" => {
+                    warnings.push(Warning {
+                        key: path.clone(),
+                        message: format!("{path} was removed: deck ships its own icons"),
+                    });
                 }
                 _ => warnings.push(Warning::unknown_key(&path)),
             }
         }
-        let roles = resolve(&raw)?;
-        let mut icon_colors = IconColors::default();
-        for (kind, color) in colors {
-            let color = color.map(|c| resolved(c, &roles));
-            match kind {
-                IconKind::Claude => icon_colors.claude = color,
-                IconKind::Codex => icon_colors.codex = color,
-                IconKind::OpenCode => icon_colors.opencode = color,
-                _ => {}
-            }
-        }
-        // `none` ignores the overrides; they are still checked above.
-        let mut icon_glyphs = IconGlyphs::preset(icons);
-        if icons != IconPreset::None {
-            for (kind, glyph) in overrides {
-                icon_glyphs.set(kind, glyph);
-            }
-        }
-        Ok(Self::from_parts(
-            roles,
-            border_style,
-            glyphs,
-            icons,
-            icon_images,
-            icon_glyphs,
-            icon_colors,
-        ))
+        Ok(Self::from_parts(resolve(&raw)?, border_style))
     }
 }
 
@@ -650,15 +290,7 @@ impl Default for Theme {
     )]
     fn default() -> Self {
         let colors = resolve(&DEFAULTS).expect("the default roles do not loop");
-        Self::from_parts(
-            colors,
-            BorderStyle::Rounded,
-            Glyphs::default(),
-            IconPreset::Unicode,
-            IconImages::Auto,
-            IconGlyphs::preset(IconPreset::Unicode),
-            IconColors::default(),
-        )
+        Self::from_parts(colors, BorderStyle::Rounded)
     }
 }
 
@@ -679,7 +311,6 @@ mod tests {
         );
         assert_eq!(t.status_bg, Color::Default);
         assert_eq!(t.border_style, BorderStyle::Rounded);
-        assert_eq!(t.glyphs.collapsed, "▸");
     }
 
     fn parse(text: &str) -> Result<Theme, ThemeError> {
@@ -728,13 +359,29 @@ mod tests {
     }
 
     #[test]
-    fn the_removed_active_glyph_warns() {
-        let table: Table = "[glyphs]\nactive = \"|\"".parse().unwrap();
-        let mut warnings = Vec::new();
-        let t = Theme::parse(&table, &mut warnings).unwrap();
-        assert_eq!(t, Theme::default());
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert_eq!(warnings[0].key, "theme.glyphs.active");
+    fn each_removed_icon_key_warns_once_and_changes_nothing() {
+        for (text, key) in [
+            ("icons = \"nerd\"", "theme.icons"),
+            ("icon_images = \"off\"", "theme.icon_images"),
+            ("icons = 1", "theme.icons"),
+            (
+                "[glyphs]\nexpanded = \"a\"\ncollapsed = \"b\"\nidle = \"日\"",
+                "theme.glyphs",
+            ),
+            ("[icon_glyphs]\nclaude = \"C\"", "theme.icon_glyphs"),
+            ("[icon_colors]\nclaude = \"none\"", "theme.icon_colors"),
+        ] {
+            let table: Table = text.parse().unwrap();
+            let mut warnings = Vec::new();
+            let t = Theme::parse(&table, &mut warnings).unwrap();
+            assert_eq!(t, Theme::default(), "{text}");
+            assert_eq!(warnings.len(), 1, "{text}: {warnings:?}");
+            assert_eq!(warnings[0].key, key);
+            assert_eq!(
+                warnings[0].message,
+                format!("{key} was removed: deck ships its own icons")
+            );
+        }
     }
 
     #[test]
@@ -757,22 +404,6 @@ mod tests {
             ("title = \"title\"", "theme.title"),
             ("border_style = \"dotted\"", "theme.border_style"),
             ("border_style = 1", "theme.border_style"),
-            ("[glyphs]\ncollapsed = \"日\"", "theme.glyphs.collapsed"),
-            ("[glyphs]\nexpanded = \"\"", "theme.glyphs.expanded"),
-            ("[glyphs]\nexpanded = \"ab\"", "theme.glyphs.expanded"),
-            ("glyphs = 1", "theme.glyphs"),
-            ("icons = \"emoji\"", "theme.icons"),
-            ("icons = true", "theme.icons"),
-            ("icon_images = \"always\"", "theme.icon_images"),
-            ("icon_images = true", "theme.icon_images"),
-            ("icon_glyphs = 1", "theme.icon_glyphs"),
-            ("[icon_glyphs]\nclaude = \"日\"", "theme.icon_glyphs.claude"),
-            ("[icon_glyphs]\ngit = \"\"", "theme.icon_glyphs.git"),
-            ("[icon_glyphs]\nbogus = \"x\"", "theme.icon_glyphs.bogus"),
-            (
-                "icons = \"none\"\n[icon_glyphs]\nrepl = \"ab\"",
-                "theme.icon_glyphs.repl",
-            ),
         ] {
             let err = parse(text).unwrap_err();
             assert_eq!(err.key, key, "{text}: {}", err.message);
@@ -786,15 +417,12 @@ mod tests {
     }
 
     #[test]
-    fn styles_and_glyphs() {
-        let t = parse("border_style = \"double\"\n[glyphs]\ncollapsed = \">\"").unwrap();
-        assert_eq!(t.border_style, BorderStyle::Double);
-        assert_eq!(t.glyphs.collapsed, ">");
-        assert_eq!(t.glyphs.expanded, "▾");
+    fn border_styles_parse() {
         for (text, style) in [
             ("rounded", BorderStyle::Rounded),
             ("plain", BorderStyle::Plain),
             ("thick", BorderStyle::Thick),
+            ("double", BorderStyle::Double),
         ] {
             let t = parse(&format!("border_style = \"{text}\"")).unwrap();
             assert_eq!(t.border_style, style);
@@ -803,90 +431,11 @@ mod tests {
 
     #[test]
     fn unknown_keys_warn_and_empty_is_the_default() {
-        let table: Table = "colour = 1\n[glyphs]\nstar = \"*\"".parse().unwrap();
+        let table: Table = "colour = 1\nother = 2".parse().unwrap();
         let mut warnings = Vec::new();
         let t = Theme::parse(&table, &mut warnings).unwrap();
         assert_eq!(t, Theme::default());
         assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert_eq!(parse("").unwrap(), Theme::default());
-    }
-
-    #[test]
-    fn the_icon_presets_are_one_cell_wide_and_distinct() {
-        for preset in [IconPreset::Unicode, IconPreset::Nerd] {
-            let glyphs = IconGlyphs::preset(preset);
-            let mut seen = Vec::new();
-            for kind in IconKind::ALL {
-                let glyph = glyphs.get(kind);
-                assert_eq!(glyph.width(), 1, "{preset:?} {}", kind.name());
-                assert!(!seen.contains(&glyph), "{preset:?} repeats {glyph}");
-                seen.push(glyph);
-            }
-        }
-        assert_eq!(parse("").unwrap().icons, IconPreset::Unicode);
-        assert_eq!(
-            parse("icons = \"nerd\"").unwrap().icon_glyphs.claude,
-            "\u{ec82}"
-        );
-        assert_eq!(
-            parse("icons = \"unicode\"").unwrap().icon_glyphs.terminal,
-            "❯"
-        );
-        assert_eq!(parse("icons = \"none\"").unwrap().icons, IconPreset::None);
-    }
-
-    #[test]
-    fn icon_images_is_auto_or_off() {
-        assert_eq!(parse("").unwrap().icon_images, IconImages::Auto);
-        assert_eq!(
-            parse("icon_images = \"off\"").unwrap().icon_images,
-            IconImages::Off
-        );
-        assert_eq!(
-            parse("icon_images = \"auto\"").unwrap().icon_images,
-            IconImages::Auto
-        );
-    }
-
-    #[test]
-    fn icon_colors_default_to_claude_only_and_take_roles_and_none() {
-        let t = Theme::default();
-        assert_eq!(t.icon_colors.get(IconKind::Claude), Some(CLAUDE_COLOR));
-        assert_eq!(t.icon_colors.get(IconKind::Codex), None);
-        assert_eq!(t.icon_colors.get(IconKind::Git), None);
-        let t = parse(
-            "accent = \"#102030\"\n[icon_colors]\nclaude = \"none\"\ncodex = \"accent\"\nopencode = 5",
-        )
-        .unwrap();
-        assert_eq!(t.icon_colors.claude, None);
-        assert_eq!(t.icon_colors.codex, Some(Color::Rgb(0x10, 0x20, 0x30)));
-        assert_eq!(t.icon_colors.opencode, Some(Color::Indexed(5)));
-    }
-
-    #[test]
-    fn bad_icon_colors_name_the_key() {
-        for (text, key) in [
-            ("[icon_colors]\ngit = \"red\"", "theme.icon_colors.git"),
-            (
-                "[icon_colors]\nclaude = \"nope\"",
-                "theme.icon_colors.claude",
-            ),
-            ("icon_colors = 1", "theme.icon_colors"),
-        ] {
-            assert_eq!(parse(text).unwrap_err().key, key, "{text}");
-        }
-    }
-
-    #[test]
-    fn single_icons_can_be_overridden() {
-        let t = parse("[icon_glyphs]\nclaude = \"C\"").unwrap();
-        assert_eq!(t.icon_glyphs.claude, "C");
-        assert_eq!(t.icon_glyphs.codex, "◎");
-        let t = parse("icons = \"nerd\"\n[icon_glyphs]\ngit = \"G\"").unwrap();
-        assert_eq!(t.icon_glyphs.git, "G");
-        assert_eq!(t.icon_glyphs.editor, "\u{f040}");
-        // With `none` the overrides are ignored.
-        let t = parse("icons = \"none\"\n[icon_glyphs]\ngit = \"G\"").unwrap();
-        assert_eq!(t.icon_glyphs, IconGlyphs::preset(IconPreset::Unicode));
     }
 }

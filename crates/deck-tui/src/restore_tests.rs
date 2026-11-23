@@ -700,7 +700,7 @@ fn row_text(a: &App, y: u16, from: u16, to: u16) -> String {
 fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_the_new_chip() {
     let mut a = app();
     let y = chip_row(&a);
-    assert_eq!(row_text(&a, y, 0, 29), "  + New             Resume  │");
+    assert_eq!(row_text(&a, y, 0, 29), "  +  New         ↻  Resume  │");
     moved(&mut a, 20, y);
     assert_eq!(a.hover, Some(Hover::Restore));
     let buf = buffer(&a);
@@ -714,9 +714,9 @@ fn the_button_is_drawn_at_the_right_of_the_bar_and_hovers_like_the_new_chip() {
     assert_eq!(a.hover, Some(Hover::New));
     moved(&mut a, 10, y);
     assert_eq!(a.hover, None);
-    moved(&mut a, 18, y);
+    moved(&mut a, 15, y);
     assert_eq!(a.hover, None);
-    moved(&mut a, 19, y);
+    moved(&mut a, 16, y);
     assert_eq!(a.hover, Some(Hover::Restore));
     moved(&mut a, 27, y);
     assert_eq!(a.hover, None);
@@ -730,10 +730,10 @@ fn at_a_sidebar_of_twenty_columns_the_button_is_a_single_glyph() {
     };
     let mut a = app_with(&config, SIZE, two_projects());
     let y = chip_row(&a);
-    assert_eq!(row_text(&a, y, 0, 21), "  +              ↻  │");
+    assert_eq!(row_text(&a, y, 0, 21), "  +             ↻   │");
     moved(&mut a, 16, y);
     assert_eq!(a.hover, Some(Hover::Restore));
-    moved(&mut a, 15, y);
+    moved(&mut a, 14, y);
     assert_eq!(a.hover, None);
     let outs = click(&mut a, 17, y);
     assert!(a.restore.is_some());
@@ -946,6 +946,7 @@ fn an_answer_does_not_snap_a_wheel_scrolled_column_back() {
 fn with_images_the_headings_draw_logos_sent_before_the_frame() {
     let mut a = opened();
     a.truecolor = true;
+    a.tier = crate::tier::Tier::Image;
     a.images = Some(crate::graphics::Images::new(
         Some((10, 20, 30)),
         Some((1, 1, 1)),

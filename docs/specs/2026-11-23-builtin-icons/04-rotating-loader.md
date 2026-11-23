@@ -1,13 +1,13 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 04 — A rotating loader at 60 frames per second
 
 ## Scope
 
-In Ghostty and kitty (the `Image` tier), a working agent's status mark is Hugeicons' `Loading02` turning smoothly, one revolution per second at 60 frames per second, in the sidebar and in grid border titles. The `Nerd` and `Unicode` tiers keep their glyph frames every 100 ms. Owning crate: `deck-tui`.
+In Ghostty and kitty (the `Image` tier), a working agent's status mark is Hugeicons' `LoaderCircle` turning smoothly, one revolution per second at 60 frames per second, in the sidebar and in grid border titles. The `Nerd` and `Unicode` tiers keep their glyph frames every 100 ms. Owning crate: `deck-tui`.
 
 ## Requirements
 

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Default Bookmark Guid</key>
+	<string>B2C1A0F4-0000-4000-8000-00000000000B</string>
+	<key>New Bookmarks</key>
+	<array>
+		<dict>
+			<key>Guid</key>
+			<string>A1B2C3D4-0000-4000-8000-00000000000A</string>
+			<key>Name</key>
+			<string>Plain</string>
+			<key>Normal Font</key>
+			<string>Monaco 12</string>
+			<key>Non Ascii Font</key>
+			<string>Hack Nerd Font 12</string>
+			<key>Use Non-ASCII Font</key>
+			<false/>
+			<key>Columns</key>
+			<integer>80</integer>
+		</dict>
+		<dict>
+			<key>Guid</key>
+			<string>B2C1A0F4-0000-4000-8000-00000000000B</string>
+			<key>Name</key>
+			<string>Nerd &amp; Co</string>
+			<key>Normal Font</key>
+			<string>JetBrainsMonoNFM-Regular 13</string>
+			<key>Non Ascii Font</key>
+			<string>Monaco 12</string>
+			<key>Use Non-ASCII Font</key>
+			<false/>
+		</dict>
+		<dict>
+			<key>Guid</key>
+			<string>C3D2E1F0-0000-4000-8000-00000000000C</string>
+			<key>Name</key>
+			<string>Split</string>
+			<key>Normal Font</key>
+			<string>Menlo-Regular 12</string>
+			<key>Non Ascii Font</key>
+			<string>Symbols Nerd Font Mono 12</string>
+			<key>Use Non-ASCII Font</key>
+			<true/>
+			<key>Custom Directory</key>
+			<string/>
+		</dict>
+		<dict>
+			<key>Guid</key>
+			<string>D4E3F2A1-0000-4000-8000-00000000000D</string>
+			<key>Name</key>
+			<string>Mixed</string>
+			<key>Normal Font</key>
+			<string>JetBrainsMonoNFM-Regular 13</string>
+			<key>Non Ascii Font</key>
+			<string>Monaco 12</string>
+			<key>Use Non-ASCII Font</key>
+			<true/>
+		</dict>
+	</array>
+</dict>
+</plist>

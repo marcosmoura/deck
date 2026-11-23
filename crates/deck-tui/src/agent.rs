@@ -1,8 +1,9 @@
-//! The glyphs of coding agents: the sidebar's status column and the terminal titles. Every
-//! glyph and colour comes from the theme.
+//! The status icons of coding agents: the sidebar's status column and the terminal titles.
+//! Every colour comes from the theme.
 
 use deck_core::agents::{AgentKind, AgentStatus};
 use deck_core::config::NotifyMode;
+use deck_core::icons::Icon;
 use deck_core::model::{PanelId, PanelView, ProjectView, SessionView, TerminalId, TerminalView};
 use deck_core::theme::Theme;
 use ratatui::style::{Modifier, Style};
@@ -36,41 +37,27 @@ pub fn panel_status(panel: &PanelView) -> AgentStatus {
     )
 }
 
-/// The glyph of a status and its style (foreground and weight only); `spin` is the spinner's
-/// frame counter. `None` for no agent.
-pub fn glyph(status: AgentStatus, spin: usize, theme: &Theme) -> Option<(String, Style)> {
-    let glyphs = &theme.glyphs;
-    let frame = || {
-        glyphs
-            .spinner
-            .get(spin % glyphs.spinner.len().max(1))
-            .cloned()
-            .unwrap_or_default()
-    };
+/// The icon of a status and its style (foreground and weight only). `None` for no agent.
+pub fn status_icon(status: AgentStatus, theme: &Theme) -> Option<(Icon, Style)> {
     let plain = |c| Style::new().fg(color(c));
     match status {
         AgentStatus::None => None,
-        AgentStatus::Working => Some((frame(), plain(theme.accent))),
-        AgentStatus::Active => Some((frame(), plain(theme.accent))),
+        AgentStatus::Working | AgentStatus::Active => Some((Icon::Spinner, plain(theme.accent))),
         AgentStatus::Waiting => Some((
-            glyphs.waiting.clone(),
+            Icon::Waiting,
             plain(theme.warning).add_modifier(Modifier::BOLD),
         )),
-        AgentStatus::Idle => Some((glyphs.idle.clone(), plain(theme.ok))),
-        AgentStatus::Quiet => Some((glyphs.quiet.clone(), plain(theme.muted))),
+        AgentStatus::Idle => Some((Icon::Idle, plain(theme.ok))),
+        AgentStatus::Quiet => Some((Icon::Quiet, plain(theme.muted))),
     }
 }
 
-/// What a terminal's title starts with when an agent runs in it: its glyph, style and the
-/// agent's name.
-pub fn title_mark(
-    terminal: &TerminalView,
-    spin: usize,
-    theme: &Theme,
-) -> Option<(String, Style, &'static str)> {
+/// What a terminal's title starts with when an agent runs in it: its status icon, style and
+/// the agent's name.
+pub fn title_mark(terminal: &TerminalView, theme: &Theme) -> Option<(Icon, Style, &'static str)> {
     let agent = terminal.agent.as_ref()?;
-    let (text, style) = glyph(agent.status, spin, theme)?;
-    Some((text, style, agent.kind.name()))
+    let (icon, style) = status_icon(agent.status, theme)?;
+    Some((icon, style, agent.kind.name()))
 }
 
 /// How many panels of a project wait for the user.

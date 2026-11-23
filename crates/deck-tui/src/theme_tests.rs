@@ -31,8 +31,6 @@ selection_fg = "black"
 selection_bg = "yellow"
 overlay_bg = 18
 border_style = "plain"
-[theme.glyphs]
-collapsed = ">"
 "##;
 
 fn app(theme: &str) -> App {
@@ -98,9 +96,9 @@ fn the_sidebar_follows_the_theme() {
     assert_eq!(buf[(10, 5)].bg, Color::Indexed(236));
     assert_eq!(buf[(5, 5)].fg, Color::Gray);
     assert_eq!(buf[(28, 0)].fg, Color::Cyan);
-    let (x, y) = find(&buf, "> dotfiles");
-    assert_eq!(buf[(x, y)].symbol(), ">");
-    assert_eq!(buf[(x, y)].fg, Color::LightRed);
+    let (_, y) = find(&buf, "dotfiles");
+    assert_eq!(buf[(25, y)].symbol(), "▸");
+    assert_eq!(buf[(25, y)].fg, Color::LightRed);
 }
 
 #[test]
@@ -151,9 +149,9 @@ fn the_selection_uses_the_selection_roles() {
     // The active panel's row keeps the selection colour, bold, when it is selected.
     let (x, y) = (0, 3);
     assert_eq!(buf[(x, y)].bg, Color::Yellow);
-    assert_eq!(buf[(x + 3, y)].fg, Color::Black);
+    assert_eq!(buf[(x + 4, y)].fg, Color::Black);
     assert!(
-        buf[(x + 3, y)]
+        buf[(x + 4, y)]
             .modifier
             .contains(ratatui::style::Modifier::BOLD)
     );

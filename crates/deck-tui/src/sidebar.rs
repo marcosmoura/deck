@@ -2,11 +2,11 @@
 //! drawing.
 
 use deck_core::action::Action as Act;
-use deck_core::icons::{IconKind, icon_for};
+use deck_core::icons::{Icon, IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::model::{PanelId, PanelView, ProjectId, SessionView};
 use deck_core::naming::source_terminal_view;
-use deck_core::theme::{IconPreset, Theme};
+use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
 use ratatui::layout::Rect;
@@ -14,9 +14,10 @@ use ratatui::style::{Modifier, Style};
 
 use crate::agent;
 use crate::app::{App, Out, too_small};
-use crate::convert::image_id_color;
+use crate::convert::{claude_color, image_id_color};
 use crate::draw::{color, selection, truncate, width};
-use crate::graphics::{Logo, Pair, placeholder};
+use crate::graphics::{Pair, has_image, placeholder};
+use crate::tier::Tier;
 
 /// The session name and a blank row above the project rows.
 pub const HEADER_ROWS: u16 = 2;
@@ -69,9 +70,10 @@ pub enum Hover {
 
 /// Cells an icon takes: a text icon and a blank, or a logo.
 pub const ICON_CELLS: u16 = 2;
-/// The column the icon of a panel row starts in, and the one its name starts in with icons.
-const ICON_X: u16 = 3;
-const NAME_X_ICONS: u16 = ICON_X + ICON_CELLS + 1;
+/// The column of a panel row's icon, and the one its name starts after it. The status slot is
+/// on the right.
+const ICON_X: u16 = 1;
+const NAME_X: u16 = ICON_X + ICON_CELLS + 1;
 
 /// Rows the bottom bar and its spacer take in a sidebar `height` rows tall.
 fn bar_rows(height: u16) -> u16 {
@@ -82,46 +84,60 @@ fn bar_rows(height: u16) -> u16 {
     }
 }
 
-/// The `New space` chip of the header: `" + New space "`, or `" + "` in a narrow sidebar.
-fn new_project_chip(width: u16) -> &'static str {
-    if width < BAR_WIDE {
-        " + "
-    } else {
-        " + New space "
-    }
+/// The label of the `New space` chip of the header.
+const NEW_PROJECT_LABEL: &str = "New space";
+/// The label of the `New` chip of the bottom bar.
+const NEW_LABEL: &str = "New";
+/// The label of the `Resume` chip of the bottom bar.
+const RESUME_LABEL: &str = "Resume";
+
+/// The columns a chip takes in a sidebar `w` columns wide: a space, the icon's slot and a
+/// space; in a wide sidebar a space and the label come before the last space.
+fn chip_cells(w: u16, label: &str) -> u16 {
+    let text = if w < BAR_WIDE { 0 } else { 1 + width(label) };
+    1 + ICON_CELLS + text + 1
 }
 
-/// The `New` chip: `" + New "`, or `" + "` in a narrow sidebar.
-fn new_chip(width: u16) -> &'static str {
-    if width < BAR_WIDE { " + " } else { " + New " }
+/// Draws a chip's icon and label at column `x` of row `y`; the caller styled its cells.
+fn draw_chip(
+    app: &App,
+    buf: &mut Buffer,
+    (x, y): (u16, u16),
+    w: u16,
+    icon: Icon,
+    label: &str,
+    style: Style,
+) {
+    let (slot, slot_style) = icon_slot(app, icon, style);
+    buf.set_stringn(x + 1, y, &slot, usize::from(ICON_CELLS), slot_style);
+    if w >= BAR_WIDE {
+        buf.set_stringn(
+            x + 1 + ICON_CELLS,
+            y,
+            format!(" {label}"),
+            usize::from(1 + width(label)),
+            style,
+        );
+    }
 }
 
 /// The columns the `New space` chip takes in a sidebar `w` columns wide: right-aligned on
 /// the header row, with a margin of one column.
 fn new_project_span(w: u16) -> std::ops::Range<u16> {
-    let cells = width(new_project_chip(w));
+    let cells = chip_cells(w, NEW_PROJECT_LABEL);
     let x = w.saturating_sub(1 + cells);
     x..x + cells
 }
 
 /// The columns the `New` chip takes: from the second column.
 fn new_span(w: u16) -> std::ops::Range<u16> {
-    1..1 + width(new_chip(w))
-}
-
-/// The `Resume` chip: `" Resume "`, or `" ↻ "` in a narrow sidebar.
-fn restore_chip(width: u16) -> &'static str {
-    if width < BAR_WIDE {
-        " ↻ "
-    } else {
-        " Resume "
-    }
+    1..1 + chip_cells(w, NEW_LABEL)
 }
 
 /// The columns the `Resume` chip takes in a sidebar `w` columns wide: right-aligned, with a
 /// margin of one column.
 fn restore_span(w: u16) -> std::ops::Range<u16> {
-    let cells = width(restore_chip(w));
+    let cells = chip_cells(w, RESUME_LABEL);
     let x = w.saturating_sub(1 + cells);
     x..x + cells
 }
@@ -731,12 +747,9 @@ impl App {
     }
 }
 
-/// The kind of icon of a panel: the one of its source terminal's agent or program; none with
-/// `icons = "none"` or without terminals.
-pub fn panel_icon_kind(panel: &PanelView, theme: &Theme) -> Option<IconKind> {
-    if theme.icons == IconPreset::None {
-        return None;
-    }
+/// The kind of icon of a panel: the one of its source terminal's agent or program; none
+/// without terminals.
+pub fn panel_icon_kind(panel: &PanelView) -> Option<IconKind> {
     let term = source_terminal_view(panel)?;
     Some(icon_for(
         term.agent.as_ref().map(|a| a.kind),
@@ -744,52 +757,64 @@ pub fn panel_icon_kind(panel: &PanelView, theme: &Theme) -> Option<IconKind> {
     ))
 }
 
-/// The style of an icon of `kind` in a row styled `style`: its text in the kind's colour
-/// (`[theme.icon_colors]`) when it has one. On a reversed row the colour goes in the
-/// background, which is what a reversed cell shows as text.
-pub fn icon_style(theme: &Theme, kind: IconKind, style: Style) -> Style {
-    let Some(c) = theme.icon_colors.get(kind) else {
+/// The style of an icon of `kind` in a row styled `style`: Claude's is always its orange. On
+/// a reversed row the colour goes in the background, which is what a reversed cell shows as
+/// text.
+pub fn icon_style(kind: IconKind, style: Style) -> Style {
+    if kind != IconKind::Claude {
         return style;
-    };
+    }
     let reversed = style.add_modifier.contains(Modifier::REVERSED)
         && !style.sub_modifier.contains(Modifier::REVERSED);
     if reversed {
-        style.bg(color(c))
+        style.bg(claude_color())
     } else {
-        style.fg(color(c))
+        style.fg(claude_color())
     }
 }
 
-/// The icon of an icon kind as it is drawn, two cells wide, with the style to draw it in. For a
-/// logo that was sent, the placeholder cells: the visible colours of `style`, no modifiers, the
-/// id as foreground (see [`crate::graphics::Images::cell_for`]); else the text icon and a
-/// blank cell, in `style`.
-pub fn kind_icon_cell(app: &App, theme: &Theme, kind: IconKind, style: Style) -> (String, Style) {
-    let style = icon_style(theme, kind, style);
-    let image = app.logos().and_then(|images| {
-        let (rgb, cell) = images.cell_for(style);
-        let pair = Pair {
-            logo: Logo::of(kind)?,
-            rgb,
-        };
-        images.id(&pair).map(|id| cell.fg(image_id_color(id)))
-    });
+/// An icon as it is drawn: a two-cell slot and the style to draw it in. In the `Image` tier an
+/// icon with an image that was sent is the placeholder cells (the visible colours of `style`,
+/// no modifiers, the id as foreground; see [`crate::graphics::Images::cell_for`]); every other
+/// icon is its glyph of the tier in the first cell and a blank second, in `style`. An image
+/// not sent yet is noted for the pre-pass ([`App::send_images`]) and drawn as its glyph.
+pub fn icon_slot(app: &App, icon: Icon, style: Style) -> (String, Style) {
+    let style = match icon {
+        Icon::Kind(kind) => icon_style(kind, style),
+        _ => style,
+    };
+    let image = app
+        .live_images()
+        .filter(|_| has_image(icon))
+        .and_then(|images| {
+            let (rgb, cell) = images.cell_for(style);
+            let frame = if icon == Icon::Spinner {
+                app.spin_frame
+            } else {
+                0
+            };
+            let pair = Pair { icon, rgb, frame };
+            images.want(pair);
+            images.id(&pair).map(|id| cell.fg(image_id_color(id)))
+        });
     match image {
         Some(cell) => (placeholder(), cell),
-        None => (format!("{} ", theme.icon_glyphs.get(kind)), style),
+        None => {
+            // `spin` steps at 60 Hz in the image tier: its glyph frame follows the clock at 100 ms.
+            let frame = if app.tier == Tier::Image {
+                usize::from(app.spin_frame) / 6
+            } else {
+                app.spin
+            };
+            (format!("{} ", app.tier.glyph(icon, frame)), style)
+        }
     }
 }
 
-/// The icon of a panel as it is drawn (see [`kind_icon_cell`]); none with `icons = "none"` or
-/// without terminals.
-pub fn panel_icon_cell(
-    app: &App,
-    panel: &PanelView,
-    theme: &Theme,
-    style: Style,
-) -> Option<(String, Style)> {
-    let kind = panel_icon_kind(panel, theme)?;
-    Some(kind_icon_cell(app, theme, kind, style))
+/// The icon of a panel as it is drawn (see [`icon_slot`]); none without terminals.
+pub fn panel_icon_cell(app: &App, panel: &PanelView, style: Style) -> Option<(String, Style)> {
+    let kind = panel_icon_kind(panel)?;
+    Some(icon_slot(app, Icon::Kind(kind), style))
 }
 
 /// The style of the sidebar's rows before any of them is selected or active.
@@ -818,13 +843,9 @@ pub fn panel_style(theme: &Theme, base: Style, band: bool, active: bool) -> Styl
     }
 }
 
-/// The caret of the drop target's row: `➤`, or the Nerd Font caret with the `nerd` icons.
-pub fn caret_glyph(theme: &Theme) -> &'static str {
-    if theme.icons == IconPreset::Nerd {
-        "\u{f0da}"
-    } else {
-        "\u{27a4}"
-    }
+/// The caret of the drop target's row: `DropTarget`'s glyph in the tier.
+pub fn caret_glyph(tier: Tier) -> &'static str {
+    tier.glyph(Icon::DropTarget, 0)
 }
 
 /// The style of the dragged row, left in its place: all muted.
@@ -885,7 +906,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         Rect::new(area.x + span.start, area.y, span.end - span.start, 1),
         style,
     );
-    put(buf, area.y, span.start, new_project_chip(w), style);
+    draw_chip(
+        app,
+        buf,
+        (area.x + span.start, area.y),
+        w,
+        Icon::New,
+        NEW_PROJECT_LABEL,
+        style,
+    );
 
     let rows = app.preview_rows();
     let dragged = app.row_drag.map(|d| d.item);
@@ -962,7 +991,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 .fg(color(theme.accent))
                 .add_modifier(Modifier::BOLD)
                 .remove_modifier(Modifier::REVERSED);
-            buf.set_stringn(area.x, y, format!("{} ", caret_glyph(theme)), 2, caret);
+            buf.set_stringn(area.x, y, format!("{} ", caret_glyph(app.tier)), 2, caret);
         }
         let put = |buf: &mut Buffer, y: u16, x: u16, text: &str, style: Style| {
             buf.set_stringn(
@@ -983,34 +1012,40 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 let Some(p) = view.projects.iter().find(|p| p.id == id) else {
                     continue;
                 };
-                let glyph = if p.collapsed {
-                    &theme.glyphs.collapsed
+                let caret = if p.collapsed {
+                    Icon::Collapsed
                 } else {
-                    &theme.glyphs.expanded
+                    Icon::Expanded
                 };
-                put(buf, y, 1, glyph, keep(row_style.patch(muted)));
+                // The caret's slot and the one-cell margin close the row on the right; the
+                // count of a collapsed space comes before it.
+                let slot_x = w.saturating_sub(ICON_CELLS + 1);
+                let (text, caret_style) = icon_slot(app, caret, keep(row_style.patch(muted)));
+                put(buf, y, slot_x, &text, caret_style);
                 let (count, count_w) = if p.collapsed {
                     side(p.panels.len().to_string())
                 } else {
                     (String::new(), 0)
                 };
-                // `!n` after the name of a collapsed project with n waiting panels.
+                // `!n` after the name of a collapsed project with n waiting panels, with the
+                // Unicode glyph in every tier.
                 let waiting = if p.collapsed {
                     agent::waiting_panels(p)
                 } else {
                     0
                 };
-                let badge = (waiting > 0).then(|| format!("{}{waiting}", theme.glyphs.waiting));
+                let badge = (waiting > 0)
+                    .then(|| format!("{}{waiting}", deck_core::icons::unicode(Icon::Waiting, 0)));
                 let badge_w = badge.as_deref().map_or(0, |b| width(b) + 1);
-                let room = w
-                    .saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 })
+                let room = slot_x
+                    .saturating_sub(2 + if count_w > 0 { count_w + 1 } else { 0 })
                     .saturating_sub(badge_w);
                 let mut style = row_style;
                 if view.active_project == Some(id) && !dimmed {
                     style = style.add_modifier(Modifier::BOLD);
                 }
                 let name = truncate(&p.name, room);
-                put(buf, y, 3, &name, style);
+                put(buf, y, 1, &name, style);
                 if let Some(badge) = badge {
                     let warning = Style::new()
                         .fg(color(theme.warning))
@@ -1018,7 +1053,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     put(
                         buf,
                         y,
-                        4 + width(&name),
+                        2 + width(&name),
                         &badge,
                         keep(row_style.patch(warning)),
                     );
@@ -1027,7 +1062,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     put(
                         buf,
                         y,
-                        w.saturating_sub(count_w + 1),
+                        slot_x.saturating_sub(count_w + 1),
                         &count,
                         keep(row_style.patch(muted)),
                     );
@@ -1044,39 +1079,34 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 if dimmed {
                     style = row_style;
                 }
-                // The status column: the panel's most urgent agent.
-                if let Some((text, glyph_style)) =
-                    agent::glyph(agent::panel_status(p), app.spin, theme)
-                {
+                // The status slot closes the row before the margin: the panel's most urgent
+                // agent. Without one there is no slot and no room kept for it.
+                let status = agent::status_icon(agent::panel_status(p), theme);
+                let status_w = if status.is_some() { ICON_CELLS + 1 } else { 0 };
+                if let Some((icon, glyph_style)) = status {
                     // The muted `quiet` glyph turns to the sidebar text under the pointer.
                     let glyph_style = if hovered && glyph_style.fg == Some(color(theme.muted)) {
                         fg(theme.sidebar_fg)
                     } else {
                         glyph_style
                     };
-                    put(buf, y, 1, &text, keep(row_style.patch(glyph_style)));
+                    let (text, slot_style) =
+                        icon_slot(app, icon, keep(row_style.patch(glyph_style)));
+                    put(buf, y, w.saturating_sub(ICON_CELLS + 1), &text, slot_style);
                 }
                 let (count, count_w) = if p.terminals.len() > 1 {
                     side(p.terminals.len().to_string())
                 } else {
                     (String::new(), 0)
                 };
-                let marker_w = if p.unseen {
-                    width(&theme.glyphs.unseen) + 1
-                } else {
-                    0
-                };
+                // The unseen marker is a slot after the name and one space.
+                let marker_w = if p.unseen { ICON_CELLS + 1 } else { 0 };
                 // The icon and its space come before the name.
-                let icon = panel_icon_cell(app, p, theme, style);
-                // With icons on the names all start in the same column.
-                let name_x = if theme.icons == IconPreset::None {
-                    ICON_X
-                } else {
-                    NAME_X_ICONS
-                };
+                let icon = panel_icon_cell(app, p, style);
+                let name_x = NAME_X;
                 let room = w
                     .saturating_sub(name_x + 1 + if count_w > 0 { count_w + 1 } else { 0 })
-                    .saturating_sub(marker_w);
+                    .saturating_sub(marker_w + status_w);
                 if p.unseen && !dimmed {
                     style = style.add_modifier(Modifier::BOLD);
                 }
@@ -1102,19 +1132,15 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 );
                 let name_end = width(&name) + width(&exited);
                 if p.unseen {
-                    put(
-                        buf,
-                        y,
-                        name_x + 1 + name_end,
-                        &theme.glyphs.unseen,
-                        keep(row_style.patch(accent_fg)),
-                    );
+                    let (text, slot_style) =
+                        icon_slot(app, Icon::Unseen, keep(row_style.patch(accent_fg)));
+                    put(buf, y, name_x + 1 + name_end, &text, slot_style);
                 }
                 if count_w > 0 {
                     put(
                         buf,
                         y,
-                        w.saturating_sub(count_w + 1),
+                        w.saturating_sub(count_w + 1 + status_w),
                         &count,
                         keep(row_style.patch(muted)),
                     );
@@ -1127,16 +1153,23 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     if bar_rows(area.height) > 0 {
         let y = area.y + area.height - 1;
         let style = style_of(Hover::New);
-        let text = new_chip(w);
-        let cells = width(text);
+        let cells = chip_cells(w, NEW_LABEL);
         buf.set_style(Rect::new(area.x + 1, y, cells, 1), style);
-        put(buf, y, 1, text, style);
+        draw_chip(app, buf, (area.x + 1, y), w, Icon::New, NEW_LABEL, style);
         let style = style_of(Hover::Restore);
         let span = restore_span(w);
         buf.set_style(
             Rect::new(area.x + span.start, y, span.end - span.start, 1),
             style,
         );
-        put(buf, y, span.start, restore_chip(w), style);
+        draw_chip(
+            app,
+            buf,
+            (area.x + span.start, y),
+            w,
+            Icon::Resume,
+            RESUME_LABEL,
+            style,
+        );
     }
 }

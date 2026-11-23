@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn columns_count_characters_and_an_unreadable_prefix_reports_only_the_syntax() {
-        let r = validate("[theme.glyphs]\nactive = \"é\" bogus\n");
+        let r = validate("[theme]\nactive = \"é\" bogus\n");
         assert_eq!(r.findings.len(), 1, "{r:#?}");
         assert_eq!(r.findings[0].line, 2);
         assert!(r.findings[0].column > 1);

@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 02 — Ask the terminal: graphics, Nerd Font, else Unicode
@@ -61,4 +61,4 @@ The client finds out what the outer terminal can show instead of guessing from a
 ## Notes
 
 - There is no terminal query for "does your font have this glyph"; reading the terminal's font setting, or the fonts fontconfig can fall back to, is the closest deck can get. iTerm2 users who load preferences from a custom folder are not read (the plist is elsewhere); they get `Unicode` unless check 4 applies.
-- Spike results: _to be filled by the worker (requirement 7)._
+- Spike results (by the user, 23 Nov 2026, macOS): Terminal.app with a non-Nerd profile font draws missing-glyph boxes for U+F120, U+EAB4 and U+EC82 although a Nerd Font is installed, so check 4 does not apply to it. iTerm2 is not installed there and stays without check 4; Alacritty is untested and keeps check 4. iTerm2's rule reads the `Non Ascii Font` alone when `Use Non-ASCII Font` is on, because iTerm2 draws non-ASCII glyphs with it. Decided with the user: on macOS, when `fc-list` fails or times out (a cold fontconfig cache can take over 1 s), check 4 falls back to the font-folder scan.

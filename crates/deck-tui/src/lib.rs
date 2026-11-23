@@ -7,6 +7,9 @@ mod app;
 mod bar;
 #[cfg(test)]
 mod bar_tests;
+mod caps;
+#[cfg(test)]
+mod caps_tests;
 mod colors;
 mod context;
 #[cfg(test)]
@@ -53,6 +56,7 @@ mod sidebar_tests;
 mod term;
 #[cfg(test)]
 mod theme_tests;
+mod tier;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -170,7 +174,22 @@ async fn run_async(mut options: Options) -> Exit {
     let mut app = App::new(&Config::default(), size, &probe.leftover).with_dirs(cwd.clone(), home);
     app.truecolor = convert::truecolor(std::env::var("COLORTERM").ok().as_deref());
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    if graphics::detect(&env, deck_core::theme::IconImages::Auto, app.truecolor) {
+    let plan = caps::plan(
+        probe.xtversion.as_deref(),
+        probe.graphics,
+        &env,
+        app.truecolor,
+    );
+    app.tier = plan.tier;
+    // The font check runs on a thread; its answer upgrades the tier once, in the loop below.
+    let mut font_rx = plan.check.map(|check| {
+        let (tx, rx) = mpsc::unbounded_channel::<bool>();
+        std::thread::spawn(move || {
+            let _ = tx.send(check.run());
+        });
+        rx
+    });
+    if app.tier == tier::Tier::Image {
         app.images = Some(graphics::Images::new(
             probe.fg,
             probe.colors.map(|c| c.bg),
@@ -250,11 +269,7 @@ async fn run_async(mut options: Options) -> Exit {
                 app.tick(now);
                 if app.take_dirty() {
                     last_draw = now;
-                    // The images this frame draws go out first.
-                    if let Err(e) = app.send_images(terminal.backend_mut()) {
-                        break Exit::Error(format!("cannot draw: {e}"));
-                    }
-                    if let Err(e) = terminal.draw(|f| draw::draw(f, &app)) {
+                    if let Err(e) = app.draw_frame(&mut terminal) {
                         break Exit::Error(format!("cannot draw: {e}"));
                     }
                     let wanted = app.cursor_shape();
@@ -271,6 +286,11 @@ async fn run_async(mut options: Options) -> Exit {
                     drawn_once = true;
                 }
                 continue;
+            },
+            found = recv_font(&mut font_rx), if font_rx.is_some() => {
+                font_rx = None;
+                app.on_font_answer(found.unwrap_or(false));
+                Vec::new()
             },
             // crossterm drops a SIGWINCH that becomes ready together with the TTY, so the
             // size is also read here; a size the app already has is not a resize.
@@ -321,6 +341,14 @@ async fn run_async(mut options: Options) -> Exit {
     drop(terminal);
     drop(guard);
     exit
+}
+
+/// The font check's answer; the channel closes after it, so it is not waited on again.
+async fn recv_font(rx: &mut Option<mpsc::UnboundedReceiver<bool>>) -> Option<bool> {
+    match rx {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// What a connection's `Hello` needs besides the session.
@@ -558,17 +586,33 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    /// The theme glyphs and both icon presets: literals that belong to `deck-core`'s theme.
-    const GLYPHS: [&str; 4 + 11 + 11] = [
+    /// A font check whose thread ended without an answer reads as "found nothing", and the
+    /// loop's arm is then switched off.
+    #[tokio::test]
+    async fn recv_font_gives_none_for_a_dropped_sender() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<bool>();
+        let mut rx = Some(rx);
+        tx.send(true).unwrap();
+        assert_eq!(super::recv_font(&mut rx).await, Some(true));
+        drop(tx);
+        let found = super::recv_font(&mut rx).await;
+        assert_eq!(found, None);
+        assert!(!found.unwrap_or(false));
+    }
+
+    /// The icon glyphs of both tiers: literals that belong to `deck-core`'s icon table.
+    const GLYPHS: &[&str] = &[
         "▾", "▸", "⠋", "⠹", // The `unicode` icons.
         "✻", "◎", "◇", "❯", "✎", "±", "◔", "⇄", "▲", "¶", "λ",
         // The `nerd` icons: Codicons for the agents, `▣` for OpenCode, Font Awesome for the rest.
         "\u{ec82}", "\u{ec81}", "▣", "\u{f120}", "\u{f040}", "\u{f126}", "\u{f0e4}", "\u{f0ec}",
-        "\u{f013}", "\u{f02d}", "\u{f121}",
+        "\u{f013}", "\u{f02d}", "\u{f121}", // The other Nerd icons and the drop target.
+        "\u{eab4}", "\u{eab6}", "\u{f0da}", "➤", "\u{ee06}", "\u{ee0b}", "\u{f06a}", "\u{f058}",
+        "\u{f10c}", "\u{f444}", "↻", "\u{ea60}", "\u{ea82}",
     ];
 
     /// Colours and theme glyphs of deck's own UI come from the theme: no `Color` constructor
-    /// outside the conversion module and no theme glyph outside `deck-core`.
+    /// outside the conversion module and no icon glyph outside `deck-core`.
     #[test]
     fn no_colour_or_theme_glyph_literals_in_the_drawing_code() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -584,7 +628,7 @@ mod tests {
             let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
             assert!(!code.contains(&constructor), "{name} builds a colour");
             assert!(!code.contains("Color as"), "{name} aliases Color");
-            for glyph in GLYPHS {
+            for glyph in GLYPHS.iter().copied() {
                 assert!(!code.contains(glyph), "{name} has the glyph {glyph}");
             }
             checked += 1;

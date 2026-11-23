@@ -60,9 +60,9 @@ fn rows(h: &Harness) -> Vec<String> {
     h.screen_text().lines().map(str::to_string).collect()
 }
 
-/// The sidebar's status column (the second cell) of the row of the first panel.
+/// The sidebar's status slot (column 25, before the margin) of the row of the first panel.
 fn status_cell(h: &Harness) -> Option<char> {
-    rows(h).get(3)?.chars().nth(1)
+    rows(h).get(3)?.chars().nth(25)
 }
 
 fn wait_status(h: &Harness, what: &str, accept: impl Fn(char) -> bool) {
@@ -160,10 +160,21 @@ fn hook_events_show_working_and_waiting_and_typing_answers() {
 
     event(&h, terminal, AgentStatus::Working, "s1");
     wait_status(&h, "the working spinner", is_spinner);
+    wait_until("the spinner slot and the agent's icon", TIMEOUT, || {
+        rows(&h).get(3).is_some_and(|row| {
+            let chars: Vec<char> = row.chars().collect();
+            chars.get(25).is_some_and(|c| is_spinner(*c))
+                && chars
+                    .get(0..4)
+                    .is_some_and(|s| s.iter().collect::<String>() == " ✻  ")
+        })
+    });
     event(&h, terminal, AgentStatus::Waiting, "s1");
     wait_status(&h, "the waiting mark", |c| c == '!');
     wait_until("the mark and the agent's icon", TIMEOUT, || {
-        rows(&h).get(3).is_some_and(|row| row.contains("! ✻  "))
+        rows(&h)
+            .get(3)
+            .is_some_and(|row| row.starts_with(" ✻  ") && row.chars().nth(25) == Some('!'))
     });
     h.capture("waiting");
     let agent = agent_json(&h);
@@ -196,7 +207,7 @@ fn a_grid_title_shows_the_glyph_and_the_agent() {
     });
     event(&h, terminal, AgentStatus::Waiting, "s1");
     wait_until("the title", TIMEOUT, || {
-        rows(&h).iter().any(|r| r.contains("! claude · "))
+        rows(&h).iter().any(|r| r.contains("!  claude · "))
     });
     h.capture("grid-title");
     // The other terminal keeps its number.
@@ -259,8 +270,8 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
     assert_eq!(panel, "refactor the layout engine");
     let row = rows(&h)[3].clone();
     // The sidebar cuts the long name to its width.
-    assert!(row.starts_with(" ! ✻  refactor the layou"), "{row}");
-    assert!(h.cell(3, 6).bold(), "the name of an unseen panel is bold");
+    assert!(row.starts_with(" ✻  refactor the lay"), "{row}");
+    assert!(h.cell(3, 4).bold(), "the name of an unseen panel is bold");
 
     let body = format!("claude needs you · {project} › {panel}");
     let expected = format!("\x1b]9;{body}\x07");
@@ -382,7 +393,7 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
     let waiting = |h: &Harness, row: usize| {
         rows(h)
             .get(row)
-            .is_some_and(|r| r.chars().nth(1) == Some('!'))
+            .is_some_and(|r| r.chars().nth(25) == Some('!'))
     };
     wait_until("two waiting", TIMEOUT, || waiting(&h, 3) && waiting(&h, 5));
 

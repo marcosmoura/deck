@@ -494,7 +494,7 @@ fn a_cancelled_gesture_does_not_swallow_the_next_terminal_click() {
 fn is_target(a: &App, y: u16) -> bool {
     let buf = buffer(a);
     let caret = &buf[(0, y)];
-    caret.symbol() == crate::sidebar::caret_glyph(&a.theme)
+    caret.symbol() == crate::sidebar::caret_glyph(a.tier)
         && caret.fg == color(a.theme.accent)
         && caret.modifier.contains(Modifier::BOLD)
         && buf[(1, y)].symbol() == " "
@@ -503,14 +503,14 @@ fn is_target(a: &App, y: u16) -> bool {
 fn target_rows(a: &App) -> usize {
     let buf = buffer(a);
     (0..a.size.1)
-        .filter(|y| buf[(0, *y)].symbol() == crate::sidebar::caret_glyph(&a.theme))
+        .filter(|y| buf[(0, *y)].symbol() == crate::sidebar::caret_glyph(a.tier))
         .count()
 }
 
 /// Whether the text of row `y` is dimmed: muted, not bold, no band.
 fn dimmed(a: &App, y: u16) -> bool {
     let buf = buffer(a);
-    let c = &buf[(10, y)];
+    let c = &buf[(5, y)];
     c.fg == color(a.theme.muted)
         && !c.modifier.contains(Modifier::BOLD)
         && !c.modifier.contains(Modifier::REVERSED)
@@ -618,24 +618,23 @@ fn the_shifted_row_keeps_its_content_inside_the_sidebar() {
     down(&mut a, 5, 2);
     drag(&mut a, 5, 7);
     let row = text(&buffer(&a), 6);
-    assert!(row.starts_with("\u{27a4}  ▾ budget"), "{row}");
+    assert!(row.starts_with("\u{27a4}  budget"), "{row}");
 }
 
 #[test]
-fn the_caret_follows_the_icon_preset() {
-    for (preset, glyph) in [
-        ("unicode", "\u{27a4}"),
-        ("none", "\u{27a4}"),
-        ("nerd", "\u{f0da}"),
+fn the_caret_follows_the_tier() {
+    use crate::tier::Tier;
+    for (tier, glyph) in [
+        (Tier::Unicode, "\u{27a4}"),
+        (Tier::Nerd, "\u{f0da}"),
+        (Tier::Image, "\u{f0da}"),
     ] {
-        let config = Config::parse(&format!("[theme]\nicons = \"{preset}\""))
-            .unwrap()
-            .config;
-        let mut a = app_at(&config, (100, 24), mockup());
+        let mut a = app_at(&Config::default(), (100, 24), mockup());
+        a.tier = tier;
         down(&mut a, 5, 4);
         drag(&mut a, 5, 5);
         let buf = buffer(&a);
-        assert_eq!(buf[(0, 5)].symbol(), glyph, "{preset}");
+        assert_eq!(buf[(0, 5)].symbol(), glyph, "{tier:?}");
         assert_eq!(buf[(0, 5)].fg, color(a.theme.accent));
         assert!(buf[(0, 5)].modifier.contains(Modifier::BOLD));
         assert_eq!(buf[(1, 5)].symbol(), " ");

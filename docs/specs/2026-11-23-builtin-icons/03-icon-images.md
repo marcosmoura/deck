@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 03 — Hugeicons images for every icon
@@ -18,7 +18,7 @@ In Ghostty and kitty (the `Image` tier of [02](02-terminal-probe.md)), every ico
    | `claude`    | `Claude`                       | `claude`    |
    | `codex`     | `ChatGpt` (OpenAI's mark)      | `openai`    |
    | `opencode`  | none: DECK-12's `opencode.svg` | `opencode`  |
-   | `terminal`  | `CommandLine`                  | `terminal`  |
+   | `terminal`  | `ComputerTerminal01`           | `terminal`  |
    | `editor`    | `PencilEdit02`                 | `editor`    |
    | `git`       | `GitBranch`                    | `git`       |
    | `monitor`   | `DashboardSpeed02`             | `monitor`   |
@@ -28,15 +28,17 @@ In Ghostty and kitty (the `Image` tier of [02](02-terminal-probe.md)), every ico
    | `repl`      | `CodeSquare`                   | `repl`      |
    | `Expanded`  | `ArrowDown01`                  | `expanded`  |
    | `Collapsed` | `ArrowRight01`                 | `collapsed` |
-   | `Spinner`   | `Loading02` (used by 04)       | `spinner`   |
+   | `Spinner`   | `LoaderCircle` (used by 04)    | `spinner`   |
    | `Waiting`   | `AlertCircle`                  | `waiting`   |
    | `Idle`      | `CheckmarkCircle02`            | `idle`      |
    | `Quiet`     | `Circle`                       | `quiet`     |
    | `Unseen`    | `Circle` with `fill` added     | `unseen`    |
+   | `New`       | `PlusSign`                     | `new`       |
+   | `Resume`    | `RotateClockwise`              | `resume`    |
 
    The package ships each icon as a JavaScript array of SVG elements (`dist/esm/<Name>Icon.js`); a throwaway script turns each into `<file>.svg` with `stroke="currentColor"`, `stroke-width="1.5"`, round caps and joins as given, on a 24×24 viewBox. DECK-12's Simple Icons `claude.svg` and `openai.svg` and their masks are replaced.
 
-2. **Assets**: `crates/deck-tui/assets/logos/` becomes `crates/deck-tui/assets/icons/`, holding each `<file>.svg` and `<file>.mask` (64×64 8-bit alpha, row-major, 4096 bytes, the icon centred with a 4-pixel margin, as in DECK-12), made outside the build (for example `rsvg-convert -w 56 -h 56` and a throwaway padding script); nothing is added to the `justfile` or `.mise.toml`. Its `README.md` names the package and version, the Hugeicons MIT licence (with the licence text or a link to it), OpenCode's source as in DECK-12, the trademark note for the Claude, OpenAI and OpenCode marks, the `fill` change for `unseen`, and the exact commands. A unit test checks every mask is 4096 bytes and not all zero, and that every `Icon` but `DropTarget` has one.
+2. **Assets**: `crates/deck-tui/assets/logos/` becomes `crates/deck-tui/assets/icons/`, holding each `<file>.svg` and `<file>.mask` (64×64 8-bit alpha, row-major, 4096 bytes, the drawing filling the mask: each SVG on viewBox `1 1 22 22`, rendered with `rsvg-convert -w 64 -h 64 --keep-aspect-ratio` and centred by a throwaway script; OpenCode's logo fills the full height); nothing is added to the `justfile` or `.mise.toml`. Its `README.md` names the package and version, the Hugeicons MIT licence (with the licence text or a link to it), OpenCode's source as in DECK-12, the trademark note for the Claude, OpenAI and OpenCode marks, the `fill` change for `unseen`, and the exact commands. A unit test checks every mask is 4096 bytes and not all zero, and that every `Icon` but `DropTarget` has one.
 
 3. **Images for every icon**: in the `Image` tier, every `Icon` but `Spinner` and `DropTarget` is drawn as its image's placeholder pair (DECK-12 requirement 7) in its two-cell slot, tinted with the colour its glyph would have had (01 requirement 6: `accent`, `warning`, `ok`, `muted`, the row's colour, Claude's `#d97757`), with `REVERSED` resolved as in DECK-12. Bold has no effect on an image (kitty reserves the attributes); the waiting mark's colour is enough. The `Spinner` stays its Nerd glyph frames; `DropTarget` stays its Nerd glyph for good. Hover rules (the caret's and the quiet mark's `muted` becoming `sidebar_fg`) and the dragged row's dimming (all `muted`) give the tint like any other colour, through the same style function the pre-pass uses.
 
@@ -49,19 +51,19 @@ In Ghostty and kitty (the `Image` tier of [02](02-terminal-probe.md)), every ico
 Ghostty, 28-column sidebar; each pair of letters stands for one two-cell image: `vv` the expanded caret, `>>` collapsed, `CC` Claude (orange), `OO` OpenAI, `TT` terminal, `EE` editor, `!!` waiting (`warning`), `ok` idle (`ok`), `••` unseen (`accent`), and `⠹` stands for the spinner's Nerd frame (one cell, then a blank):
 
 ```text
- main          + New space  │
+ main         ++ New space  │
                             │
  terminal-multiplexer    vv │
-    EE editor               │
- ⠹  CC Fix login bug ••     │
- !! OO Review the API chan… │
- ok TT ~/Projects/terminal… │
+ EE editor                  │
+ CC Fix login bug ••     ⠹  │
+ OO Review the API chan… !! │
+ TT ~/Projects/terminal… ok │
  dotfiles !1           2 >> │
                             │
-  + New             Resume  │
+  ++ New         ↻↻ Resume  │
 ```
 
-The columns are 01's; only the cells' content changes.
+`++` and `↻↻` are the `New` and `Resume` chip images (`muted`). The columns are 01's (the status slot is at the right); only the cells' content changes.
 
 ## Acceptance criteria
 

@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — One icon set, three tiers, no icon config
@@ -13,7 +13,7 @@ Sub-spec 02 replaces this sub-spec's first-cut tier rules with real checks; sub-
 
 ## Requirements
 
-1. **`deck_core::icons::Icon`**: an enum with one variant per `IconKind` (by wrapping it: `Icon::Kind(IconKind)`) plus `Expanded`, `Collapsed`, `DropTarget`, `Spinner`, `Waiting`, `Idle`, `Quiet`, `Unseen`. Two pure functions give its glyphs: `unicode(icon, frame) -> &'static str` and `nerd(icon, frame) -> &'static str`, where `frame` picks the spinner frame (modulo the tier's frame count) and is ignored by the other icons. Each glyph is one cell wide (`unicode-width`), checked by a unit test over every icon and frame.
+1. **`deck_core::icons::Icon`**: an enum with one variant per `IconKind` (by wrapping it: `Icon::Kind(IconKind)`) plus `Expanded`, `Collapsed`, `DropTarget`, `Spinner`, `Waiting`, `Idle`, `Quiet`, `Unseen`, `New`, `Resume` (the last two added after the user tried the branch: the sidebar's `+` and `↻` chips). Two pure functions give its glyphs: `unicode(icon, frame) -> &'static str` and `nerd(icon, frame) -> &'static str`, where `frame` picks the spinner frame (modulo the tier's frame count) and is ignored by the other icons. Each glyph is one cell wide (`unicode-width`), checked by a unit test over every icon and frame.
 
    | Icon         | Unicode                  | Nerd Font                                                    |
    | ------------ | ------------------------ | ------------------------------------------------------------ |
@@ -36,6 +36,8 @@ Sub-spec 02 replaces this sub-spec's first-cut tier rules with real checks; sub-
    | `Idle`       | `●`                      | U+F058 nf-fa-check_circle                                    |
    | `Quiet`      | `○`                      | U+F10C nf-fa-circle_o                                        |
    | `Unseen`     | `•`                      | U+F444 nf-oct-dot_fill                                       |
+   | `New`        | `+`                      | U+EA60 nf-cod-add                                            |
+   | `Resume`     | `↻`                      | U+EA82 nf-cod-history                                        |
 
    The Unicode column is today's default; the program icons' and the drop target's Nerd column is today's `nerd` preset. The new Nerd code points were checked against Nerd Fonts' `glyphnames.json` (3.4.0); the worker checks them again.
 
@@ -50,7 +52,7 @@ Sub-spec 02 replaces this sub-spec's first-cut tier rules with real checks; sub-
 4. **Drawing one icon**: one `deck-tui` function draws any `Icon` into a two-cell slot with a style: in the `Image` tier, an agent `IconKind` is DECK-12's placeholder pair; every other icon in the `Image` and `Nerd` tiers is its Nerd glyph in the first cell; in the `Unicode` tier, its Unicode glyph. The second cell is blank (with the slot's background). Every place below goes through it, and the transmission pre-pass (DECK-12 requirement 6) uses the same choice.
 
 5. **Places** (every one is a two-cell slot; the rest of each layout shifts by the extra cell where there was one cell before):
-   - Panel rows: blank, status slot, space, program icon slot, space, name. A panel without an agent has a blank status slot. The unseen marker after the name is a slot.
+   - Panel rows: blank, program icon slot, space, name; at the right, the unseen slot (after the name), the terminal count and the status slot (two cells, before the one-cell margin), one space apart. A panel without an agent has no status slot and keeps no room for it. The name is cut with `…` before whatever is on its right.
    - Space rows: the caret is a slot, then the one-cell right margin; the collapsed count stays before it (`2 ▸ `).
    - The collapsed space's waiting badge stays text, `!<n>` in `warning` bold, with the Unicode `Waiting` glyph in every tier.
    - Grid border titles of agent terminals: `<status slot> <kind> · <name>` (today `<glyph> <kind> · <name>`), still from `rect.x + 2`; the label's room is `6 + 2` cells less than the width (today `6 + width(&glyph)`).
@@ -67,22 +69,22 @@ Sub-spec 02 replaces this sub-spec's first-cut tier rules with real checks; sub-
 Unicode tier, 28-column sidebar (the `Nerd` tier is the same with the Nerd glyphs):
 
 ```text
- main          + New space  │
+ main         +  New space  │
                             │
  terminal-multiplexer    ▾  │
-    ✎  editor               │
- ⠹  ✻  Fix login bug •      │
- !  ◎  Review the API chan… │
+ ✎  editor                  │
+ ✻  Fix login bug •      ⠹  │
+ ◎  Review the API chan… !  │
  budget                  ▾  │
    no panels                │
  dotfiles !1           2 ▸  │
                             │
-  + New             Resume  │
+  +  New         ↻  Resume  │
 ```
 
-- Panel row columns: 0 blank, 1–2 status slot, 3 space, 4–5 icon slot, 6 space, name from 7 (was 6). The unseen slot follows the name after one space.
+- Panel row columns: 0 blank, 1–2 icon slot, 3 space, name from 4; the status slot is columns 25–26 (the two before the right margin), when the panel has an agent. The unseen slot follows the name after one space; the count is before the status slot.
 - Space row: the caret's slot is the two columns before the right margin.
-- `✻` is `#d97757`, `⠹` and `•` `accent`, `!` `warning` bold, `▾` `muted`, `✎` and `◎` the row's colour. A name with nothing after it has 20 cells (28 − 7 − 1 margin).
+- `✻` is `#d97757`, `⠹` and `•` `accent`, `!` `warning` bold, `▾` `muted`, `✎` and `◎` the row's colour. A name with nothing after it has 23 cells (28 − 4 − 1 margin), 20 with a status slot.
 
 Grid border title of a working Claude terminal: `╭─ ⠹  claude · Fix login bug ───╮`.
 
@@ -94,7 +96,7 @@ Grid border title of a working Claude terminal: `╭─ ⠹  claude · Fix login
 - [ ] `TestBackend`, Unicode tier: the panel row, space row, unseen marker and grid border title match the screen above cell for cell; Nerd tier: the same cells hold the Nerd glyphs; Image tier: a Claude row holds DECK-12's placeholder pair and a shell row the Nerd `terminal` glyph.
 - [ ] The Claude icon is `#d97757` in every tier, on a normal and on a reversed row; a Codex icon on the active row is in the row's colour.
 - [ ] No `IconPreset`, `IconImages`, `Glyphs`, `IconGlyphs` or `IconColors` is left in the workspace; no code path skips icons.
-- [ ] End to end (Unicode tier): a fake `claude` panel row reads `⠹  ✻ ` up to its name (any spinner frame), and a config with `icons = "nerd"` loads with the warning in the floating bar. Existing e2e tests pass with their captures updated to the new columns, when run from Ghostty, kitty or WezTerm.
+- [ ] End to end (Unicode tier): a fake `claude` panel row reads `✻ ` up to its name and has a spinner frame in column 25 (any frame), and a config with `icons = "nerd"` loads with the warning in the floating bar. Existing e2e tests pass with their captures updated to the new columns, when run from Ghostty, kitty or WezTerm.
 - [ ] `PROTOCOL_VERSION` is 20.
 - [ ] By hand, in Ghostty, kitty, WezTerm and Terminal.app: the icons look right and line up; the Claude and OpenAI Nerd glyphs render in Ghostty, kitty and WezTerm (else see the overview's risk).
 
@@ -106,5 +108,6 @@ Grid border title of a working Claude terminal: `╭─ ⠹  claude · Fix login
 
 ## Notes
 
+- The status slot moved from the start of a panel row to its right end after the user tried the branch: the loader, waiting, idle and quiet marks share it, it shows only when the panel has an agent status, and the name gets the width otherwise.
 - Nerd Fonts' `extra-progress_spinner_*` glyphs come from Fira Code's progress set and are in Nerd Fonts since 3.0.
 - `docs/features/config.md`: the `icons`, `icon_glyphs`, `icon_colors`, `icon_images` and `[theme.glyphs]` paragraphs become one short paragraph: deck ships its own icons (images in Ghostty and kitty, Nerd Font glyphs in terminals that bundle them, Unicode elsewhere) and the old keys warn. `docs/features/agents.md` stops pointing at `[theme.glyphs]`.

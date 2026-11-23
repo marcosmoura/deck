@@ -128,44 +128,54 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let side: Vec<String> = rows.iter().map(|r| r.chars().take(29).collect()).collect();
     assert_eq!(
         side[0],
-        format!("{}│", pad(" main          + New space  ", 28))
+        format!("{}│", pad(" main         +  New space  ", 28))
     );
     assert_eq!(side[1], format!("{}│", pad("", 28)));
-    assert_eq!(side[2], format!("{}│", pad(" ▾ terminal-multiplexer", 28)));
-    assert_eq!(side[3], format!("{}│", pad("   ❯  editor", 28)));
-    assert_eq!(side[4], format!("{}│", pad("   ❯  claude", 28)));
-    assert_eq!(side[5], format!("{}│", pad("   ❯  tests", 28)));
-    assert_eq!(side[6], format!("{}│", pad(" ▾ budget", 28)));
-    assert_eq!(side[7], format!("{}│", pad("   ❯  api", 28)));
-    assert_eq!(side[8], format!("{}│", pad(" ▾ empty", 28)));
+    assert_eq!(
+        side[2],
+        format!("{}│", pad(" terminal-multiplexer    ▾", 28))
+    );
+    assert_eq!(side[3], format!("{}│", pad(" ❯  editor", 28)));
+    assert_eq!(side[4], format!("{}│", pad(" ❯  claude", 28)));
+    assert_eq!(side[5], format!("{}│", pad(" ❯  tests", 28)));
+    assert_eq!(
+        side[6],
+        format!("{}│", pad(" budget                  ▾", 28))
+    );
+    assert_eq!(side[7], format!("{}│", pad(" ❯  api", 28)));
+    assert_eq!(
+        side[8],
+        format!("{}│", pad(" empty                   ▾", 28))
+    );
     assert_eq!(side[9], format!("{}│", pad("   no panels", 28)));
     assert_eq!(
         side[10],
-        format!("{}│", pad(" ▸ dotfiles               2 ", 28))
+        format!("{}│", pad(" dotfiles              2 ▸", 28))
     );
     assert_eq!(side[11], format!("{}│", pad("", 28)));
     // The panel area is the rest: the terminal from column 29 on, with no border.
     assert_eq!(rows[0].chars().count(), 100);
     assert!(!rows.iter().any(|r| r.contains('╭') || r.contains('╰')));
     // The last row is the sidebar's bottom bar and the terminal's.
-    assert!(rows[23].starts_with("  + New "), "{}", rows[23]);
+    assert!(rows[23].starts_with("  +  New "), "{}", rows[23]);
     assert!(!rows[23].contains("detach"), "{}", rows[23]);
     let buf = t.backend().buffer();
     // Styles: header and the active project bold, the active panel a bold band of the
     // selection colours (reversed here), `no panels` and the count muted.
     assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(1, 0)].fg, Color::Blue);
-    assert!(buf[(3, 2)].modifier.contains(Modifier::BOLD));
-    assert!(!buf[(3, 6)].modifier.contains(Modifier::BOLD));
+    assert!(buf[(2, 2)].modifier.contains(Modifier::BOLD));
+    assert!(!buf[(2, 6)].modifier.contains(Modifier::BOLD));
     for x in [0, 3, 27] {
         assert!(buf[(x, 3)].modifier.contains(Modifier::REVERSED), "{x}");
     }
-    assert!(buf[(3, 3)].modifier.contains(Modifier::BOLD));
+    assert!(buf[(4, 3)].modifier.contains(Modifier::BOLD));
     assert!(!buf[(28, 3)].modifier.contains(Modifier::REVERSED));
     assert!(!buf[(3, 4)].modifier.contains(Modifier::REVERSED));
     assert_eq!(buf[(3, 4)].fg, Color::Reset);
     assert_eq!(buf[(3, 9)].fg, Color::DarkGray);
-    assert_eq!(buf[(26, 10)].fg, Color::DarkGray);
+    assert_eq!(buf[(23, 10)].fg, Color::DarkGray);
+    assert_eq!(buf[(25, 10)].fg, Color::DarkGray);
     assert_eq!(buf[(28, 5)].symbol(), "│");
     // Nothing is reversed outside the sidebar focus.
     assert!(!buf[(3, 4)].modifier.contains(Modifier::REVERSED));
@@ -182,12 +192,12 @@ fn long_names_end_in_an_ellipsis_and_a_count_keeps_its_place() {
     let (_, rows) = screen(&a);
     assert_eq!(
         rows[2].chars().take(29).collect::<String>(),
-        format!("{}│", pad(" ▾ a-very-long-project-nam…", 28))
+        format!("{}│", pad(" a-very-long-project-na… ▾", 28))
     );
     // The terminal count of a panel with two terminals is at the right.
     assert_eq!(
         rows[4].chars().take(29).collect::<String>(),
-        format!("{}│", pad("   ❯  a-very-long-panel-… 2 ", 28))
+        format!("{}│", pad(" ❯  a-very-long-panel-na… 2 ", 28))
     );
 }
 
@@ -733,7 +743,7 @@ fn many_panels() -> SessionView {
 fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     let mut a = app_at(&Config::default(), (100, 24), many_panels());
     let (_, rows) = screen(&a);
-    assert!(rows[3].starts_with("   ❯  p1"), "{}", rows[3]);
+    assert!(rows[3].starts_with(" ❯  p1"), "{}", rows[3]);
     // The active panel moves down the list.
     let mut view = many_panels();
     view.projects[0].active_panel = Some(PanelId(30));
@@ -742,17 +752,17 @@ fn the_sidebar_scrolls_to_keep_the_active_panel_and_the_selection_visible() {
     let (_, rows) = screen(&a);
     let at = rows
         .iter()
-        .position(|r| r.starts_with("   ❯  p30"))
+        .position(|r| r.starts_with(" ❯  p30"))
         .unwrap_or_else(|| panic!("{rows:#?}"));
     assert_eq!(at, 21, "the last row of the list");
-    assert!(rows[2].starts_with("   ❯  p11"), "{}", rows[2]);
+    assert!(rows[2].starts_with(" ❯  p11"), "{}", rows[2]);
     // The selection scrolls it back up.
     run(&mut a, &[prefix(), key(ct::KeyCode::Tab)]);
     for _ in 0..28 {
         run(&mut a, &[ch('k')]);
     }
     let (_, rows) = screen(&a);
-    assert!(rows.iter().any(|r| r.starts_with("   ❯  p2 ")), "{rows:#?}");
+    assert!(rows.iter().any(|r| r.starts_with(" ❯  p2 ")), "{rows:#?}");
     // The wheel scrolls by three rows and stops at the ends.
     run(&mut a, &[mouse(ct::MouseEventKind::ScrollDown, 5, 5)]);
     let first = a.sidebar_offset;
@@ -1015,7 +1025,11 @@ fn a_gap_row_draws_blank_and_does_not_hover_click_or_open_a_menu() {
     let mut a = app_at(&gap_config(1), (100, 24), mockup());
     let (_, screen_rows) = screen(&a);
     // Header 0, blank 1, P1 2, editor 3, claude 4, tests 5, gap 6, P2 7.
-    assert!(screen_rows[5].starts_with("   "), "{}", screen_rows[5]);
+    assert!(
+        screen_rows[5].starts_with(" ❯  tests"),
+        "{}",
+        screen_rows[5]
+    );
     assert_eq!(screen_rows[6][..28].trim(), "");
     assert!(screen_rows[7].contains("budget"), "{}", screen_rows[7]);
     assert!(screen_rows[10].contains("empty") && screen_rows[11].contains("no panels"));

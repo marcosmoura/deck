@@ -165,7 +165,7 @@ fn an_agent_that_only_has_a_prompt_gets_its_first_line() {
     let terminal = terminal_id(&h);
     prompt_event(&h, terminal, "Review the API changes\nthen the docs");
     wait_name(&h, "Review the API changes");
-    h.wait_for_text("Review the API chang", TIMEOUT);
+    h.wait_for_text("Review the API chan", TIMEOUT);
     h.capture("agent-prompt");
 }
 
@@ -182,7 +182,7 @@ fn a_program_without_a_title_names_the_panel_until_it_exits() {
     h.wait_for_text("nvim-ready", TIMEOUT);
     wait_name(&h, "nvim");
     assert_eq!(panel(&h)["terminals"][0]["program"], "nvim");
-    h.wait_for_active_row("   \u{270e}  nvim", TIMEOUT);
+    h.wait_for_active_row(" \u{270e}  nvim", TIMEOUT);
     h.capture("program-name");
 
     // It exits: the panel is named after the shell again.
@@ -246,7 +246,7 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
         "printf '\\033]2;\u{2733} Fix login bug\\007'\necho agent-ready\nread line",
     );
     let mut h = attached(&bin);
-    wait_row(&h, 3, "the shell icon", |r| r.starts_with("   \u{276f} "));
+    wait_row(&h, 3, "the shell icon", |r| r.starts_with(" \u{276f} "));
     h.send_keys("claude\r");
     h.wait_for_text("agent-ready", TIMEOUT);
     wait_row(&h, 3, "the agent icon", |r| {
@@ -255,31 +255,43 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
     // A second panel with a shell: its row starts with the terminal icon.
     h.send_bytes(PREFIX);
     h.send_keys("c");
-    wait_row(&h, 4, "the second panel", |r| r.starts_with("   \u{276f} "));
+    wait_row(&h, 4, "the second panel", |r| r.starts_with(" \u{276f} "));
     let first = rows(&h)[3].clone();
     // Names start at the same column whatever the icon.
-    assert_eq!(first.chars().nth(6), Some('F'), "{first}");
-    assert_eq!(rows(&h)[4].chars().nth(6), Some('s'), "{}", rows(&h)[4]);
+    assert_eq!(first.chars().nth(4), Some('F'), "{first}");
+    assert_eq!(rows(&h)[4].chars().nth(4), Some('s'), "{}", rows(&h)[4]);
     assert!(
-        first.starts_with("   \u{273b} ") || first.contains(" \u{273b} "),
+        first.chars().take(4).collect::<String>() == " \u{273b}  ",
         "{first}"
     );
     h.capture("icons");
+}
+
+/// The harness's terminal answers neither XTVERSION nor the graphics query, so the
+/// environment names it: WezTerm bundles the Nerd Font symbols, so the icons are Nerd glyphs.
+#[test]
+fn a_terminal_that_bundles_nerd_symbols_gets_nerd_glyphs() {
+    let bin = fake("unused", "true");
+    let h = attached_in(&bin, &[("TERM_PROGRAM", "WezTerm")]);
+    wait_row(&h, 3, "the Nerd terminal icon", |r| {
+        r.starts_with(" \u{f120} ") && !r.contains('\u{276f}')
+    });
+    h.capture("nerd-tier");
 }
 
 #[test]
 fn a_program_switches_the_icon_and_the_shell_brings_it_back() {
     let bin = fake("nvim", "echo nvim-ready\nread line");
     let mut h = attached(&bin);
-    wait_row(&h, 3, "the shell icon", |r| r.starts_with("   \u{276f} "));
+    wait_row(&h, 3, "the shell icon", |r| r.starts_with(" \u{276f} "));
     h.send_keys("nvim\r");
     h.wait_for_text("nvim-ready", TIMEOUT);
     wait_row(&h, 3, "the editor icon", |r| {
-        r.starts_with("   \u{270e}  nvim")
+        r.starts_with(" \u{270e}  nvim")
     });
     h.send_keys("\r");
     wait_row(&h, 3, "the shell icon again", |r| {
-        r.starts_with("   \u{276f} ")
+        r.starts_with(" \u{276f} ")
     });
 }
 
@@ -295,26 +307,75 @@ fn claude_panel(env: &[(&str, &str)]) -> Harness {
     h.wait_for_text("agent-ready", TIMEOUT);
     // The shell's icon gives way to the agent's.
     wait_row(&h, 3, "the agent's icon", |r| {
-        r.contains("Fix login bug") && !r.contains('\u{276f}')
+        r.contains("Fix login bug") && !r.contains(['\u{276f}', '\u{f120}', '\u{2733}'])
     });
     h
 }
 
 #[test]
-fn ghostty_shows_the_agent_logo_and_tmux_keeps_the_text_icon() {
-    let image = "\u{10EEEE}";
-    let h = claude_panel(&[("TERM_PROGRAM", "ghostty")]);
-    let row = rows(&h)[3].clone();
-    assert!(h.is_active_row(3), "{row}");
-    // The logo is two cells wide.
-    assert_eq!(row.matches(image).count(), 2, "{row}");
-    assert!(!row.contains('\u{273b}'), "{row}");
-    // The name starts at column 6, as it does after a text icon.
-    assert_eq!(h.cell(3, 6).ch, 'F');
-    h.capture("logos");
+fn ghostty_shows_every_icon_as_an_image_and_tmux_keeps_the_nerd_glyphs() {
+    let image = '\u{10EEEE}';
+    let h = claude_panel(&[("TERM_PROGRAM", "ghostty"), ("COLORTERM", "truecolor")]);
+    let screen = rows(&h);
+    assert!(h.is_active_row(3), "{}", screen[3]);
+    // The program slot (columns 1 and 2) and the space row's caret slot hold placeholders.
+    assert_eq!(h.cell(3, 1).ch, image, "{}", screen[3]);
+    assert_eq!(h.cell(3, 2).ch, image, "{}", screen[3]);
+    assert_eq!(screen[2].matches(image).count(), 2, "{}", screen[2]);
+    assert!(!screen[3].contains('\u{273b}'), "{}", screen[3]);
+    // The name starts at column 4, as it does after a text icon.
+    assert_eq!(h.cell(3, 4).ch, 'F', "{}", screen[3]);
+    h.capture("all-icon-images");
 
-    // Inside tmux the same terminal gets the text icon.
-    let h = claude_panel(&[("TERM_PROGRAM", "ghostty"), ("TMUX", "/tmp/x,1,0")]);
-    let row = rows(&h)[3].clone();
-    assert!(row.contains('\u{273b}') && !row.contains(image), "{row}");
+    // Inside tmux the same terminal gets the Nerd Font glyphs.
+    let h = claude_panel(&[
+        ("TERM_PROGRAM", "ghostty"),
+        ("COLORTERM", "truecolor"),
+        ("TMUX", "/tmp/x,1,0"),
+    ]);
+    let screen = rows(&h);
+    assert!(
+        screen[3].contains('\u{ec82}') && !screen[3].contains(image),
+        "{}",
+        screen[3]
+    );
+    assert!(
+        screen[2].contains('\u{eab4}') && !screen[2].contains(image),
+        "{}",
+        screen[2]
+    );
+}
+
+/// A working agent's status slot holds the loader's image in Ghostty. The harness cannot see
+/// the rotation; the frame maths is covered by the unit tests of `deck-tui`.
+#[test]
+fn a_working_agent_shows_the_loader_image_in_ghostty() {
+    let image = '\u{10EEEE}';
+    // The agent keeps printing, so it stays active and the loader keeps turning.
+    let bin = fake(
+        "claude",
+        "printf '\\033]2;\u{2733} Fix login bug\\007'\necho agent-ready\nwhile :; do echo tick; sleep 0.5; done",
+    );
+    let mut h = attached_in(
+        &bin,
+        &[("TERM_PROGRAM", "ghostty"), ("COLORTERM", "truecolor")],
+    );
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    wait_row(&h, 3, "the loader's image", |r| {
+        r.contains("Fix login bug") && r.chars().nth(25) == Some(image)
+    });
+    assert_eq!(h.cell(3, 25).ch, image, "{}", rows(&h)[3]);
+    assert_eq!(h.cell(3, 26).ch, image, "{}", rows(&h)[3]);
+    // Only the loader changes the image id (the cell's colour) from one sample to the next.
+    let mut seen = Vec::new();
+    for _ in 0..10 {
+        let fg = format!("{:?}", h.cell(3, 25).fg);
+        if !seen.contains(&fg) {
+            seen.push(fg);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(seen.len() >= 3, "the status image never turned: {seen:?}");
+    h.capture("rotating-loader");
 }

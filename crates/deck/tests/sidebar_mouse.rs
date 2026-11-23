@@ -250,11 +250,11 @@ fn a_press_on_the_separator_with_the_sidebar_hidden_does_nothing() {
 #[test]
 fn a_press_on_a_sidebar_row_still_focuses_it() {
     let mut h = attached();
-    h.wait_for_active_row("   ❯  sh", TIMEOUT);
+    h.wait_for_active_row(" ❯  sh", TIMEOUT);
     // The project row (row 3, 1-based 3): folding it hides its panel.
     h.send_keys("\x1b[<0;5;3M");
     h.send_keys("\x1b[<0;5;3m");
-    wait_gone(&h, "   ❯  sh");
+    wait_gone(&h, " ❯  sh");
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn wait_bar(h: &Harness) {
     wait_until("the bottom bar", TIMEOUT, || {
         rows(h)
             .get(BAR_ROW)
-            .is_some_and(|r| r.starts_with("  + New "))
+            .is_some_and(|r| r.starts_with("  +  New "))
     });
 }
 
@@ -363,7 +363,7 @@ fn the_bottom_bar_shows_the_new_chip_and_the_resume_chip_at_the_right() {
     let screen = rows(&h);
     let bar = &screen[BAR_ROW];
     let sidebar: String = bar.chars().take(28).collect();
-    assert_eq!(sidebar.trim_end(), "  + New             Resume", "{bar:?}");
+    assert_eq!(sidebar.trim_end(), "  +  New         ↻  Resume", "{bar:?}");
     assert!(screen[BAR_ROW - 1].chars().take(28).all(|c| c == ' '));
     h.capture("bottom-bar");
 }
@@ -374,7 +374,7 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip() {
     wait_bar(&h);
     let header = rows(&h)[0].clone();
     let sidebar: String = header.chars().take(28).collect();
-    assert_eq!(sidebar, " main          + New space  ", "{header:?}");
+    assert_eq!(sidebar, " main         +  New space  ", "{header:?}");
     h.capture("header");
 }
 
@@ -588,7 +588,7 @@ fn a_click_on_new_opens_the_menu_above_the_bar_and_a_click_on_the_name_folds() {
     wait_gone(&h, "New in");
     // The name of the project still folds it.
     click_at(&mut h, 6, 2);
-    wait_gone(&h, "   ❯  sh");
+    wait_gone(&h, " ❯  sh");
 }
 
 #[test]
@@ -610,7 +610,7 @@ fn the_terminal_item_adds_a_panel_with_a_shell_in_the_project_root() {
 fn choosing_on_a_folded_project_unfolds_it_and_shows_the_active_new_panel() {
     let mut h = attached();
     click_at(&mut h, 6, 2);
-    wait_gone(&h, "   ❯  sh");
+    wait_gone(&h, " ❯  sh");
     open_menu(&mut h);
     pick(&mut h, 0);
     wait_until("two panels, the new one active", TIMEOUT, || {
@@ -711,7 +711,7 @@ fn the_menu_sits_right_above_the_bar_in_a_short_window() {
     let top = screen.iter().position(|r| r.contains("╭─ New in")).unwrap();
     let bottom = screen.iter().rposition(|r| r.starts_with('╰')).unwrap();
     assert_eq!((top, bottom), (4, 10), "{}", h.screen_text());
-    assert!(screen[11].starts_with("  + New"), "{}", h.screen_text());
+    assert!(screen[11].starts_with("  +  New"), "{}", h.screen_text());
 }
 
 #[test]
@@ -800,7 +800,7 @@ fn the_new_button_adds_a_terminal_panel_to_the_selected_project() {
     let api_panels = |h: &Harness| {
         side(h)
             .iter()
-            .skip_while(|r| !r.starts_with(" ▾ api"))
+            .skip_while(|r| !(r.starts_with(" api") && r.ends_with("▾")))
             .skip(1)
             .take_while(|r| r.contains('❯'))
             .count()

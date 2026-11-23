@@ -61,6 +61,11 @@ pub fn image_id_color(id: u32) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// Claude's brand colour, `#d97757`: the colour of its icon in every tier.
+pub fn claude_color() -> Color {
+    rgb((0xd9, 0x77, 0x57))
+}
+
 /// An RGB colour as a ratatui colour, for image cells whose reversed colours are resolved.
 pub fn rgb(c: (u8, u8, u8)) -> Color {
     Color::Rgb(c.0, c.1, c.2)

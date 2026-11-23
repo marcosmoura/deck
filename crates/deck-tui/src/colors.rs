@@ -1,5 +1,6 @@
-//! Asking the outer terminal for its foreground and background (OSC 10 and OSC 11) and for
-//! its 16 base colours (OSC 4).
+//! Asking the outer terminal for its foreground and background (OSC 10 and OSC 11), its 16
+//! base colours (OSC 4), its name (XTVERSION) and whether it speaks the kitty graphics
+//! protocol.
 
 use std::time::{Duration, Instant};
 
@@ -12,13 +13,14 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_millis(200);
 pub const LATE_WINDOW: Duration = Duration::from_secs(3);
 
 /// The colour queries (foreground, background, then palette entries 0 to 15), BEL-terminated,
-/// then a device-attributes request (DA1). Terminals answer in order, so the DA1 reply tells
-/// that no colour answer is still on its way.
+/// XTVERSION, the kitty graphics query, then a device-attributes request (DA1). Terminals
+/// answer in order, so the DA1 reply tells that no other answer is still on its way.
 pub const QUERY: &[u8] = b"\x1b]10;?\x07\x1b]11;?\x07\
 \x1b]4;0;?\x07\x1b]4;1;?\x07\x1b]4;2;?\x07\x1b]4;3;?\x07\
 \x1b]4;4;?\x07\x1b]4;5;?\x07\x1b]4;6;?\x07\x1b]4;7;?\x07\
 \x1b]4;8;?\x07\x1b]4;9;?\x07\x1b]4;10;?\x07\x1b]4;11;?\x07\
 \x1b]4;12;?\x07\x1b]4;13;?\x07\x1b]4;14;?\x07\x1b]4;15;?\x07\
+\x1b[>0q\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\
 \x1b[c";
 
 /// An RGB colour as the terminal reported it.
@@ -36,10 +38,14 @@ pub struct Probe {
     pub fg: Option<Rgb>,
     /// The base colours it answered.
     pub palette: Palette,
+    /// The XTVERSION reply: the terminal's name and version, as it wrote them.
+    pub xtversion: Option<String>,
+    /// The kitty graphics reply: `Some(true)` for `OK`, `Some(false)` for an error text.
+    pub graphics: Option<bool>,
     /// Bytes that were not part of an answer, to pass on as input.
     pub leftover: Vec<u8>,
-    /// Colour answers that may still arrive: 0 once the DA1 reply was seen, else the
-    /// number of colours and palette entries missing.
+    /// Answers that may still arrive: 0 once the DA1 reply was seen, else the number of
+    /// colours, palette entries and other replies missing.
     pub late: u8,
 }
 
@@ -72,12 +78,16 @@ pub fn probe(read: ReadInput<'_>, timeout: Duration) -> Probe {
         let missing = parsed.palette.iter().filter(|c| c.is_none()).count();
         u8::from(parsed.fg.is_none())
             + u8::from(parsed.bg.is_none())
+            + u8::from(parsed.xtversion.is_none())
+            + u8::from(parsed.graphics.is_none())
             + u8::try_from(missing).unwrap_or(16)
     };
     Probe {
         late,
         fg: parsed.fg,
         palette: parsed.palette,
+        xtversion: parsed.xtversion,
+        graphics: parsed.graphics,
         colors: parsed
             .fg
             .zip(parsed.bg)
@@ -86,10 +96,12 @@ pub fn probe(read: ReadInput<'_>, timeout: Duration) -> Probe {
     }
 }
 
-/// Takes colour answers that arrive after [`probe`] gave up out of the input events.
+/// Takes answers that arrive after [`probe`] gave up out of the input events.
 ///
 /// Once the event reader owns the input, crossterm reads `ESC ] 11;rgb:…` `BEL` as keys:
-/// `Alt+]`, then the characters, then `Ctrl+G` (or `Alt+\` for the `ESC \` ending).
+/// `Alt+]`, then the characters, then `Ctrl+G` (or `Alt+\` for the `ESC \` ending). The
+/// XTVERSION reply (`Alt+P`, `>`, `|`, text, `Alt+\`) and the graphics reply (`Alt+_`, `G`,
+/// text, `Alt+\`) come the same way.
 /// Keys that start like an answer are held; they are dropped when the answer completes, and
 /// passed on as soon as they stop matching or the window ends.
 #[derive(Debug)]
@@ -126,7 +138,7 @@ impl LateAnswers {
             out.push(event);
             return out;
         };
-        let step = answer_step(self.held.len(), key);
+        let step = answer_step(&self.held, key);
         match step {
             Step::Continue => {
                 self.held.push(event);
@@ -163,28 +175,73 @@ enum Step {
     No,
 }
 
-/// Whether `key`, after `held` keys of an answer, continues it, ends it or breaks it.
-fn answer_step(held: usize, key: &KeyEvent) -> Step {
-    let char_with = |mods: KeyModifiers| match key.code {
+/// The most characters in the text of an XTVERSION or graphics reply that is still taken.
+const REPLY_TEXT_MAX: usize = 64;
+
+/// Whether `key`, after the `held` keys of an answer, continues it, ends it or breaks it.
+fn answer_step(held: &[Event], key: &KeyEvent) -> Step {
+    let char_with = |key: &KeyEvent, mods: KeyModifiers| match key.code {
         KeyCode::Char(c) if key.modifiers == mods => Some(c),
         _ => None,
     };
-    // Upper-case hex digits come with `Shift`.
-    let plain = char_with(KeyModifiers::NONE).or_else(|| char_with(KeyModifiers::SHIFT));
-    let ok = match held {
-        0 => char_with(KeyModifiers::ALT) == Some(']'),
-        // `]10;`, `]11;` or `]4;n;`.
-        1 => matches!(plain, Some('1' | '4')),
-        2 => matches!(plain, Some('0' | '1' | ';')),
-        3 => matches!(plain, Some(';' | '0'..='9')),
-        _ => {
-            if char_with(KeyModifiers::CONTROL) == Some('g')
-                || char_with(KeyModifiers::ALT) == Some('\\')
-            {
-                return Step::Done;
+    // Upper-case letters come with `Shift`.
+    let plain = |key: &KeyEvent| {
+        char_with(key, KeyModifiers::NONE).or_else(|| char_with(key, KeyModifiers::SHIFT))
+    };
+    // `ESC P` is `Alt+Shift+P` to crossterm.
+    let alt = |key: &KeyEvent| {
+        char_with(key, KeyModifiers::ALT)
+            .or_else(|| char_with(key, KeyModifiers::ALT | KeyModifiers::SHIFT))
+    };
+    let held_key = |i: usize| match held.get(i) {
+        Some(Event::Key(k)) => Some(*k),
+        _ => None,
+    };
+    let Some(lead) = held_key(0) else {
+        return if matches!(alt(key), Some(']' | 'P' | '_')) {
+            Step::Continue
+        } else {
+            Step::No
+        };
+    };
+    let n = held.len();
+    let ends = char_with(key, KeyModifiers::ALT) == Some('\\');
+    let ok = match alt(&lead) {
+        // XTVERSION: `P>|`, then printable ASCII.
+        Some('P') => match n {
+            1 => plain(key) == Some('>'),
+            2 => plain(key) == Some('|'),
+            _ => {
+                if ends {
+                    return Step::Done;
+                }
+                n - 3 < REPLY_TEXT_MAX && plain(key).is_some_and(|c| (' '..='~').contains(&c))
             }
-            plain.is_some_and(|c| c.is_ascii_hexdigit() || "rgb:/;".contains(c))
-        }
+        },
+        // Graphics: `_G`, then `i=31;OK`-like text.
+        Some('_') => match n {
+            1 => plain(key) == Some('G'),
+            _ => {
+                if ends {
+                    return Step::Done;
+                }
+                n - 2 < REPLY_TEXT_MAX
+                    && plain(key)
+                        .is_some_and(|c| c.is_ascii_alphanumeric() || "=,;:._ -".contains(c))
+            }
+        },
+        // `]10;`, `]11;` or `]4;n;`.
+        _ => match n {
+            1 => matches!(plain(key), Some('1' | '4')),
+            2 => matches!(plain(key), Some('0' | '1' | ';')),
+            3 => matches!(plain(key), Some(';' | '0'..='9')),
+            _ => {
+                if char_with(key, KeyModifiers::CONTROL) == Some('g') || ends {
+                    return Step::Done;
+                }
+                plain(key).is_some_and(|c| c.is_ascii_hexdigit() || "rgb:/;".contains(c))
+            }
+        },
     };
     if ok { Step::Continue } else { Step::No }
 }
@@ -195,13 +252,17 @@ pub struct Answers {
     pub bg: Option<Rgb>,
     /// The OSC 4 replies for the base colours.
     pub palette: Palette,
+    /// The XTVERSION reply's text.
+    pub xtversion: Option<String>,
+    /// The graphics reply: `OK` or not.
+    pub graphics: Option<bool>,
     /// The DA1 reply was seen.
     pub da1: bool,
     /// Everything else, without a trailing unfinished reply.
     pub rest: Vec<u8>,
 }
 
-/// Finds the OSC 10, OSC 11, OSC 4 and DA1 replies in `bytes`.
+/// Finds the OSC 10, OSC 11, OSC 4, XTVERSION, graphics and DA1 replies in `bytes`.
 pub fn parse_answers(bytes: &[u8]) -> Answers {
     let mut out = Answers::default();
     let mut i = 0;
@@ -225,6 +286,14 @@ pub fn parse_answers(bytes: &[u8]) -> Answers {
                 out.da1 = true;
                 i += len;
             }
+            Some((Reply::Version(text), len)) => {
+                out.xtversion = out.xtversion.take().or(Some(text));
+                i += len;
+            }
+            Some((Reply::Graphics(ok), len)) => {
+                out.graphics = out.graphics.or(Some(ok));
+                i += len;
+            }
             None => {
                 out.rest.push(*byte);
                 i += 1;
@@ -234,21 +303,43 @@ pub fn parse_answers(bytes: &[u8]) -> Answers {
     // A reply cut short at the end (it will never finish) must not reach the shell.
     if let Some(esc) = out.rest.iter().rposition(|b| *b == 0x1b)
         && let Some(tail) = out.rest.get(esc + 1..)
+        && cut_reply(tail)
     {
-        let reply_like = tail.is_empty() || tail.starts_with(b"]") || tail.starts_with(b"[?");
-        if reply_like
-            && tail
-                .iter()
-                .all(|b| b"[]?;:/rgb0123456789abcdefABCDEF".contains(b))
-        {
-            out.rest.truncate(esc);
-        }
+        out.rest.truncate(esc);
     }
     out
 }
 
+/// Whether `tail`, what follows the last `ESC`, is the start of a reply that never finished.
+fn cut_reply(tail: &[u8]) -> bool {
+    match tail.first() {
+        None => true,
+        // A DCS reply (XTVERSION): printable text.
+        Some(b'P') => tail.iter().skip(1).all(|b| (0x20..=0x7e).contains(b)),
+        // An APC reply (graphics).
+        Some(b'_') => tail
+            .iter()
+            .skip(1)
+            .all(|b| b.is_ascii_alphanumeric() || b"=,;:._ -".contains(b)),
+        Some(b']') => tail
+            .iter()
+            .all(|b| b"[]?;:/rgb0123456789abcdefABCDEF".contains(b)),
+        Some(b'[') => {
+            tail.starts_with(b"[?")
+                && tail
+                    .iter()
+                    .all(|b| b"[]?;:/rgb0123456789abcdefABCDEF".contains(b))
+        }
+        Some(_) => false,
+    }
+}
+
 enum Reply {
     Color(u8, Option<Rgb>),
+    /// The XTVERSION text.
+    Version(String),
+    /// A graphics reply; `true` for `OK`.
+    Graphics(bool),
     /// A base colour: its index and colour.
     Palette(usize, Option<Rgb>),
     Da1,
@@ -256,6 +347,15 @@ enum Reply {
 
 /// A reply at the start of `bytes` and its length.
 fn reply_at(bytes: &[u8]) -> Option<(Reply, usize)> {
+    if let Some(body) = bytes.strip_prefix(b"\x1bP>|") {
+        let (text, len) = string_reply(body)?;
+        return Some((Reply::Version(text.to_string()), 4 + len));
+    }
+    if let Some(body) = bytes.strip_prefix(b"\x1b_G") {
+        let (text, len) = string_reply(body)?;
+        let ok = text.rsplit(';').next() == Some("OK") && text.contains(';');
+        return Some((Reply::Graphics(ok), 3 + len));
+    }
     if let Some(body) = bytes.strip_prefix(b"\x1b[?") {
         let (end, byte) = body
             .iter()
@@ -295,6 +395,17 @@ fn reply_at(bytes: &[u8]) -> Option<(Reply, usize)> {
         Some(n) => Some((Reply::Palette(n, color), len)),
         None => Some((Reply::Color(slot, color), len)),
     }
+}
+
+/// The text of a string reply up to its `ST` or `BEL`, and the length with the terminator.
+fn string_reply(body: &[u8]) -> Option<(&str, usize)> {
+    let (end, term_len) = body.iter().enumerate().find_map(|(i, &b)| match b {
+        0x07 => Some((i, 1)),
+        0x1b if body.get(i + 1) == Some(&b'\\') => Some((i, 2)),
+        _ => None,
+    })?;
+    let text = std::str::from_utf8(body.get(..end)?).ok()?;
+    Some((text, end + term_len))
 }
 
 /// `rgb:R/G/B` with one to four hex digits per channel, scaled to 8 bits.
@@ -421,8 +532,8 @@ mod tests {
         let p = probe(&mut read, Duration::from_millis(30));
         assert_eq!(p.colors, None);
         assert_eq!(p.leftover, b"hi");
-        // Both colours and the 16 base colours are missing.
-        assert_eq!(p.late, 18);
+        // Both colours, the 16 base colours, XTVERSION and the graphics reply are missing.
+        assert_eq!(p.late, 20);
     }
 
     #[test]
@@ -467,6 +578,98 @@ mod tests {
         assert_eq!(probe(&mut read, Duration::from_secs(1)).late, 0);
     }
 
+    const VERSIONS: [&[u8]; 2] = [
+        b"\x1bP>|kitty(0.36.4)\x1b\\",
+        b"\x1bP>|WezTerm 20240203-110809-5046fc22\x07",
+    ];
+
+    #[test]
+    fn the_query_asks_xtversion_and_graphics_before_da1() {
+        let tail = b"\x1b[>0q\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c";
+        assert!(QUERY.ends_with(tail));
+    }
+
+    #[test]
+    fn xtversion_and_graphics_replies_parse_in_both_forms_and_stay_out_of_the_input() {
+        for version in VERSIONS {
+            let mut input = b"a".to_vec();
+            input.extend_from_slice(version);
+            input.extend_from_slice(b"b\x1b_Gi=31;OK\x1b\\\x1b[?6c");
+            let a = parse_answers(&input);
+            assert!(
+                a.xtversion
+                    .as_deref()
+                    .is_some_and(|v| v.contains("(0.36.4)") || v.starts_with("WezTerm"))
+            );
+            assert_eq!(a.graphics, Some(true));
+            assert!(a.da1);
+            assert_eq!(a.rest, b"ab");
+        }
+        let a = parse_answers(b"\x1b_Gi=31;ENOTSUPPORTED:no\x07\x1b_Gi=31;OK\x1b\\");
+        assert_eq!(a.graphics, Some(false));
+        assert!(a.rest.is_empty());
+        assert_eq!(parse_answers(b"\x1b[?6c").xtversion, None);
+    }
+
+    #[test]
+    fn unfinished_dcs_and_apc_replies_at_the_end_are_dropped() {
+        for tail in [
+            &b"\x1bP"[..],
+            b"\x1bP>|kitty(0.36",
+            b"\x1b_",
+            b"\x1b_Gi=31;O",
+        ] {
+            let mut input = b"hi".to_vec();
+            input.extend_from_slice(tail);
+            let a = parse_answers(&input);
+            assert_eq!(a.rest, b"hi", "{tail:?}");
+        }
+    }
+
+    #[test]
+    fn probe_reads_both_new_answers_and_stops_at_da1() {
+        let mut chunks = vec![
+            b"\x1bP>|ghostty 1.2".to_vec(),
+            b".0\x1b\\\x1b_Gi=31;OK\x1b".to_vec(),
+            b"\\\x1b[?62c".to_vec(),
+            b"never read".to_vec(),
+        ]
+        .into_iter();
+        let mut read = |_: Duration| chunks.next();
+        let p = probe(&mut read, Duration::from_secs(1));
+        assert_eq!(p.xtversion.as_deref(), Some("ghostty 1.2.0"));
+        assert_eq!(p.graphics, Some(true));
+        assert_eq!((p.late, p.leftover), (0, Vec::new()));
+    }
+
+    #[test]
+    fn late_xtversion_and_graphics_replies_are_swallowed() {
+        let now = Instant::now();
+        let mut late = LateAnswers::new(2, now);
+        let mut input = b"a".to_vec();
+        input.extend_from_slice(b"\x1bP>|kitty(0.36.4)\x1b\\b");
+        input.extend_from_slice(b"\x1b_Gi=31;OK\x1b\\c");
+        assert_eq!(feed_all(&mut late, keys(&input), now), keys(b"abc"));
+    }
+
+    #[test]
+    fn a_late_alt_p_that_breaks_the_shape_is_delivered_as_typed() {
+        let now = Instant::now();
+        for typed in [&b"\x1bPx"[..], b"\x1bP>x", b"\x1b_x", b"\x1b_Gi=31;\x01"] {
+            let mut late = LateAnswers::new(1, now);
+            let mut events = feed_all(&mut late, keys(typed), now);
+            events.extend(late.flush(now + LATE_WINDOW));
+            assert_eq!(events, keys(typed), "{typed:?}");
+        }
+        // Too long a text is not a reply either.
+        let mut late = LateAnswers::new(1, now);
+        let mut long = b"\x1bP>|".to_vec();
+        long.extend(std::iter::repeat_n(b'x', 70));
+        let mut events = feed_all(&mut late, keys(&long), now);
+        events.extend(late.flush(now + LATE_WINDOW));
+        assert_eq!(events, keys(&long));
+    }
+
     fn key(code: KeyCode, mods: KeyModifiers) -> Event {
         Event::Key(KeyEvent::new(code, mods))
     }
@@ -482,7 +685,12 @@ mod tests {
                 0x1b => {
                     let c = char::from(bytes[i]);
                     i += 1;
-                    key(KeyCode::Char(c), KeyModifiers::ALT)
+                    let shift = if c.is_ascii_uppercase() {
+                        KeyModifiers::SHIFT
+                    } else {
+                        KeyModifiers::NONE
+                    };
+                    key(KeyCode::Char(c), KeyModifiers::ALT | shift)
                 }
                 0x07 => key(KeyCode::Char('g'), KeyModifiers::CONTROL),
                 b if b.is_ascii_uppercase() => {

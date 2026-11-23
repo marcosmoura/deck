@@ -100,46 +100,6 @@ overlay_bg = "default" # help and picker overlays
 hover = "bright-black" # background of the sidebar row or chip under the pointer
 # rounded, plain, thick or double: borders of terminals and overlays.
 border_style = "rounded"
-# unicode, nerd or none: the icon in front of each panel's name, chosen by what runs in it
-# (an agent, or a program such as nvim, lazygit or ssh; a terminal icon otherwise). `unicode`
-# uses glyphs every font has, `nerd` needs a Nerd Font, `none` draws no icons.
-icons = "unicode"
-# auto or off: in Ghostty and kitty `auto` draws the logos of Claude Code, Codex and OpenCode
-# as images in place of their icons (not inside tmux, Zellij or a deck panel, and not without
-# truecolor); `off` keeps the text icons. Ignored with icons = "none".
-icon_images = "auto"
-
-# One cell wide each.
-[theme.glyphs]
-expanded = "▾" # a space that shows its panels
-collapsed = "▸" # a space that hides its panels
-spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] # a working agent: frames, 100 ms each
-waiting = "!" # an agent that needs you (warning colour, bold)
-idle = "●" # an agent that finished its turn (ok colour)
-quiet = "○" # an agent found by its process that is not printing (muted)
-unseen = "•" # a panel whose agent needed you or finished while you were not looking (accent)
-
-# One cell wide each. Uncomment a line to change one icon of the preset; with
-# icons = "none" they are still checked but not drawn.
-[theme.icon_glyphs]
-# claude = "✻" # Claude Code (nerd: U+EC82)
-# codex = "◎" # Codex (nerd: U+EC81)
-# opencode = "◇" # OpenCode (nerd: ▣, U+25A3)
-# terminal = "❯" # a shell and every program without an icon of its own (nerd: U+F120)
-# editor = "✎" # vi, vim, nvim, hx, helix, nano, emacs, micro, kak (nerd: U+F040)
-# git = "±" # git, lazygit, tig, gitui (nerd: U+F126)
-# monitor = "◔" # top, htop, btop, glances (nerd: U+F0E4)
-# remote = "⇄" # ssh, mosh, et (nerd: U+F0EC)
-# build = "▲" # cargo, make, just, npm, pnpm, yarn, go (nerd: U+F013)
-# pager = "¶" # less, more, man, bat (nerd: U+F02D)
-# repl = "λ" # python, python3, node, irb, ghci, iex (nerd: U+F121)
-
-# The colour of each agent icon (text or logo), in the colour syntax above; "none" draws it
-# in its row's colour.
-[theme.icon_colors]
-claude = "#d97757" # Claude's orange
-# codex = "none"
-# opencode = "none"
 
 # How deck recognises each coding agent in a terminal: the program names (the command as
 # typed, or the script that node, bun, deno, sh, bash, zsh or dash runs, without extension)
