@@ -214,7 +214,7 @@ pub const RESUME_EXEC_TAIL: &str = "; exec \"$0\" \"$@\"";
 /// exists and is not an option, the basename of `argv[1]` instead (the script it runs). A
 /// shell that runs deck's resume wrapper (`sh -c '<command>; exec "$0" "$@"' <shell> ...`)
 /// has no job control, so the agent stays in its process group: the program is then the
-/// first word of the command.
+/// first word of the command. The extension is removed (`codex.js` is `codex`).
 pub fn program_name(argv: &[String]) -> Option<String> {
     let first = basename(argv.first()?);
     let first = first.strip_prefix('-').unwrap_or(first);
@@ -223,28 +223,31 @@ pub fn program_name(argv: &[String]) -> Option<String> {
         && let Some(command) = argv.get(2).and_then(|c| c.strip_suffix(RESUME_EXEC_TAIL))
         && let Some(word) = command.split_whitespace().next()
     {
-        return Some(basename(word).to_string());
+        return Some(without_extension(basename(word)));
     }
     if INTERPRETERS.contains(&first)
         && let Some(script) = argv.get(1).filter(|a| !a.starts_with('-'))
     {
-        return Some(basename(script).to_string());
+        return Some(without_extension(basename(script)));
     }
-    Some(first.to_string())
+    Some(without_extension(first))
 }
 
-/// Which agent a process is: its [`program_name`] without extension (`codex.js` is `codex`)
-/// is in an agent's `process` list.
-pub fn match_argv(argv: &[String], config: &AgentsConfig) -> Option<AgentKind> {
-    let name = program_name(argv)?;
-    let stem = Path::new(&name)
+fn without_extension(name: &str) -> String {
+    Path::new(name)
         .file_stem()
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty())
-        .unwrap_or(&name);
+        .unwrap_or(name)
+        .to_string()
+}
+
+/// Which agent a process is: its [`program_name`] is in an agent's `process` list.
+pub fn match_argv(argv: &[String], config: &AgentsConfig) -> Option<AgentKind> {
+    let name = program_name(argv)?;
     AgentKind::ALL
         .into_iter()
-        .find(|k| config.get(*k).process.iter().any(|p| p == stem))
+        .find(|k| config.get(*k).process.contains(&name))
 }
 
 /// What the state file keeps about a terminal's agent so a restart can reopen it.
@@ -422,9 +425,18 @@ mod tests {
         );
         assert_eq!(
             program_name(&argv(&["bash", "/a/b/run.sh"])).as_deref(),
-            Some("run.sh")
+            Some("run")
         );
         assert_eq!(program_name(&[]), None);
+        for (items, want) in [
+            (&["/bin/zsh", "-l"][..], "zsh"),
+            (&["sh"], "sh"),
+            (&["bash", "-c", "x"], "bash"),
+            (&["node", "/x/codex.js"], "codex"),
+            (&["/bin/sh", "/tmp/fake/claude"], "claude"),
+        ] {
+            assert_eq!(program_name(&argv(items)).as_deref(), Some(want));
+        }
     }
 
     #[test]

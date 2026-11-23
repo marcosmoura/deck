@@ -17,11 +17,11 @@ A terminal that runs an agent has an agent state: its kind, a status and a sourc
 
 Urgency, most to least: `waiting`, `working`, `active`, `idle`, `quiet`, none. The sidebar shows, in the status column of a panel row, the glyph of the panel's most urgent terminal. The glyphs and colours come from `[theme.glyphs]` (`spinner` is a list of frames, `waiting`, `idle`, `quiet`) and the theme colours; see the reference in `deck config default`.
 
-A grid border title for an agent terminal reads `<glyph> <kind> · <name>` in place of the number. A terminal alone in its panel shows `project › panel · <glyph> <kind> · <name>` in the status bar. The client redraws the spinner only while one spins.
+A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<glyph> <kind> · <name>` in place of the number. The status bar shows `project › <status> <icon> <name>` for the active panel (`project › ⠹ ✻ Fix login bug`), the same status glyph and icon as the sidebar row, so the state stays visible when the sidebar is hidden; there is no status glyph without an agent. The client redraws the spinner only while one spins.
 
 ## Detection by process
 
-Every second the daemon asks the operating system for the foreground process of each terminal's PTY (`sysctl` on macOS, `/proc` on Linux) and compares its program name with `[agents.<kind>] process` (a list of names; defaults: `claude`, `codex`, `opencode`). A login dash and a script interpreter (`node claude.js`) are looked through, and an extension is ignored. A match gives the state `source: process`: `active` while the terminal printed in the last 2 s, else `quiet`. When the agent leaves the foreground the state is cleared.
+Every second the daemon asks the operating system for the foreground process of each terminal's PTY (`sysctl` on macOS, `/proc` on Linux) and compares its program name with `[agents.<kind>] process` (a list of names; defaults: `claude`, `codex`, `opencode`). A login dash and a script interpreter (`node claude.js`) are looked through, and an extension is ignored. The same tick sets each terminal's `program` to that name (`ls --json` shows it) and leaves it as it was when the process cannot be read. A match gives the state `source: process`: `active` while the terminal printed in the last 2 s, else `quiet`. When the agent leaves the foreground the state is cleared.
 
 ```toml
 [agents.claude]

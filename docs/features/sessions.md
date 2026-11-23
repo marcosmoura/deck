@@ -10,7 +10,7 @@ A session is a set of terminals that lives in the deck daemon, with or without a
 - The first `deck` command starts the daemon when it is not running.
 - Attaching is refused inside deck (`DECK` is set) and when stdin or stdout is not a terminal.
 - The shell is the `shell` of the config, else `$SHELL`, else `/bin/sh`, started with `shell_args` (default `["-l"]`, a login shell). It gets the environment of the `deck` that created the session.
-- The shell's size follows the window: the terminal fills the screen minus the sidebar and the bottom status-bar row, with no border. The status bar shows `project › panel · <title>` after the session name: the title is the terminal's OSC title, else its program, muted, and cut with `…` when it does not fit beside the hints (it is left out when the panel area is empty). When the window is smaller than 20 columns or 5 rows, deck shows only `deck: window too small` and keeps the shell's last size.
+- The shell's size follows the window: the terminal fills the screen minus the sidebar and the bottom status-bar row, with no border. The status bar shows `project › <icon> <panel>` after the session name, muted, and cut with `…` when it does not fit beside the hints; a panel you named by hand also shows ` · <title>` (the terminal's OSC title) when it differs from the name; both are left out when the panel area is empty (see [sidebar](sidebar.md#the-sidebar)). When the window is smaller than 20 columns or 5 rows, deck shows only `deck: window too small` and keeps the shell's last size.
 - Several clients can attach to one session. The shell follows the client that typed or resized last; the others draw its layout cropped or padded to their window.
 
 ## Switching sessions

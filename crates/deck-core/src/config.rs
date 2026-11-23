@@ -748,6 +748,8 @@ mod tests {
             assert!(theme.contains_key(role), "theme.{role} missing");
         }
         assert!(theme.contains_key("border_style"));
+        assert!(theme.contains_key("icons"));
+        assert!(theme.contains_key("icon_glyphs"));
         let glyphs = theme["glyphs"].as_table().unwrap();
         for name in [
             "expanded",
@@ -760,6 +762,15 @@ mod tests {
             "unseen",
         ] {
             assert!(glyphs.contains_key(name), "theme.glyphs.{name} missing");
+        }
+        // Each commented icon line names its kind's `unicode` glyph.
+        let unicode = crate::theme::IconGlyphs::preset(crate::theme::IconPreset::Unicode);
+        for kind in crate::icons::IconKind::ALL {
+            let want = format!("# {} = \"{}\"", kind.name(), unicode.get(kind));
+            assert!(
+                DEFAULT_CONFIG_TOML.lines().any(|l| l.starts_with(&want)),
+                "default.toml lacks `{want}`"
+            );
         }
     }
 

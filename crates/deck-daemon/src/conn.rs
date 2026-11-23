@@ -233,7 +233,8 @@ async fn dispatch(
             | Request::NewTerminal { .. }
             | Request::Focus { .. }
             | Request::Close { .. }
-            | Request::RenamePanel { .. }),
+            | Request::RenamePanel { .. }
+            | Request::AutoNamePanel { .. }),
         )) => {
             let response = shared.control(request).await;
             queue.push_msg(ServerMsg::Response(response));

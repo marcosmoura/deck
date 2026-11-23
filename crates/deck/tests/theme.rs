@@ -57,7 +57,7 @@ fn is_palette(color: Color) -> bool {
 #[test]
 fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     let mut h = themed(THEMED, &[]);
-    h.wait_for_text("▌  1", TIMEOUT);
+    h.wait_for_text("▌  ❯ sh", TIMEOUT);
     // The active panel row and the session name.
     assert_eq!(h.cell(3, 0).ch, '▌');
     assert_eq!(h.cell(3, 0).fg, ACCENT);
@@ -85,7 +85,7 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
 #[test]
 fn without_truecolor_the_theme_and_the_programs_use_the_palette() {
     let mut h = themed(THEMED, &[("COLORTERM", None)]);
-    h.wait_for_text("▌  1", TIMEOUT);
+    h.wait_for_text("▌  ❯ sh", TIMEOUT);
     assert!(is_palette(h.cell(3, 0).fg), "{:?}", h.cell(3, 0).fg);
     assert!(is_palette(h.cell(23, 1).fg));
     assert_eq!(h.cell(1, 20).bg, Color::Indexed(236));
@@ -152,7 +152,7 @@ fn glyphs_follow_the_theme() {
         r#"{ glyphs = { expanded = "v", collapsed = ">", active = "|" } }"#,
         &[],
     );
-    h.wait_for_text("|  1", TIMEOUT);
+    h.wait_for_text("|  ❯ sh", TIMEOUT);
     assert!(rows(&h)[2].starts_with(" v dk"), "{}", rows(&h)[2]);
     h.capture("glyphs");
     prefixed(&mut h, "\t");

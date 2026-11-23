@@ -8,7 +8,6 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-1. [DECK-09](#tasks): sidebar titles with program and agent icons
 1. [DECK-10](#tasks): sidebar mouse resize, New project button and per-project New menu
 1. [DECK-11](#tasks): restore agent sessions from a dialog
 
@@ -18,18 +17,18 @@ Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
-| ID      | Title                                  | Status      | Depends on       | Spec                                                                         |
-| ------- | -------------------------------------- | ----------- | ---------------- | ---------------------------------------------------------------------------- |
-| DECK-01 | Core daemon and terminal               | done        | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
-| DECK-02 | Sessions, projects, panels and sidebar | done        | DECK-01          | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
-| DECK-03 | Grid layout                            | done        | DECK-02, DECK-08 | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
-| DECK-04 | Persistence across daemon restarts     | done        | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
-| DECK-05 | Control API                            | done        | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
-| DECK-06 | Agent status, hooks and resume         | done        | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
-| DECK-08 | Config and theming                     | done        | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
-| DECK-09 | Sidebar titles with icons              | in-progress | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
-| DECK-10 | Sidebar mouse and buttons              | ready       | DECK-06          | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
-| DECK-11 | Restore agent sessions                 | ready       | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
+| ID      | Title                                  | Status | Depends on       | Spec                                                                         |
+| ------- | -------------------------------------- | ------ | ---------------- | ---------------------------------------------------------------------------- |
+| DECK-01 | Core daemon and terminal               | done   | —                | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
+| DECK-02 | Sessions, projects, panels and sidebar | done   | DECK-01          | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
+| DECK-03 | Grid layout                            | done   | DECK-02, DECK-08 | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
+| DECK-04 | Persistence across daemon restarts     | done   | DECK-03, DECK-08 | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
+| DECK-05 | Control API                            | done   | DECK-03, DECK-04 | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
+| DECK-06 | Agent status, hooks and resume         | done   | DECK-05, DECK-04 | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
+| DECK-08 | Config and theming                     | done   | DECK-02          | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
+| DECK-09 | Sidebar titles with icons              | done   | DECK-06          | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
+| DECK-10 | Sidebar mouse and buttons              | ready  | DECK-06          | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
+| DECK-11 | Restore agent sessions                 | ready  | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
 
 ### Withdrawn
 

@@ -130,8 +130,13 @@ fn three_terminals_are_drawn_in_the_grid_with_borders_and_numbered_titles() {
     assert!(rows.iter().any(|r| r.contains("╭─ 3 · sh ─")));
     assert!(rows[1].starts_with("│term 1"), "{}", rows[1]);
     assert_eq!(rows[22].chars().next(), Some('╰'));
-    // The status bar keeps the focused terminal's title.
-    assert!(rows[23].contains("tests · cargo watch"), "{}", rows[23]);
+    // The status bar has the panel's icon and name, not a terminal's title.
+    assert!(
+        rows[23].contains("terminal-multiplexer › ❯ tests"),
+        "{}",
+        rows[23]
+    );
+    assert!(!rows[23].contains("cargo watch"), "{}", rows[23]);
 }
 
 #[test]

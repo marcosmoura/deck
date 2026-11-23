@@ -30,7 +30,7 @@ This spec takes over [DECK-07](../../backlog.md#deck-07) (panels named after wha
 - **One name, kept on the panel.** A panel whose `name_source` is not `manual` gets its name from its _source terminal_; the daemon writes it into `Panel.name` with `name_source = auto`, so persistence (DECK-04), `ls --json` and every client see the same name. A manual rename (`prefix ,`, `deck rename-panel`) locks it; `deck rename-panel --auto` unlocks it.
 - **Source terminal**: the panel's first terminal in grid order that has an agent; otherwise its focused terminal.
 - **Program**: the daemon records each terminal's foreground program name from DECK-06's detection tick (`program_name(argv)`, shared with `match_argv`: login dash removed, an interpreter unwrapped only when its first argument is not an option, extension removed), keeping the last value when the process cannot be read, so the client can choose an icon without knowing processes.
-- **Icons** are a fixed set of kinds (`claude`, `codex`, `opencode`, `terminal`, `editor`, `git`, `monitor`, `remote`, `build`, `pager`, `repl`) chosen by a pure table in `deck-core`; the glyph of each kind lives in `[theme.icons]`, one cell wide like every theme glyph. `[theme] icons = "unicode"` (default) uses plain Unicode glyphs that every font has; `icons = "nerd"` uses Nerd Font glyphs; `icons = "none"` draws no icons.
+- **Icons** are a fixed set of kinds (`claude`, `codex`, `opencode`, `terminal`, `editor`, `git`, `monitor`, `remote`, `build`, `pager`, `repl`) chosen by a pure table in `deck-core`; the glyph of each kind lives in `[theme.icon_glyphs]`, one cell wide like every theme glyph. `[theme] icons = "unicode"` (default) uses plain Unicode glyphs that every font has; `icons = "nerd"` uses Nerd Font glyphs; `icons = "none"` draws no icons.
 - **Status bar** shows the same icon and name as the sidebar row; DECK-02's ` · <title>` suffix stays only for a manually named panel, where the name no longer follows the title.
 - **Changed from DECK-07**: when an agent exits, the panel's name follows the program that is left (usually the shell), instead of keeping the agent's last name.
 
@@ -38,15 +38,15 @@ This spec takes over [DECK-07](../../backlog.md#deck-07) (panels named after wha
 
 | Sub-spec                | Type      | Crate                        | Summary                                                                             | Depends | Status |
 | ----------------------- | --------- | ---------------------------- | ----------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-auto-titles.md) | shippable | deck-core, deck-daemon, deck | Foreground program per terminal; panels named after their source terminal; `--auto` | DECK-06 | todo   |
-| [02](02-icons.md)       | shippable | deck-core, deck-tui          | Icon kinds, `[theme.icons]` and `icons`, icons in the sidebar and status bar        | 01      | todo   |
+| [01](01-auto-titles.md) | shippable | deck-core, deck-daemon, deck | Foreground program per terminal; panels named after their source terminal; `--auto` | DECK-06 | done   |
+| [02](02-icons.md)       | shippable | deck-core, deck-tui          | Icon kinds, `[theme.icon_glyphs]` and `icons`, icons in the sidebar and status bar  | 01      | done   |
 
 ## Affected docs
 
 - `docs/features/sidebar.md`: panel names that follow their program, icons.
 - `docs/features/agents.md` (created by DECK-06): agent titles in the sidebar.
 - `docs/features/control-api.md`: `rename-panel --auto`, `program` in `ls --json`.
-- `docs/features/config.md` or wherever DECK-08 documents `[theme]`: `icons` and `[theme.icons]`.
+- `docs/features/config.md` or wherever DECK-08 documents `[theme]`: `icons` and `[theme.icon_glyphs]`.
 - `docs/architecture.md#model`: `NameSource::Auto` and the naming rule.
 - `docs/backlog.md`: DECK-07 withdrawn in favour of this spec (done by the lead when the user approves).
 

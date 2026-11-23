@@ -10,6 +10,8 @@ mod draw;
 mod grid;
 #[cfg(test)]
 mod grid_tests;
+#[cfg(test)]
+mod icons_tests;
 mod input;
 mod mirror;
 mod modal;
@@ -507,6 +509,15 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// The theme glyphs and both icon presets: literals that belong to `deck-core`'s theme.
+    const GLYPHS: [&str; 5 + 11 + 11] = [
+        "▾", "▸", "▌", "⠋", "⠹", // The `unicode` icons.
+        "✻", "◎", "◇", "❯", "✎", "±", "◔", "⇄", "▲", "¶", "λ",
+        // The `nerd` icons: Font Awesome codepoints.
+        "\u{f069}", "\u{f1ce}", "\u{f1b2}", "\u{f120}", "\u{f040}", "\u{f126}", "\u{f0e4}",
+        "\u{f0ec}", "\u{f013}", "\u{f02d}", "\u{f121}",
+    ];
+
     /// Colours and theme glyphs of deck's own UI come from the theme: no `Color` constructor
     /// outside the conversion module and no theme glyph outside `deck-core`.
     #[test]
@@ -524,7 +535,7 @@ mod tests {
             let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
             assert!(!code.contains(&constructor), "{name} builds a colour");
             assert!(!code.contains("Color as"), "{name} aliases Color");
-            for glyph in ["▾", "▸", "▌", "⠋", "⠹"] {
+            for glyph in GLYPHS {
                 assert!(!code.contains(glyph), "{name} has the glyph {glyph}");
             }
             checked += 1;

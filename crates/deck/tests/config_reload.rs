@@ -83,7 +83,7 @@ fn wait_accent(h: &Harness, color: Color) {
 #[test]
 fn a_new_accent_applies_without_reattaching_and_reloaded_flashes() {
     let h = running(&[]);
-    h.wait_for_text("▌  1", TIMEOUT);
+    h.wait_for_text("▌  ❯ sh", TIMEOUT);
     assert_eq!(accent(&h), BLUE);
     write(&h, "[theme]\naccent = \"red\"\n");
     wait_accent(&h, RED);

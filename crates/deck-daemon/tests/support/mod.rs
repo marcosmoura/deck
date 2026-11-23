@@ -379,6 +379,18 @@ impl Client {
             .id
     }
 
+    /// The panel at `position` (from 1) of a project: new panels are named after their
+    /// shell, so tests find them by place.
+    pub fn panel_at(&self, project: &str, position: usize) -> PanelId {
+        let view = self.view.as_ref().expect("a session view");
+        view.projects
+            .iter()
+            .find(|p| p.name == project)
+            .and_then(|p| p.panels.get(position - 1))
+            .unwrap_or_else(|| panic!("no panel {project}/{position}"))
+            .id
+    }
+
     /// Sends an action and waits for its result.
     pub async fn action(&mut self, action: Action) -> Result<(), ActionError> {
         self.send(&ClientMsg::Action(action)).await;

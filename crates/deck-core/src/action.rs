@@ -41,6 +41,10 @@ pub enum Action {
         panel: PanelId,
         name: String,
     },
+    /// Unlocks a manually named panel: its name follows what runs in it again.
+    AutoNamePanel {
+        panel: PanelId,
+    },
     ClosePanel {
         panel: PanelId,
     },
@@ -255,6 +259,7 @@ mod tests {
                 panel: PanelId(2),
                 name: "x".into(),
             },
+            Action::AutoNamePanel { panel: PanelId(2) },
             Action::ClosePanel { panel: PanelId(2) },
             Action::FocusPanel { panel: PanelId(2) },
             Action::CyclePanel { delta: -1 },

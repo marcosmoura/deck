@@ -6,6 +6,7 @@ use toml::{Table, Value};
 use unicode_width::UnicodeWidthStr;
 
 use crate::config::Warning;
+use crate::icons::IconKind;
 use crate::protocol::Color;
 
 /// The colour roles, in the order of [`Theme::colors`].
@@ -151,6 +152,113 @@ impl Default for Glyphs {
     }
 }
 
+/// Which glyphs the program icons use: `[theme] icons`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IconPreset {
+    /// Plain Unicode that every font has.
+    Unicode,
+    /// Font Awesome glyphs of the Nerd Fonts.
+    Nerd,
+    /// No icons are drawn.
+    None,
+}
+
+impl IconPreset {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "unicode" => Some(Self::Unicode),
+            "nerd" => Some(Self::Nerd),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+/// The glyph of each icon kind, one cell wide.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IconGlyphs {
+    pub claude: String,
+    pub codex: String,
+    pub opencode: String,
+    pub terminal: String,
+    pub editor: String,
+    pub git: String,
+    pub monitor: String,
+    pub remote: String,
+    pub build: String,
+    pub pager: String,
+    pub repl: String,
+}
+
+impl IconGlyphs {
+    /// The glyphs of a preset (`None` has the `Unicode` ones; they are not drawn).
+    pub fn preset(preset: IconPreset) -> Self {
+        let g = |text: &str| text.to_string();
+        match preset {
+            IconPreset::Unicode | IconPreset::None => Self {
+                claude: g("✻"),
+                codex: g("◎"),
+                opencode: g("◇"),
+                terminal: g("❯"),
+                editor: g("✎"),
+                git: g("±"),
+                monitor: g("◔"),
+                remote: g("⇄"),
+                build: g("▲"),
+                pager: g("¶"),
+                repl: g("λ"),
+            },
+            // Font Awesome codepoints, checked against Nerd Fonts' `glyphnames.json`.
+            IconPreset::Nerd => Self {
+                claude: g("\u{f069}"),   // nf-fa-asterisk
+                codex: g("\u{f1ce}"),    // nf-fa-circle_o_notch
+                opencode: g("\u{f1b2}"), // nf-fa-cube
+                terminal: g("\u{f120}"), // nf-fa-terminal
+                editor: g("\u{f040}"),   // nf-fa-pencil
+                git: g("\u{f126}"),      // nf-fa-code_fork
+                monitor: g("\u{f0e4}"),  // nf-fa-tachometer
+                remote: g("\u{f0ec}"),   // nf-fa-exchange
+                build: g("\u{f013}"),    // nf-fa-cog
+                pager: g("\u{f02d}"),    // nf-fa-book
+                repl: g("\u{f121}"),     // nf-fa-code
+            },
+        }
+    }
+
+    pub fn get(&self, kind: IconKind) -> &str {
+        match kind {
+            IconKind::Claude => &self.claude,
+            IconKind::Codex => &self.codex,
+            IconKind::OpenCode => &self.opencode,
+            IconKind::Terminal => &self.terminal,
+            IconKind::Editor => &self.editor,
+            IconKind::Git => &self.git,
+            IconKind::Monitor => &self.monitor,
+            IconKind::Remote => &self.remote,
+            IconKind::Build => &self.build,
+            IconKind::Pager => &self.pager,
+            IconKind::Repl => &self.repl,
+        }
+    }
+
+    fn set(&mut self, kind: IconKind, glyph: String) {
+        let slot = match kind {
+            IconKind::Claude => &mut self.claude,
+            IconKind::Codex => &mut self.codex,
+            IconKind::OpenCode => &mut self.opencode,
+            IconKind::Terminal => &mut self.terminal,
+            IconKind::Editor => &mut self.editor,
+            IconKind::Git => &mut self.git,
+            IconKind::Monitor => &mut self.monitor,
+            IconKind::Remote => &mut self.remote,
+            IconKind::Build => &mut self.build,
+            IconKind::Pager => &mut self.pager,
+            IconKind::Repl => &mut self.repl,
+        };
+        *slot = glyph;
+    }
+}
+
 /// A glyph: a string one cell wide.
 fn one_cell(path: &str, value: &toml::Value) -> Result<String, ThemeError> {
     let text = value
@@ -210,6 +318,8 @@ pub struct Theme {
     pub overlay_bg: Color,
     pub border_style: BorderStyle,
     pub glyphs: Glyphs,
+    pub icons: IconPreset,
+    pub icon_glyphs: IconGlyphs,
 }
 
 /// The default of each role, in the order of [`ROLES`].
@@ -266,7 +376,13 @@ fn resolve(raw: &[ThemeColor; 15]) -> Result<[Color; 15], ThemeError> {
 }
 
 impl Theme {
-    fn from_parts(c: [Color; 15], border_style: BorderStyle, glyphs: Glyphs) -> Self {
+    fn from_parts(
+        c: [Color; 15],
+        border_style: BorderStyle,
+        glyphs: Glyphs,
+        icons: IconPreset,
+        icon_glyphs: IconGlyphs,
+    ) -> Self {
         let [
             accent,
             muted,
@@ -302,6 +418,8 @@ impl Theme {
             overlay_bg,
             border_style,
             glyphs,
+            icons,
+            icon_glyphs,
         }
     }
 
@@ -310,6 +428,8 @@ impl Theme {
         let mut raw = DEFAULTS;
         let mut border_style = BorderStyle::Rounded;
         let mut glyphs = Glyphs::default();
+        let mut icons = IconPreset::Unicode;
+        let mut overrides = Vec::new();
         for (key, value) in table {
             let path = format!("theme.{key}");
             if let Some((_, slot)) = ROLES
@@ -356,10 +476,45 @@ impl Theme {
                         *slot = one_cell(&path, value)?;
                     }
                 }
+                "icons" => {
+                    icons = value
+                        .as_str()
+                        .and_then(IconPreset::parse)
+                        .ok_or_else(|| bad(&path, "expected \"unicode\", \"nerd\" or \"none\""))?;
+                }
+                "icon_glyphs" => {
+                    let table = value
+                        .as_table()
+                        .ok_or_else(|| bad(&path, "expected a table"))?;
+                    for (name, value) in table {
+                        let path = format!("{path}.{name}");
+                        let kind = IconKind::parse(name).ok_or_else(|| {
+                            let kinds = IconKind::ALL.map(IconKind::name).join(", ");
+                            bad(
+                                &path,
+                                format!("unknown icon `{name}`; expected one of {kinds}"),
+                            )
+                        })?;
+                        overrides.push((kind, one_cell(&path, value)?));
+                    }
+                }
                 _ => warnings.push(Warning::unknown_key(&path)),
             }
         }
-        Ok(Self::from_parts(resolve(&raw)?, border_style, glyphs))
+        // `none` ignores the overrides; they are still checked above.
+        let mut icon_glyphs = IconGlyphs::preset(icons);
+        if icons != IconPreset::None {
+            for (kind, glyph) in overrides {
+                icon_glyphs.set(kind, glyph);
+            }
+        }
+        Ok(Self::from_parts(
+            resolve(&raw)?,
+            border_style,
+            glyphs,
+            icons,
+            icon_glyphs,
+        ))
     }
 }
 
@@ -370,7 +525,13 @@ impl Default for Theme {
     )]
     fn default() -> Self {
         let colors = resolve(&DEFAULTS).expect("the default roles do not loop");
-        Self::from_parts(colors, BorderStyle::Rounded, Glyphs::default())
+        Self::from_parts(
+            colors,
+            BorderStyle::Rounded,
+            Glyphs::default(),
+            IconPreset::Unicode,
+            IconGlyphs::preset(IconPreset::Unicode),
+        )
     }
 }
 
@@ -452,6 +613,16 @@ mod tests {
             ("[glyphs]\nactive = \"\"", "theme.glyphs.active"),
             ("[glyphs]\nexpanded = \"ab\"", "theme.glyphs.expanded"),
             ("glyphs = 1", "theme.glyphs"),
+            ("icons = \"emoji\"", "theme.icons"),
+            ("icons = true", "theme.icons"),
+            ("icon_glyphs = 1", "theme.icon_glyphs"),
+            ("[icon_glyphs]\nclaude = \"日\"", "theme.icon_glyphs.claude"),
+            ("[icon_glyphs]\ngit = \"\"", "theme.icon_glyphs.git"),
+            ("[icon_glyphs]\nbogus = \"x\"", "theme.icon_glyphs.bogus"),
+            (
+                "icons = \"none\"\n[icon_glyphs]\nrepl = \"ab\"",
+                "theme.icon_glyphs.repl",
+            ),
         ] {
             let err = parse(text).unwrap_err();
             assert_eq!(err.key, key, "{text}: {}", err.message);
@@ -488,5 +659,42 @@ mod tests {
         assert_eq!(t, Theme::default());
         assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert_eq!(parse("").unwrap(), Theme::default());
+    }
+
+    #[test]
+    fn the_icon_presets_are_one_cell_wide_and_distinct() {
+        for preset in [IconPreset::Unicode, IconPreset::Nerd] {
+            let glyphs = IconGlyphs::preset(preset);
+            let mut seen = Vec::new();
+            for kind in IconKind::ALL {
+                let glyph = glyphs.get(kind);
+                assert_eq!(glyph.width(), 1, "{preset:?} {}", kind.name());
+                assert!(!seen.contains(&glyph), "{preset:?} repeats {glyph}");
+                seen.push(glyph);
+            }
+        }
+        assert_eq!(parse("").unwrap().icons, IconPreset::Unicode);
+        assert_eq!(
+            parse("icons = \"nerd\"").unwrap().icon_glyphs.claude,
+            "\u{f069}"
+        );
+        assert_eq!(
+            parse("icons = \"unicode\"").unwrap().icon_glyphs.terminal,
+            "❯"
+        );
+        assert_eq!(parse("icons = \"none\"").unwrap().icons, IconPreset::None);
+    }
+
+    #[test]
+    fn single_icons_can_be_overridden() {
+        let t = parse("[icon_glyphs]\nclaude = \"C\"").unwrap();
+        assert_eq!(t.icon_glyphs.claude, "C");
+        assert_eq!(t.icon_glyphs.codex, "◎");
+        let t = parse("icons = \"nerd\"\n[icon_glyphs]\ngit = \"G\"").unwrap();
+        assert_eq!(t.icon_glyphs.git, "G");
+        assert_eq!(t.icon_glyphs.editor, "\u{f040}");
+        // With `none` the overrides are ignored.
+        let t = parse("icons = \"none\"\n[icon_glyphs]\ngit = \"G\"").unwrap();
+        assert_eq!(t.icon_glyphs, IconGlyphs::preset(IconPreset::Unicode));
     }
 }

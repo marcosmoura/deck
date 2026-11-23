@@ -144,7 +144,7 @@ fn ls_shows_the_tree_as_json_text_and_the_old_summary() {
     let t = tree(home);
     let main = session(&t, "main");
     assert_eq!(main["attached"], true);
-    assert_eq!(main["projects"][0]["panels"][0]["name_source"], "default");
+    assert_eq!(main["projects"][0]["panels"][0]["name_source"], "auto");
 
     let text = ok(home, &["ls", "--tree"]);
     assert!(text.starts_with("session main ["), "{text}");

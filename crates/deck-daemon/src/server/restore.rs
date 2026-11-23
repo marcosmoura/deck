@@ -310,7 +310,9 @@ impl Shared {
                     t.launch.cwd = req.cwd;
                 }
                 let before = sess.model.active_panel();
-                self.settle(&mut st, sid, before);
+                // A saved name may be of a program that is not running any more.
+                let renamed = panel_of_terminal(&mut sess.model, tid).map(|p| p.id);
+                self.settle_named(&mut st, sid, before, renamed);
                 for frame in st.full_frames_of(sid, &[tid]) {
                     st.push_frame(sid, &frame);
                 }
@@ -325,9 +327,11 @@ impl Shared {
                     names.0.clone_from(&project.name);
                 }
                 let mut emptied = None;
+                let mut renamed = None;
                 if let Some(panel) = panel_of_terminal(&mut sess.model, tid) {
                     names.1.clone_from(&panel.name);
                     panel.remove_terminal(tid);
+                    renamed = Some(panel.id);
                     if panel.terminals.is_empty() {
                         emptied = Some(panel.id);
                     }
@@ -335,7 +339,7 @@ impl Shared {
                 if let Some(panel) = emptied {
                     sess.model.remove_panel(panel);
                 }
-                self.settle(&mut st, sid, before);
+                self.settle_named(&mut st, sid, before, renamed);
                 drop(st);
                 self.notify(
                     NoticeLevel::Warning,

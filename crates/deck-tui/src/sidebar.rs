@@ -2,9 +2,11 @@
 //! drawing.
 
 use deck_core::action::Action as Act;
+use deck_core::icons::icon_for;
 use deck_core::keys::{KeyCode, KeyEvent};
-use deck_core::model::{PanelId, ProjectId, SessionView};
-use deck_core::theme::Theme;
+use deck_core::model::{PanelId, PanelView, ProjectId, SessionView};
+use deck_core::naming::source_terminal_view;
+use deck_core::theme::{IconPreset, Theme};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
 use ratatui::layout::Rect;
@@ -294,6 +296,17 @@ impl App {
     }
 }
 
+/// The icon of a panel: the one of its source terminal's agent or program; none with
+/// `icons = "none"` or without terminals.
+pub fn panel_icon<'a>(panel: &PanelView, theme: &'a Theme) -> Option<&'a str> {
+    if theme.icons == IconPreset::None {
+        return None;
+    }
+    let term = source_terminal_view(panel)?;
+    let kind = icon_for(term.agent.as_ref().map(|a| a.kind), Some(&term.program));
+    Some(theme.icon_glyphs.get(kind))
+}
+
 /// Draws the sidebar in `area` (its columns, without the separator) and the separator
 /// column after it.
 pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
@@ -442,19 +455,25 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 } else {
                     0
                 };
+                // The icon and its space come before the name.
+                let icon = panel_icon(p, theme);
+                let name_x = icon.map_or(3, |i| 4 + width(i));
                 let room = w
-                    .saturating_sub(4 + if count_w > 0 { count_w + 1 } else { 0 })
+                    .saturating_sub(name_x + 1 + if count_w > 0 { count_w + 1 } else { 0 })
                     .saturating_sub(marker_w);
                 if p.unseen {
                     style = style.add_modifier(Modifier::BOLD);
                 }
+                if let Some(icon) = icon {
+                    put(buf, y, 3, icon, style);
+                }
                 let name = truncate(&p.name, room);
-                put(buf, y, 3, &name, style);
+                put(buf, y, name_x, &name, style);
                 if p.unseen {
                     put(
                         buf,
                         y,
-                        4 + width(&name),
+                        name_x + 1 + width(&name),
                         &theme.glyphs.unseen,
                         keep(row_style.patch(accent)),
                     );

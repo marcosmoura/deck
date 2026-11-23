@@ -38,6 +38,10 @@ Save the file and, within about a second, the colours, border style, glyphs, key
 
 `notify` (`"osc9"`, the default, `"bell"` or `"none"`) is how the client tells you through the outer terminal that an agent needs you or finished while you were not looking; see [agents](agents.md#attention). `[theme.glyphs] unseen` is the marker of such a panel.
 
+## Icons
+
+`[theme] icons` picks the icons in front of each panel's name in the sidebar and the status bar: `"unicode"` (the default) uses plain Unicode glyphs that every font has, `"nerd"` uses Font Awesome glyphs that every [Nerd Font](https://www.nerdfonts.com) carries, `"none"` draws no icons. `[theme.icon_glyphs]` sets the glyph of single kinds (`claude`, `codex`, `opencode`, `terminal`, `editor`, `git`, `monitor`, `remote`, `build`, `pager`, `repl`), each one cell wide; a wider glyph or an unknown kind is an error naming the key, and with `icons = "none"` the table is checked but not drawn. `deck config default` lists every glyph. Which kind a panel shows follows its agent, else its foreground program: `editor` for `vi`, `vim`, `nvim`, `hx`, `helix`, `nano`, `emacs`, `micro` and `kak`; `git` for `git`, `lazygit`, `tig` and `gitui`; `monitor` for `top`, `htop`, `btop` and `glances`; `remote` for `ssh`, `mosh` and `et`; `build` for `cargo`, `make`, `just`, `npm`, `pnpm`, `yarn` and `go`; `pager` for `less`, `more`, `man` and `bat`; `repl` for `python`, `python3`, `node`, `irb`, `ghci` and `iex`; `terminal` for shells and everything else. The table is fixed. Some terminals draw Nerd Font glyphs two cells wide; the space after the icon keeps the name readable.
+
 `[agents.<kind>] process` lists the program names deck takes for an agent (`claude`, `codex`, `opencode`); `[agents.<kind>] resume` and `resume_latest` are the commands that reopen its conversation after a restart, and `resume_agents` (default `true`) turns that off; see [agents](agents.md#resume).
 
 ## The reference

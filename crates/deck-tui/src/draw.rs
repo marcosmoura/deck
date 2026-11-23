@@ -2,7 +2,8 @@
 //! Every colour and glyph of deck's own UI comes from the [`Theme`].
 
 use deck_core::config::HelpGroup;
-use deck_core::model::TerminalView;
+use deck_core::model::{NameSource, TerminalView};
+use deck_core::naming::source_terminal_view;
 use deck_core::protocol::{CursorShape, NoticeLevel};
 use deck_core::theme::{BorderStyle, Theme};
 use ratatui::Frame;
@@ -490,23 +491,41 @@ fn draw_status(buf: &mut Buffer, bar: Rect, app: &App, theme: &Theme) {
             )
         };
     let project = app.mirror.project_name().unwrap_or("");
-    let location = match app.mirror.active_panel() {
-        Some(panel) => format!("{project} › {}", panel.name),
-        None => project.to_string(),
-    };
-    // The terminal's title, or its program, after the location; not when there is no panel.
-    // An agent's glyph and name come first; the glyph is coloured after the text is drawn.
+    // `project › <status> <icon> <name>` like the sidebar row (the status only with an
+    // agent; coloured after the text is drawn); a manually named panel keeps its name, so
+    // its source terminal's title follows it when it says something else.
     let mut mark = None;
-    let location = match app.mirror.focused() {
-        Some(term) if !app.panel_area_empty() => match agent::title_mark(term, app.spin, theme) {
-            Some((glyph, glyph_style, kind)) => {
-                let before = format!("{location} · ");
-                mark = Some((width(&before), glyph.clone(), glyph_style));
-                format!("{before}{glyph} {kind} · {}", terminal_label(term))
+    let location = match app.mirror.active_panel() {
+        Some(panel) => {
+            let icon =
+                sidebar::panel_icon(panel, theme).map_or_else(String::new, |i| format!("{i} "));
+            let before = format!("{project} › ");
+            let status = agent::glyph(agent::panel_status(panel), app.spin, theme).map_or_else(
+                String::new,
+                |(glyph, style)| {
+                    let text = format!("{glyph} ");
+                    mark = Some((width(&before), glyph, style));
+                    text
+                },
+            );
+            let mut text = format!("{before}{status}{icon}{}", panel.name);
+            let title = source_terminal_view(panel)
+                .and_then(|t| t.title.as_deref())
+                .filter(|t| !t.is_empty() && *t != panel.name);
+            if panel.name_source == NameSource::Manual
+                && !app.panel_area_empty()
+                && let Some(title) = title
+            {
+                text.push_str(" · ");
+                text.push_str(title);
             }
-            None => format!("{location} · {}", terminal_label(term)),
-        },
-        _ => location,
+            // A kept terminal whose process ended says so.
+            if let Some(code) = app.mirror.focused().and_then(|t| t.exit_status) {
+                text.push_str(&format!(" · exited {code}"));
+            }
+            text
+        }
+        None => project.to_string(),
     };
     // "[offset/history]" while the focused terminal is scrolled back.
     let indicator = app
@@ -715,6 +734,16 @@ mod tests {
         app
     }
 
+    /// The app of `app()` whose panel `p` was renamed by hand.
+    fn manual_app(size: (u16, u16), vp: (u16, u16), title: Option<&str>) -> App {
+        let mut app = App::new(&no_sidebar(), size, &[]);
+        let mut v = view(title);
+        v.layout_viewport = Some(vp);
+        v.projects[0].panels[0].name_source = NameSource::Manual;
+        app.on_server(ServerMsg::SessionView(v));
+        app
+    }
+
     fn render(app: &App) -> (Terminal<TestBackend>, Vec<String>) {
         let mut t = Terminal::new(TestBackend::new(app.size.0, app.size.1)).unwrap();
         t.draw(|f| draw(f, app)).unwrap();
@@ -757,8 +786,8 @@ mod tests {
         assert_eq!(
             text[23],
             format!(
-                " main  proj › p · sh{}{} ? help  d detach",
-                " ".repeat(80 - 20 - 17 - prefix_hint().chars().count()),
+                " main  proj › ❯ p{}{} ? help  d detach",
+                " ".repeat(80 - 17 - 17 - prefix_hint().chars().count()),
                 prefix_hint()
             )
         );
@@ -774,25 +803,30 @@ mod tests {
 
     #[test]
     fn the_status_bar_shows_the_osc_title_cut_with_an_ellipsis_beside_the_hints() {
-        let a = app((80, 24), Some((80, 23)), Some("vim: a title"));
+        let a = manual_app((80, 24), (80, 23), Some("vim: a title"));
         let (_, text) = render(&a);
         assert!(
-            text[23].starts_with(" main  proj › p · vim: a title "),
+            text[23].starts_with(" main  proj › ❯ p · vim: a title "),
             "{}",
             text[23]
         );
 
-        let a = app(
-            (50, 10),
-            Some((50, 9)),
-            Some("vim: a very long title indeed"),
-        );
+        let a = manual_app((50, 10), (50, 9), Some("vim: a very long title indeed"));
         let (_, text) = render(&a);
         let bar = &text[9];
-        assert!(bar.starts_with(" main  proj › p · vim: a "), "{bar}");
+        assert!(bar.starts_with(" main  proj › ❯ p · vim"), "{bar}");
         assert!(bar.contains("… "), "{bar}");
         assert!(bar.ends_with("d detach"), "{bar}");
         assert_eq!(width(bar), 50);
+
+        // A panel named after what runs in it has no title suffix, and neither has a manual
+        // one whose title is its name.
+        let a = app((80, 24), Some((80, 23)), Some("vim: a title"));
+        let (_, text) = render(&a);
+        assert!(!text[23].contains('·'), "{}", text[23]);
+        let a = manual_app((80, 24), (80, 23), Some("p"));
+        let (_, text) = render(&a);
+        assert!(text[23].starts_with(" main  proj › ❯ p  "), "{}", text[23]);
 
         // No title when the panel area is empty.
         let mut v = view(Some("t"));
@@ -829,8 +863,8 @@ mod tests {
         assert_eq!(
             text[23],
             format!(
-                " SCROLL  [120/4096] proj › p · sh{}q exit  g top  G bottom",
-                " ".repeat(80 - 33 - 23)
+                " SCROLL  [120/4096] proj › ❯ p{}q exit  g top  G bottom",
+                " ".repeat(80 - 30 - 23)
             )
         );
         let buf = t.backend().buffer();

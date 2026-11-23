@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Panels named after what runs in them
@@ -20,7 +20,7 @@ The sidebar's panel names follow what runs in each panel: the title an agent or 
 4. **Applying names**: the daemon recomputes the name of each affected panel whose `name_source` is `default` or `auto` after a title change, a detection tick that changed a `program` or an agent state, an agent event, a focus change inside a panel, a terminal added to or removed from a panel, and a change of grid order (DECK-03). When the result is `Some` and differs from the current name, it sets the name and `name_source = auto` and sends the new `SessionView`. Nothing is sent when the name is unchanged, so a spinner in an agent's title (stripped) does not cause traffic.
 5. **Manual lock**: a manual rename (`RenamePanel`, `prefix ,`, `deck rename-panel <name>`) sets `name_source = manual`, and requirement 4 never touches that panel. `deck rename-panel --auto` (new flag on DECK-05's command; a name and `--auto` together are a usage error) sets `name_source = auto` and applies requirement 4 at once; the protocol gains `Action::AutoNamePanel { panel }` for it.
 6. **Agent exit**: when the agent leaves, the source terminal is chosen again and the name follows it (usually the shell's title or name). This changes DECK-07's note, which kept the agent's name after it exited.
-7. **New panels** start with DECK-02's numbered default name, which the first `Some` from requirement 3 replaces.
+7. **New panels** start with DECK-02's numbered default name, which is only a fallback for the moment before the panel's first name: a panel created by `NewPanel`, `prefix c`, `deck new-panel` or `NewProject`, and the first panel of a new session, is named at once from its shell's program (or title). A panel restored from `state.json` whose `name_source` is `default` or `auto` is recomputed when its terminal is restored; a `manual` one never is.
 
 ## Screen
 

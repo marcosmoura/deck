@@ -17,6 +17,7 @@ use deck_core::model::{
     LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, SessionView,
     Terminal, TerminalId,
 };
+use deck_core::naming;
 use deck_core::protocol::{
     ByeReason, Frame, NoticeLevel, OuterColors, ScrollTo, ServerMsg, SessionSummary,
 };
@@ -813,7 +814,7 @@ impl Shared {
         } = new;
         let handle = terminal::start(self, tid, sid, &req, parts);
 
-        let model = Session {
+        let mut model = Session {
             id: sid,
             name,
             active_project: Some(pid),
@@ -833,6 +834,7 @@ impl Shared {
                 }],
             }],
         };
+        naming::refresh_panel(&mut model, panel);
         st.sessions.push(SessionRt {
             model,
             env: a.env.clone(),
@@ -876,7 +878,7 @@ impl Shared {
         out
     }
 
-    pub fn input(&self, cid: ClientId, terminal: TerminalId, bytes: Vec<u8>) {
+    pub fn input(self: &Arc<Self>, cid: ClientId, terminal: TerminalId, bytes: Vec<u8>) {
         let mut st = self.st();
         let Some(sid) = st.clients.get(&cid).and_then(|c| c.session) else {
             tracing::debug!("input from a client without a session ignored");
@@ -1120,7 +1122,20 @@ impl Shared {
         if model.title == title {
             return;
         }
+        // Only an animation in front of an agent's title changed: nothing to tell.
+        let animation = model.agent.is_some()
+            && match (&model.title, &title) {
+                (Some(old), Some(new)) => naming::title_core(old) == naming::title_core(new),
+                _ => false,
+            };
         model.title = title;
+        // A new name travels in the same throttled view as the title.
+        if !self.refresh_name_of(&mut st, sid, h.id) && animation {
+            return;
+        }
+        let Some(sess) = st.session_mut(sid) else {
+            return;
+        };
         match sess.title_throttle.poke(now) {
             Poke::Now => st.push_view(sid),
             Poke::Wait(wait) => {
@@ -1216,8 +1231,10 @@ impl Shared {
         let before = sess.model.active_panel();
         sess.terminals.remove(&h.id);
         let mut emptied = None;
+        let mut renamed = None;
         if let Some(panel) = panel_of_terminal(&mut sess.model, h.id) {
             panel.remove_terminal(h.id);
+            renamed = Some(panel.id);
             if panel.terminals.is_empty() {
                 emptied = Some(panel.id);
             }
@@ -1241,7 +1258,7 @@ impl Shared {
             }
             return;
         }
-        self.settle(&mut st, sid, before);
+        self.settle_named(&mut st, sid, before, renamed);
         drop(st);
         if quick && was_restored {
             self.notify(
@@ -1273,7 +1290,8 @@ impl Shared {
             // The agent left with its program.
             t.agent = None;
         }
-        self.settle(st, sid, before);
+        let renamed = panel_of_terminal(&mut sess.model, h.id).map(|p| p.id);
+        self.settle_named(st, sid, before, renamed);
     }
 
     /// After a change to a session: its terminals match the viewport, every client has the
@@ -1295,6 +1313,42 @@ impl Shared {
         for frame in frames {
             st.push_frame(sid, &frame);
         }
+    }
+
+    /// [`Shared::settle`] after a change of a panel's terminals or of their focus: the panel
+    /// may take a new name.
+    fn settle_named(
+        self: &Arc<Self>,
+        st: &mut State,
+        sid: SessionId,
+        before: Option<PanelId>,
+        panel: Option<PanelId>,
+    ) {
+        if let Some(panel) = panel {
+            self.refresh_name(st, sid, panel);
+        }
+        self.settle(st, sid, before);
+    }
+
+    /// Recomputes the name of a panel that follows what runs in it; true when it changed
+    /// (the caller sends the view).
+    fn refresh_name(self: &Arc<Self>, st: &mut State, sid: SessionId, panel: PanelId) -> bool {
+        let renamed = st
+            .session_mut(sid)
+            .is_some_and(|s| naming::refresh_panel(&mut s.model, panel));
+        if renamed {
+            self.mark_dirty(st);
+        }
+        renamed
+    }
+
+    /// [`Shared::refresh_name`] for the panel of a terminal.
+    fn refresh_name_of(self: &Arc<Self>, st: &mut State, sid: SessionId, tid: TerminalId) -> bool {
+        let panel = st
+            .session_mut(sid)
+            .and_then(|s| panel_of_terminal(&mut s.model, tid))
+            .map(|p| p.id);
+        panel.is_some_and(|panel| self.refresh_name(st, sid, panel))
     }
 
     /// Sends `Bye` to the session's clients and removes the session. Its terminals are not
@@ -1381,6 +1435,9 @@ impl Shared {
             }
             _ => None,
         };
+        // The panel that may take a new name after the action: its terminals or the focused
+        // one changed, or the user gave the name back.
+        let mut renamed_panel = None;
         let sess = state.session_mut(sid).ok_or(ActionError::NotAttached)?;
         let before = sess.model.active_panel();
         let mut doomed: Vec<Arc<TermHandle>> = Vec::new();
@@ -1440,6 +1497,12 @@ impl Shared {
                 p.name = name;
                 p.name_source = NameSource::Manual;
             }
+            Action::AutoNamePanel { panel } => {
+                panel_mut(&mut sess.model, panel)
+                    .ok_or(ActionError::NoSuchPanel(panel))?
+                    .name_source = NameSource::Auto;
+                renamed_panel = Some(panel);
+            }
             Action::ClosePanel { panel } => {
                 let removed = sess
                     .model
@@ -1461,6 +1524,7 @@ impl Shared {
                 let panel = panel_of_terminal(&mut sess.model, terminal)
                     .ok_or(ActionError::NoSuchTerminal(terminal))?;
                 panel.remove_terminal(terminal);
+                renamed_panel = Some(panel.id);
                 let emptied = panel.terminals.is_empty().then_some(panel.id);
                 doomed.extend(sess.terminals.remove(&terminal));
                 if let Some(panel) = emptied {
@@ -1471,6 +1535,7 @@ impl Shared {
                 let panel = panel_of_terminal(&mut sess.model, terminal)
                     .ok_or(ActionError::NoSuchTerminal(terminal))?;
                 panel.focused_terminal = Some(terminal);
+                renamed_panel = Some(panel.id);
             }
             Action::FocusDirection { dir } => {
                 let (cols, rows) = sess.viewport.unwrap_or(DEFAULT_VIEWPORT);
@@ -1493,6 +1558,7 @@ impl Shared {
                     .and_then(|to| panel.terminals.get(to));
                 if let Some(target) = target {
                     panel.focused_terminal = Some(target.id);
+                    renamed_panel = Some(panel.id);
                 }
             }
             Action::SetRatios { panel, n, ratios } => {
@@ -1512,7 +1578,7 @@ impl Shared {
                 unreachable!("handled by `action`")
             }
         }
-        self.settle(&mut st, sid, before);
+        self.settle_named(&mut st, sid, before, renamed_panel);
         drop(st);
         self.hang_up(doomed);
         Ok(())
@@ -1649,7 +1715,7 @@ impl Shared {
                 sess.model.active_project = Some(project_id);
             }
         }
-        self.settle(&mut st, sid, before);
+        self.settle_named(&mut st, sid, before, Some(panel_id));
         Ok(Made {
             project: project_id,
             panel: panel_id,
@@ -1784,7 +1850,7 @@ impl Shared {
                 panel.focused_terminal = focused;
             }
         }
-        self.settle(&mut st, sid, before);
+        self.settle_named(&mut st, sid, before, Some(panel_id));
         for frame in st.full_frames_of(sid, &[tid]) {
             st.push_frame(sid, &frame);
         }

@@ -69,6 +69,9 @@ impl Shared {
             Request::RenamePanel { panel, name } => self
                 .control_rename_panel(panel, name)
                 .map(|()| Response::Ok),
+            Request::AutoNamePanel { panel } => {
+                self.control_auto_name_panel(panel).map(|()| Response::Ok)
+            }
             _ => Err("not a tree request".to_string()),
         };
         result.unwrap_or_else(Response::Error)
@@ -209,11 +212,13 @@ impl Shared {
             return Err(format!("no session {sid}"));
         };
         let before = sess.model.active_panel();
+        let mut renamed = None;
         let panel = match kind {
             Kind::Terminal => {
                 let terminal = deck_core::model::TerminalId(id);
                 panel_of_terminal(&mut sess.model, terminal).map(|p| {
                     p.focused_terminal = Some(terminal);
+                    renamed = Some(p.id);
                     p.id
                 })
             }
@@ -222,7 +227,7 @@ impl Shared {
         if let Some(panel) = panel {
             sess.model.focus_panel(panel);
         }
-        self.settle(&mut st, sid, before);
+        self.settle_named(&mut st, sid, before, renamed);
         Ok(())
     }
 
@@ -251,6 +256,12 @@ impl Shared {
     fn control_rename_panel(self: &Arc<Self>, panel: PanelId, name: String) -> Result<(), String> {
         let sid = self.session_of_panel(panel)?;
         self.edit(sid, Action::RenamePanel { panel, name })
+            .map_err(|e| e.to_string())
+    }
+
+    fn control_auto_name_panel(self: &Arc<Self>, panel: PanelId) -> Result<(), String> {
+        let sid = self.session_of_panel(panel)?;
+        self.edit(sid, Action::AutoNamePanel { panel })
             .map_err(|e| e.to_string())
     }
 }

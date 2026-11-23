@@ -13,16 +13,16 @@ Commands that read and edit a running deck from outside: from another terminal, 
 
 ## Commands
 
-| Command                                                                                                     | What it does                                                                                                                |
-| ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `deck ls`                                                                                                   | The session list, as before.                                                                                                |
-| `deck ls --json` / `--tree`                                                                                 | The whole tree as JSON, or as indented text (`[id]` after each name, `*` on the active panel and the focused terminal).     |
-| `deck new-project <name> [--dir <path>] [--focus]`                                                          | Adds a project; `--dir` defaults to the current directory. Prints the new id.                                               |
-| `deck new-panel [--project <id\|name>] [--name <n>] [--cwd <dir>] [--focus] [-- <program> <args>...]`       | Adds a panel with one terminal; `--cwd` defaults to the project root. Prints the id.                                        |
-| `deck new-terminal [--panel <id>] [--cwd <dir>] [--env K=V]... [--keep] [--focus] [-- <program> <args>...]` | Adds a terminal; `--cwd` defaults to where the panel's focused terminal is. Prints the id. Fails when the grid has no room. |
-| `deck focus <id>`                                                                                           | Focuses a terminal (with its panel and project) or a panel.                                                                 |
-| `deck close <id>`                                                                                           | Closes a terminal, a panel or a project, without confirmation.                                                              |
-| `deck rename-panel [--panel <id>] <name>`                                                                   | Names a panel by hand (`name_source` becomes `manual`).                                                                     |
+| Command                                                                                                     | What it does                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `deck ls`                                                                                                   | The session list, as before.                                                                                                                                                         |
+| `deck ls --json` / `--tree`                                                                                 | The whole tree as JSON, or as indented text (`[id]` after each name, `*` on the active panel and the focused terminal).                                                              |
+| `deck new-project <name> [--dir <path>] [--focus]`                                                          | Adds a project; `--dir` defaults to the current directory. Prints the new id.                                                                                                        |
+| `deck new-panel [--project <id\|name>] [--name <n>] [--cwd <dir>] [--focus] [-- <program> <args>...]`       | Adds a panel with one terminal; `--cwd` defaults to the project root. Prints the id.                                                                                                 |
+| `deck new-terminal [--panel <id>] [--cwd <dir>] [--env K=V]... [--keep] [--focus] [-- <program> <args>...]` | Adds a terminal; `--cwd` defaults to where the panel's focused terminal is. Prints the id. Fails when the grid has no room.                                                          |
+| `deck focus <id>`                                                                                           | Focuses a terminal (with its panel and project) or a panel.                                                                                                                          |
+| `deck close <id>`                                                                                           | Closes a terminal, a panel or a project, without confirmation.                                                                                                                       |
+| `deck rename-panel [--panel <id>] <name>\|--auto`                                                           | Names a panel by hand (`name_source` becomes `manual`, and the name stays); `--auto` gives it back to what runs in it (`name_source` `auto`). A name with `--auto` is a usage error. |
 
 `new-*` print the id (`12`, or `{"id": 12}` with `--json`); `focus`, `close` and `rename-panel` print nothing (`{"ok": true}` with `--json`).
 
@@ -106,7 +106,7 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
 }
 ```
 
-`pid` is null for a terminal that has exited; `exited` is the exit code (a death by signal `n` is `128 + n`) or null. `cwd` is the directory the program reported (OSC 7), else the one the daemon finds by polling the process every 5 s, else the directory it was launched in.
+`program` is the name of the foreground process (`nvim`, `claude`, the shell's name), kept as it was when the process cannot be read. A panel named after what runs in it has `name_source` `auto`. `pid` is null for a terminal that has exited; `exited` is the exit code (a death by signal `n` is `128 + n`) or null. `cwd` is the directory the program reported (OSC 7), else the one the daemon finds by polling the process every 5 s, else the directory it was launched in.
 
 ## Agent events
 
@@ -114,7 +114,7 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
 
 ## Kept terminals
 
-`new-terminal --keep` leaves the terminal in place when its program exits. In a grid its title reads `<title> · exited <code>` and its border and title are drawn muted; a terminal alone in its panel shows `exited <code>` in the status bar (not muted), and input to it is dropped. `Option+Space x` closes an exited terminal at once; a running one still asks. A panel stays while a kept terminal is in it.
+`new-terminal --keep` leaves the terminal in place when its program exits. In a grid its title reads `<title> · exited <code>` and its border and title are drawn muted; a terminal alone in its panel adds ` · exited <code>` to the panel in the status bar (not muted), and input to it is dropped. `Option+Space x` closes an exited terminal at once; a running one still asks. A panel stays while a kept terminal is in it.
 
 `keep` is saved in `state.json`. After a daemon restart a kept terminal that had exited is gone, and one that was still running is started again with `keep` set.
 

@@ -162,10 +162,10 @@ fn hook_events_show_working_and_waiting_and_typing_answers() {
     wait_status(&h, "the working spinner", is_spinner);
     event(&h, terminal, AgentStatus::Waiting, "s1");
     wait_status(&h, "the waiting mark", |c| c == '!');
-    wait_until("the title", TIMEOUT, || {
+    wait_until("the icon and the count in the status bar", TIMEOUT, || {
         rows(&h)
             .last()
-            .is_some_and(|bar| bar.contains("· ! claude · "))
+            .is_some_and(|bar| bar.contains("› ! ✻ ") && bar.contains("1 waiting"))
     });
     h.capture("waiting");
     let agent = agent_json(&h);
@@ -224,6 +224,16 @@ fn inactive_first_panel(h: &mut Harness) -> (String, String, TerminalId) {
     )
 }
 
+/// The name of the first panel, from `deck ls --json`.
+fn panel_name(h: &Harness) -> String {
+    let out = h.run_deck(&["ls", "--json"]);
+    let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
+    doc["sessions"][0]["projects"][0]["panels"][0]["name"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
 /// The bytes the program wrote after the first `from` ones.
 fn written_since(h: &Harness, from: usize) -> Vec<u8> {
     h.raw_output().get(from..).unwrap_or_default().to_vec()
@@ -239,7 +249,7 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
     let mut h = attached(&bin);
     h.send_keys("claude\r");
     h.wait_for_text("agent-ready", TIMEOUT);
-    let (project, panel, terminal) = inactive_first_panel(&mut h);
+    let (project, _, terminal) = inactive_first_panel(&mut h);
 
     let before = h.raw_output().len();
     event(&h, terminal, AgentStatus::Working, "s1");
@@ -250,9 +260,13 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
             && r.last().is_some_and(|b| b.contains("1 waiting"))
     });
     h.capture("attention");
+    // The panel was named after the agent's first prompt by the events.
+    let panel = panel_name(&h);
+    assert_eq!(panel, "refactor the layout engine");
     let row = rows(&h)[3].clone();
-    assert!(row.starts_with(&format!(" ! {panel} •")), "{row}");
-    assert!(h.cell(3, 3).bold(), "the name of an unseen panel is bold");
+    // The sidebar cuts the long name to its width.
+    assert!(row.starts_with(" ! ✻ refactor the layout"), "{row}");
+    assert!(h.cell(3, 5).bold(), "the name of an unseen panel is bold");
 
     let body = format!("claude needs you · {project} › {panel}");
     let expected = format!("\x1b]9;{body}\x07");

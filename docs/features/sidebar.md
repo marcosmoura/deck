@@ -8,8 +8,8 @@ A session holds projects, a project holds panels, and a panel shows one terminal
  main                       │
                             │
  ▾ terminal-multiplexer     │
-▌  editor                   │
-   claude                   │
+▌  ✎ editor                 │
+ ! ✻ claude                 │
  ▾ budget                   │
    no panels                │
  ▸ dotfiles               2 │
@@ -25,7 +25,10 @@ A session holds projects, a project holds panels, and a panel shows one terminal
 
 After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previous panel, `1`..`9` the N-th panel of the active project, `,` rename the panel, `X` close it, `P` new project, `.` rename the project, `Q` close it, `b` show or hide the sidebar, `Tab` move focus into the sidebar, `?` help. The full table, with the config names, is in [keys](keys.md#bindings).
 
-- A new panel runs one shell in the project's directory and is named with the lowest unused number (`1`, `2`, ...).
+- A new panel runs one shell in the project's directory and starts with the lowest unused number (`1`, `2`, ...) as its name, which is only a fallback for the moment before its first name: every panel, the first of a session included, is named after its shell at once.
+- A panel keeps its name in step with what runs in it until you rename it: a coding agent shows its title without the spinner in front (`Fix login bug`), else the first line of its first prompt; any other program shows the title it sets (a shell's directory, an editor's file), else its own name (`nvim`, `zsh`). The name follows the panel's first terminal that has an agent, else its focused terminal, and is cut to 32 cells. When an agent exits, the name follows what is left. Renaming a panel (`,`, `deck rename-panel`) locks the name; `deck rename-panel --auto` unlocks it.
+- Every panel row starts with an icon for what runs in its source terminal: `▌`, the status column, a space, the icon, a space, then the name (`▌⠹ ✻ Fix login bug`). The agent's own icon for Claude Code (`✻`), Codex (`◎`) and OpenCode (`◇`); `❯` for a shell and any unknown program; `✎` for an editor, `±` git, `◔` a monitor, `⇄` ssh, `▲` a build tool, `¶` a pager and `λ` a REPL. A renamed panel keeps its name and the icon follows its program. A panel with no terminals has no icon. `[theme] icons = "nerd"` uses Nerd Font glyphs, `"none"` draws no icons; see [config](config.md#icons).
+- The status bar shows `project › <status> <icon> <name>` (the status glyph only with an agent) for the active panel, then ` · <title>` (the source terminal's title) only for a panel you named by hand, and only when the title differs from the name.
 - A new project asks `Directory:` (prefilled with the directory deck was started in), then `Project name:` (prefilled with the directory's name: `~` for the home directory, `root` for `/`). `~` and relative paths are resolved by the client, against that start directory. Its first panel starts with it.
 - Closing a panel or a project asks `Close panel "<name>" and its terminal? (y/n)` first. `y` confirms; `n` or `Esc` cancels; any other key is ignored.
 - Closing the last panel of a project leaves the project empty. The panel area then shows `No panels in <project> — <key> to create one` (or `No projects — <key> to add one`), and typing goes nowhere.

@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use deck_core::agents::{AgentKind, AgentResume, AgentSource, AgentState, AgentStatus, match_argv};
+use deck_core::agents::{
+    AgentKind, AgentResume, AgentSource, AgentState, AgentStatus, match_argv, program_name,
+};
 use deck_core::model::{SessionId, TerminalId};
 use deck_core::protocol::{Response, ServerMsg};
 
@@ -72,17 +74,30 @@ impl Shared {
             }
             let now = self.clock.now();
             let mut changed: Vec<SessionId> = Vec::new();
+            let mut moved_terminals: Vec<(SessionId, TerminalId)> = Vec::new();
             let mut resume_changed = false;
             for (h, argv) in found {
-                let kind = argv.and_then(|a| match_argv(&a, &config.agents));
+                let kind = argv.as_deref().and_then(|a| match_argv(a, &config.agents));
                 let Some(sess) = st.session_mut(h.session) else {
                     continue;
                 };
                 let Some(model) = terminal_model(&mut sess.model, h.id) else {
                     continue;
                 };
+                // A process that could not be read leaves the program and the agent as
+                // they were.
+                let Some(argv) = argv else {
+                    continue;
+                };
+                let mut moved = false;
+                if let Some(name) = program_name(&argv)
+                    && name != model.program
+                {
+                    model.program = name;
+                    moved = true;
+                }
                 let before = resume_of(model.agent.as_ref());
-                let moved = agents::detect(
+                moved |= agents::detect(
                     &mut model.agent,
                     &mut lock(&h.agent_rt),
                     kind,
@@ -90,9 +105,16 @@ impl Shared {
                     now,
                 );
                 resume_changed |= before != resume_of(model.agent.as_ref());
-                if moved && !changed.contains(&h.session) {
-                    changed.push(h.session);
+                if moved {
+                    moved_terminals.push((h.session, h.id));
+                    if !changed.contains(&h.session) {
+                        changed.push(h.session);
+                    }
                 }
+            }
+            // A program or an agent that moved can rename its panel.
+            for (sid, tid) in moved_terminals {
+                self.refresh_name_of(&mut st, sid, tid);
             }
             for sid in changed {
                 self.agents_changed(&mut st, sid);
@@ -141,6 +163,7 @@ impl Shared {
         };
         let now = self.clock.now();
         let sid = handle.session;
+        let tid = handle.id;
         let mut before = None;
         let moved = self.with_agent(&mut st, &handle, |agent, rt| {
             before = agent.clone();
@@ -156,16 +179,18 @@ impl Shared {
             if resume_of(before.as_ref()) != resume_of(after.as_ref()) {
                 self.mark_dirty(&mut st);
             }
+            self.refresh_name_of(&mut st, sid, tid);
             self.agents_changed(&mut st, sid);
         }
         Response::Ok
     }
 
     /// The user typed into a terminal: an agent that waited for them works again.
-    pub(super) fn agent_answered(&self, st: &mut State, handle: &TermHandle) {
+    pub(super) fn agent_answered(self: &Arc<Self>, st: &mut State, handle: &TermHandle) {
         let now = self.clock.now();
         let moved = self.with_agent(st, handle, |agent, rt| agents::answered(agent, rt, now));
         if moved {
+            self.refresh_name_of(st, handle.session, handle.id);
             self.agents_changed(st, handle.session);
         }
     }
@@ -243,7 +268,7 @@ impl Shared {
     }
 
     /// Tells the session's clients about a changed agent state.
-    fn agents_changed(&self, st: &mut State, sid: SessionId) {
+    fn agents_changed(self: &Arc<Self>, st: &mut State, sid: SessionId) {
         st.push_view(sid);
         self.bump();
     }

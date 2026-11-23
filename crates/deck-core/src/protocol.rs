@@ -13,7 +13,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -136,6 +136,10 @@ pub enum Request {
     RenamePanel {
         panel: PanelId,
         name: String,
+    },
+    /// Gives a panel its live name back (`deck rename-panel --auto`).
+    AutoNamePanel {
+        panel: PanelId,
     },
     /// Types bytes into a terminal; with `paste` they are wrapped in bracketed-paste markers
     /// when the terminal asked for them. Answered by `Ok`.
@@ -717,6 +721,7 @@ mod tests {
                 panel: PanelId(3),
                 name: "build".into(),
             }),
+            ClientMsg::Request(Request::AutoNamePanel { panel: PanelId(3) }),
             ClientMsg::Request(Request::Send {
                 terminal: TerminalId(4),
                 bytes: b"echo \xe2\x9c\x93\r".to_vec(),

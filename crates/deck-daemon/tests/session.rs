@@ -45,7 +45,7 @@ async fn a_new_client_gets_main_with_a_shell_sized_by_its_attach() {
         cwd.path().file_name().unwrap().to_string_lossy()
     );
     assert_eq!(project.root, cwd.path());
-    assert_eq!(project.panels[0].name, "1");
+    assert_eq!(project.panels[0].name, "sh", "named after its program");
 
     client.type_line("stty size").await;
     client.wait_row("24 80").await;

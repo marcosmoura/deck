@@ -569,6 +569,28 @@ async fn a_leftover_temp_file_is_deleted_at_start() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_restored_auto_name_follows_what_runs_now() {
+    let work = workdir();
+    let home = TestDaemon::new_home();
+    let mut saved = panel(3, "nvim", vec![shell(4)]);
+    saved.name_source = NameSource::Auto;
+    let state = file(vec![session(
+        1,
+        "main",
+        vec![project(2, "p", work.path(), vec![saved])],
+    )]);
+    seed(home.path(), &state);
+    let daemon = TestDaemon::start_on(home).await;
+    let mut client = attach_to(&daemon, "main").await;
+    client
+        .wait(|c| c.view.as_ref().unwrap().projects[0].panels[0].name == "sh")
+        .await;
+    let view = client.view.as_ref().unwrap();
+    assert_eq!(view.projects[0].panels[0].name_source, NameSource::Auto);
+    daemon.stop().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_missing_program_is_dropped_with_its_panel_and_reported() {
     let work = workdir();
     let home = TestDaemon::new_home();
@@ -599,7 +621,7 @@ async fn a_missing_program_is_dropped_with_its_panel_and_reported() {
         .wait(|c| c.view.as_ref().unwrap().projects[0].panels.len() == 1)
         .await;
     let view = client.view.as_ref().unwrap();
-    assert_eq!(view.projects[0].panels[0].name, "kept");
+    assert_eq!(view.projects[0].panels[0].id, PanelId(5), "the kept panel");
     assert_eq!(view.name, "main", "the session stays");
     daemon.stop().await.unwrap();
 }

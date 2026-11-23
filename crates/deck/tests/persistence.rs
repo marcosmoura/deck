@@ -199,16 +199,27 @@ fn add_terminals(h: &mut Harness, up_to: usize) {
 fn the_sessions_panels_and_grid_come_back_after_kill_server() {
     let mut h = Harness::builder(SIZE).config_unset("sidebar").deck();
     h.wait_for_text("$", TIMEOUT);
-    // Panel 1 has one terminal, panel 2 three, a renamed panel 3 five.
+    // Panel 1 has one terminal, the second three, a renamed third five. New panels are
+    // named after their shell at once.
     prefixed(&mut h, "c");
-    h.wait_for_text("▌  2", TIMEOUT);
+    wait_until("a second panel", TIMEOUT, || {
+        h.screen_text()
+            .lines()
+            .nth(4)
+            .is_some_and(|r| r.starts_with("▌  ❯ sh"))
+    });
     add_terminals(&mut h, 3);
     prefixed(&mut h, "c");
-    h.wait_for_text("▌  3", TIMEOUT);
+    wait_until("a third panel", TIMEOUT, || {
+        h.screen_text()
+            .lines()
+            .nth(5)
+            .is_some_and(|r| r.starts_with("▌  ❯ sh"))
+    });
     add_terminals(&mut h, 5);
     prefixed(&mut h, ",");
     h.send_keys("\x15build\r");
-    h.wait_for_text("▌  build", TIMEOUT);
+    h.wait_for_text("▌  ❯ build", TIMEOUT);
     let other = h.run_deck(&["new", "other", "-d"]);
     assert!(other.status.success(), "{}", stderr(&other));
     wait_until("the grid to settle", TIMEOUT, || {

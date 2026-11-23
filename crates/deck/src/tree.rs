@@ -114,8 +114,12 @@ pub struct RenamePanelArgs {
     /// The panel (default: this terminal's).
     #[arg(long, value_name = "ID")]
     pub panel: Option<u64>,
-    /// The new name.
-    pub name: String,
+    /// The new name; it stays until `--auto`.
+    #[arg(required_unless_present = "auto", conflicts_with = "auto")]
+    pub name: Option<String>,
+    /// Name the panel after what runs in it again.
+    #[arg(long)]
+    pub auto: bool,
 }
 
 fn parse_env(text: &str) -> Result<(String, String), String> {
@@ -687,11 +691,14 @@ pub fn rename_panel(args: RenamePanelArgs) -> ExitCode {
                 pick_panel(&tree, session, None, here)?
             }
         };
-        api.done(Request::RenamePanel {
-            panel,
-            name: args.name.clone(),
-        })
-        .map(Some)
+        let request = match &args.name {
+            Some(name) if !args.auto => Request::RenamePanel {
+                panel,
+                name: name.clone(),
+            },
+            _ => Request::AutoNamePanel { panel },
+        };
+        api.done(request).map(Some)
     })();
     finish(json, result)
 }

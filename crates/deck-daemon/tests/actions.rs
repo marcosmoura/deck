@@ -123,7 +123,11 @@ async fn a_new_project_gets_panel_1_with_a_shell_in_its_root_and_focus() {
     assert_eq!(api.name, "api");
     assert_eq!(api.root, real(&root));
     assert_eq!(api.panels.len(), 1);
-    assert_eq!(api.panels[0].name, "1");
+    assert_eq!(api.panels[0].name, "sh", "named after its program");
+    assert_eq!(
+        api.panels[0].name_source,
+        deck_core::model::NameSource::Auto
+    );
     assert_eq!(view.active_project, Some(api.id));
     assert_eq!(view.active_panel, Some(api.panels[0].id));
     assert_eq!(api.panels[0].terminals[0].program, "sh");
@@ -140,13 +144,19 @@ async fn panels_get_the_lowest_unused_number() {
     let main = c.tree()[0].0.clone();
     new_panel(&mut c, &main).await;
     new_panel(&mut c, &main).await;
-    assert_eq!(c.tree()[0].1, ["1", "2", "3"]);
+    // Panels are named after their shell at once; the numbers never show.
+    assert_eq!(c.tree()[0].1, ["sh", "sh", "sh"]);
 
-    let two = c.panel_id(&main, "2");
+    let [one, two, three] = [1, 2, 3].map(|n| c.panel_at(&main, n));
     c.action(Action::ClosePanel { panel: two }).await.unwrap();
-    assert_eq!(c.tree()[0].1, ["1", "3"]);
+    assert_eq!(c.tree()[0].1, ["sh", "sh"]);
     new_panel(&mut c, &main).await;
-    assert_eq!(c.tree()[0].1, ["1", "3", "2"]);
+    let ids: Vec<_> = c.view.as_ref().unwrap().projects[0]
+        .panels
+        .iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(ids[..2], [one, three]);
 
     let view = c.view.clone().unwrap();
     let last = view.projects[0].panels.last().unwrap();
@@ -178,9 +188,9 @@ async fn closing_a_panel_kills_its_process_and_moves_focus() {
 
     // The middle panel closes: focus goes to the next one.
     let (p1, p2, p3) = (
-        c.panel_id(&main, "1"),
-        c.panel_id(&main, "2"),
-        c.panel_id(&main, "3"),
+        c.panel_at(&main, 1),
+        c.panel_at(&main, 2),
+        c.panel_at(&main, 3),
     );
     c.action(Action::FocusPanel { panel: p2 }).await.unwrap();
     let pid = shell_pid(&mut c, "P2").await;
@@ -250,7 +260,7 @@ async fn exit_in_a_panels_only_terminal_removes_the_panel_and_keeps_the_rest() {
     let main = c.tree()[0].0.clone();
     new_panel(&mut c, &main).await;
     c.type_line("exit").await;
-    c.wait(|c| c.tree()[0].1 == ["1"]).await;
+    c.wait(|c| c.tree()[0].1.len() == 1).await;
     let view = c.view.clone().unwrap();
     assert_eq!(view.active_panel, Some(view.projects[0].panels[0].id));
     assert_eq!(c.bye, None);
@@ -287,11 +297,11 @@ async fn cycling_follows_the_sidebar_order_and_skips_collapsed_projects() {
     assert!(c.view.as_ref().unwrap().projects[1].collapsed);
 
     let expect = [
-        c.panel_id(&main, "1"),
-        c.panel_id(&main, "2"),
-        c.panel_id("b", "1"),
+        c.panel_at(&main, 1),
+        c.panel_at(&main, 2),
+        c.panel_at("b", 1),
     ];
-    let first = c.panel_id(&main, "1");
+    let first = c.panel_at(&main, 1);
     c.action(Action::FocusPanel { panel: first }).await.unwrap();
     let mut seen = vec![first];
     for _ in 0..3 {
@@ -330,7 +340,7 @@ async fn after_focus_panel_only_the_new_panels_full_frames_follow() {
     sleep(Duration::from_millis(150)).await;
 
     let before = c.log.len();
-    let p1 = c.panel_id(&main, "1");
+    let p1 = c.panel_at(&main, 1);
     c.action(Action::FocusPanel { panel: p1 }).await.unwrap();
     let frames: Vec<_> = c.log[before..]
         .iter()
@@ -359,7 +369,7 @@ async fn after_focus_panel_only_the_new_panels_full_frames_follow() {
     assert!(!hidden, "frames of the inactive panel were streamed");
 
     // Coming back shows what it printed meanwhile.
-    let p2 = c.panel_id(&main, "2");
+    let p2 = c.panel_at(&main, 2);
     c.action(Action::FocusPanel { panel: p2 }).await.unwrap();
     c.wait_row("HIDDEN").await;
     daemon.stop().await.unwrap();
