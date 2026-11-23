@@ -473,11 +473,28 @@ pub fn panel_icon_kind(panel: &PanelView, theme: &Theme) -> Option<IconKind> {
     ))
 }
 
+/// The style of an icon of `kind` in a row styled `style`: its text in the kind's colour
+/// (`[theme.icon_colors]`) when it has one. On a reversed row the colour goes in the
+/// background, which is what a reversed cell shows as text.
+pub fn icon_style(theme: &Theme, kind: IconKind, style: Style) -> Style {
+    let Some(c) = theme.icon_colors.get(kind) else {
+        return style;
+    };
+    let reversed = style.add_modifier.contains(Modifier::REVERSED)
+        && !style.sub_modifier.contains(Modifier::REVERSED);
+    if reversed {
+        style.bg(color(c))
+    } else {
+        style.fg(color(c))
+    }
+}
+
 /// The icon of an icon kind as it is drawn, two cells wide, with the style to draw it in. For a
 /// logo that was sent, the placeholder cells: the visible colours of `style`, no modifiers, the
 /// id as foreground (see [`crate::graphics::Images::cell_for`]); else the text icon and a
 /// blank cell, in `style`.
 pub fn kind_icon_cell(app: &App, theme: &Theme, kind: IconKind, style: Style) -> (String, Style) {
+    let style = icon_style(theme, kind, style);
     let image = app.logos().and_then(|images| {
         let (rgb, cell) = images.cell_for(style);
         let pair = Pair {

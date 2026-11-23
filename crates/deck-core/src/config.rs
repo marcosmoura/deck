@@ -784,6 +784,7 @@ mod tests {
         assert!(theme.contains_key("icons"));
         assert!(theme.contains_key("icon_images"));
         assert!(theme.contains_key("icon_glyphs"));
+        assert!(theme.contains_key("icon_colors"));
         let glyphs = theme["glyphs"].as_table().unwrap();
         for name in [
             "expanded",

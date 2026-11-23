@@ -291,8 +291,8 @@ fn the_dialog_draws_three_columns_with_title_directory_and_age() {
         cell.modifier.contains(Modifier::REVERSED) || themed,
         "{cell:?}"
     );
-    // The active column's header is in the accent colour and bold.
-    assert_eq!(buf[(7, 6)].fg, color(a.theme.accent));
+    // The active column's header is in the accent colour and bold; Claude's icon in its own.
+    assert_eq!(buf[(7, 6)].fg, ratatui::style::Color::Rgb(0xd9, 0x77, 0x57));
     assert!(buf[(10, 6)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(10, 6)].fg, color(a.theme.accent));
     assert_ne!(buf[(36, 6)].fg, color(a.theme.accent));

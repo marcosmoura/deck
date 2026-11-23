@@ -132,6 +132,13 @@ unseen = "•" # a panel whose agent needed you or finished while you were not l
 # pager = "¶" # less, more, man, bat (nerd: U+F02D)
 # repl = "λ" # python, python3, node, irb, ghci, iex (nerd: U+F121)
 
+# The colour of each agent icon (text or logo), in the colour syntax above; "none" draws it
+# in its row's colour.
+[theme.icon_colors]
+claude = "#d97757" # Claude's orange
+# codex = "none"
+# opencode = "none"
+
 # How deck recognises each coding agent in a terminal: the program names (the command as
 # typed, or the script that node, bun, deno, sh, bash, zsh or dash runs, without extension)
 # whose process in the foreground of the terminal means that agent.

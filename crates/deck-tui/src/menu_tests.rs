@@ -671,12 +671,14 @@ fn with_images_the_menu_items_draw_logos_sent_before_the_frame() {
 
 #[test]
 fn the_highlighted_logo_is_sent_in_the_selection_colour() {
+    // OpenCode: Claude's logo keeps its own colour.
     let mut a = menu_with_images();
+    press(&mut a, ct::KeyCode::Down);
     press(&mut a, ct::KeyCode::Down);
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
     let buf = buffer(&a);
-    let id = logo_at(&buf, 2, 18).expect("logo on the highlighted row");
+    let id = logo_at(&buf, 2, 19).expect("logo on the highlighted row");
     let (_, pair) = *a
         .images
         .as_ref()
@@ -694,7 +696,7 @@ fn the_highlighted_logo_is_sent_in_the_selection_colour() {
         .0;
     assert_eq!(pair.rgb, shown);
     // An unselected logo is sent in another colour.
-    let other = logo_at(&buf, 2, 19).unwrap();
+    let other = logo_at(&buf, 2, 20).unwrap();
     let (_, other_pair) = *a
         .images
         .as_ref()

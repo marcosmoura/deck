@@ -179,3 +179,31 @@ fn a_panel_without_terminals_has_no_icon() {
     let (_, rows) = render(&a);
     assert_eq!(sidebar(&rows)[4], pad("      nvim"));
 }
+
+#[test]
+fn agent_icons_take_their_icon_colour() {
+    use ratatui::style::Color;
+    let claude = Color::Rgb(0xd9, 0x77, 0x57);
+    let a = app_with("", titled());
+    let (buf, _) = render(&a);
+    // The active Claude row is reversed: the colour goes in the background, which it shows
+    // as text. The name keeps the row's style.
+    assert!(buf[(3, 3)].modifier.contains(Modifier::REVERSED));
+    assert_eq!(buf[(3, 3)].bg, claude);
+    assert_ne!(buf[(6, 3)].bg, claude);
+    // Codex has no colour by default, nor has an editor: the row's colour.
+    assert_eq!(buf[(3, 5)].fg, buf[(6, 5)].fg);
+    assert_eq!(buf[(3, 4)].fg, buf[(6, 4)].fg);
+    // Outside the band the colour is the text's.
+    let mut view = titled();
+    view.active_panel = Some(PanelId(4));
+    let (buf, _) = render(&app_with("[theme.icon_colors]\ncodex = \"#010203\"", view));
+    assert_eq!(buf[(3, 3)].fg, claude);
+    assert_eq!(buf[(3, 5)].fg, Color::Rgb(1, 2, 3));
+    // `none` draws Claude in its row's colour.
+    let (buf, _) = render(&app_with(
+        "[theme.icon_colors]\nclaude = \"none\"",
+        titled(),
+    ));
+    assert_eq!(buf[(3, 3)].bg, buf[(6, 3)].bg);
+}

@@ -281,9 +281,10 @@ fn agent_rows_draw_placeholders() {
     assert_eq!(buf[(3, 3)].symbol(), "\u{10EEEE}\u{0305}\u{0305}");
     // No attribute but the colours is left on an image cell, bold included.
     assert!(buf[(3, 3)].modifier.is_empty());
-    // The second Claude row (inactive: `sidebar_fg`) has another image.
+    // The second Claude row (inactive: `sidebar_fg`) has the same image: Claude's logo is
+    // drawn in its own colour on every row.
     let inactive = placeholder_cell(&buf, 3, 6).expect("placeholder on the second row");
-    assert_ne!(active, inactive);
+    assert_eq!(active, inactive);
     // Codex has its own logo, a shell keeps its glyph, an editor too.
     assert!(placeholder_cell(&buf, 3, 5).is_some());
     assert_eq!(buf[(3, 4)].symbol(), "✎");
@@ -354,9 +355,9 @@ fn images_are_sent_once_before_the_frame_and_follow_a_reload() {
     let mut a = ghostty("");
     let mut out = Vec::new();
     a.send_images(&mut out).unwrap();
-    // Active Claude (accent), second Claude (sidebar_fg), Codex (sidebar_fg).
+    // Both Claude rows (Claude's colour) and Codex (sidebar_fg).
     let first = a.images.as_ref().unwrap().order.len();
-    assert_eq!(first, 3);
+    assert_eq!(first, 2);
     assert!(out.starts_with(b"\x1b_Ga=T,U=1,f=32,s=64,v=64,c=2,r=1,i=14598145,q=2,m=1;"));
     let len = out.len();
     for _ in 0..3 {
@@ -405,13 +406,13 @@ fn a_selected_row_draws_its_visible_colours_without_reverse() {
     let (buf, _) = render(&a);
     let cell = &buf[(3, 6)];
     // The default selection is `REVERSED` over `default` colours: the row shows the outer
-    // foreground (10, 20, 30) as its background and the outer background (1, 1, 1) as text.
+    // foreground (10, 20, 30) as its background; Claude's logo keeps its own colour on it.
     let id = placeholder_cell(&buf, 3, 6).expect("placeholder on the selected row");
     assert!(cell.modifier.is_empty(), "{:?}", cell.modifier);
     assert_eq!(cell.bg, Color::Rgb(10, 20, 30));
     let images = a.images.as_ref().unwrap();
     let pair = images.order.iter().find(|(i, _)| *i == id).unwrap().1;
-    assert_eq!(pair.rgb, (1, 1, 1));
+    assert_eq!(pair.rgb, (0xd9, 0x77, 0x57));
     // The row's own cells are still reversed.
     assert!(
         buf[(5, 6)]

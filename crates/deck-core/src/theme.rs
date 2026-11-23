@@ -278,6 +278,39 @@ impl IconGlyphs {
     }
 }
 
+/// The colour of each agent icon; `None` draws the icon in its row's colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IconColors {
+    pub claude: Option<Color>,
+    pub codex: Option<Color>,
+    pub opencode: Option<Color>,
+}
+
+/// Claude's brand colour, the default of `claude`.
+const CLAUDE_COLOR: Color = Color::Rgb(0xd9, 0x77, 0x57);
+
+impl Default for IconColors {
+    fn default() -> Self {
+        Self {
+            claude: Some(CLAUDE_COLOR),
+            codex: None,
+            opencode: None,
+        }
+    }
+}
+
+impl IconColors {
+    /// The colour of an icon kind; only the agents have one.
+    pub fn get(&self, kind: IconKind) -> Option<Color> {
+        match kind {
+            IconKind::Claude => self.claude,
+            IconKind::Codex => self.codex,
+            IconKind::OpenCode => self.opencode,
+            _ => None,
+        }
+    }
+}
+
 /// A glyph: a string one cell wide.
 fn one_cell(path: &str, value: &toml::Value) -> Result<String, ThemeError> {
     let text = value
@@ -341,6 +374,7 @@ pub struct Theme {
     pub icons: IconPreset,
     pub icon_images: IconImages,
     pub icon_glyphs: IconGlyphs,
+    pub icon_colors: IconColors,
 }
 
 /// The default of each role, in the order of [`ROLES`].
@@ -362,6 +396,20 @@ const DEFAULTS: [ThemeColor; 16] = [
     ThemeColor::Default,
     ThemeColor::Indexed(8),
 ];
+
+/// A colour whose role references are resolved, given the resolved roles.
+fn resolved(c: ThemeColor, roles: &[Color; 16]) -> Color {
+    match c {
+        ThemeColor::Default => Color::Default,
+        ThemeColor::Indexed(n) => Color::Indexed(n),
+        ThemeColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        ThemeColor::Role(name) => ROLES
+            .iter()
+            .zip(roles)
+            .find(|(role, _)| **role == name)
+            .map_or(Color::Default, |(_, c)| *c),
+    }
+}
 
 /// Follows role references until a colour; a loop is an error naming the keys in it.
 fn resolve(raw: &[ThemeColor; 16]) -> Result<[Color; 16], ThemeError> {
@@ -405,6 +453,7 @@ impl Theme {
         icons: IconPreset,
         icon_images: IconImages,
         icon_glyphs: IconGlyphs,
+        icon_colors: IconColors,
     ) -> Self {
         let [
             accent,
@@ -446,6 +495,7 @@ impl Theme {
             icons,
             icon_images,
             icon_glyphs,
+            icon_colors,
         }
     }
 
@@ -457,6 +507,7 @@ impl Theme {
         let mut icons = IconPreset::Unicode;
         let mut icon_images = IconImages::Auto;
         let mut overrides = Vec::new();
+        let mut colors: Vec<(IconKind, Option<ThemeColor>)> = Vec::new();
         for (key, value) in table {
             let path = format!("theme.{key}");
             if let Some((_, slot)) = ROLES
@@ -530,7 +581,47 @@ impl Theme {
                         overrides.push((kind, one_cell(&path, value)?));
                     }
                 }
+                "icon_colors" => {
+                    let table = value
+                        .as_table()
+                        .ok_or_else(|| bad(&path, "expected a table"))?;
+                    for (name, value) in table {
+                        let path = format!("{path}.{name}");
+                        let kind = match name.as_str() {
+                            "claude" => IconKind::Claude,
+                            "codex" => IconKind::Codex,
+                            "opencode" => IconKind::OpenCode,
+                            _ => {
+                                return Err(bad(
+                                    &path,
+                                    format!(
+                                        "unknown icon `{name}`; expected claude, codex or opencode"
+                                    ),
+                                ));
+                            }
+                        };
+                        let color = if value.as_str() == Some("none") {
+                            None
+                        } else {
+                            Some(ThemeColor::from_value(value).map_err(|m| {
+                                bad(&path, format!("{m}, or \"none\" for the row's colour"))
+                            })?)
+                        };
+                        colors.push((kind, color));
+                    }
+                }
                 _ => warnings.push(Warning::unknown_key(&path)),
+            }
+        }
+        let roles = resolve(&raw)?;
+        let mut icon_colors = IconColors::default();
+        for (kind, color) in colors {
+            let color = color.map(|c| resolved(c, &roles));
+            match kind {
+                IconKind::Claude => icon_colors.claude = color,
+                IconKind::Codex => icon_colors.codex = color,
+                IconKind::OpenCode => icon_colors.opencode = color,
+                _ => {}
             }
         }
         // `none` ignores the overrides; they are still checked above.
@@ -541,12 +632,13 @@ impl Theme {
             }
         }
         Ok(Self::from_parts(
-            resolve(&raw)?,
+            roles,
             border_style,
             glyphs,
             icons,
             icon_images,
             icon_glyphs,
+            icon_colors,
         ))
     }
 }
@@ -565,6 +657,7 @@ impl Default for Theme {
             IconPreset::Unicode,
             IconImages::Auto,
             IconGlyphs::preset(IconPreset::Unicode),
+            IconColors::default(),
         )
     }
 }
@@ -753,6 +846,35 @@ mod tests {
             parse("icon_images = \"auto\"").unwrap().icon_images,
             IconImages::Auto
         );
+    }
+
+    #[test]
+    fn icon_colors_default_to_claude_only_and_take_roles_and_none() {
+        let t = Theme::default();
+        assert_eq!(t.icon_colors.get(IconKind::Claude), Some(CLAUDE_COLOR));
+        assert_eq!(t.icon_colors.get(IconKind::Codex), None);
+        assert_eq!(t.icon_colors.get(IconKind::Git), None);
+        let t = parse(
+            "accent = \"#102030\"\n[icon_colors]\nclaude = \"none\"\ncodex = \"accent\"\nopencode = 5",
+        )
+        .unwrap();
+        assert_eq!(t.icon_colors.claude, None);
+        assert_eq!(t.icon_colors.codex, Some(Color::Rgb(0x10, 0x20, 0x30)));
+        assert_eq!(t.icon_colors.opencode, Some(Color::Indexed(5)));
+    }
+
+    #[test]
+    fn bad_icon_colors_name_the_key() {
+        for (text, key) in [
+            ("[icon_colors]\ngit = \"red\"", "theme.icon_colors.git"),
+            (
+                "[icon_colors]\nclaude = \"nope\"",
+                "theme.icon_colors.claude",
+            ),
+            ("icon_colors = 1", "theme.icon_colors"),
+        ] {
+            assert_eq!(parse(text).unwrap_err().key, key, "{text}");
+        }
     }
 
     #[test]

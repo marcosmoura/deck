@@ -327,10 +327,10 @@ impl App {
         let base = sidebar::base_style(theme);
         let selected = self.sidebar_focus.then_some(self.selection).flatten();
         let pair = |panel: &PanelView, style: Style| {
-            let logo = Logo::of(sidebar::panel_icon_kind(panel, theme)?)?;
+            let kind = sidebar::panel_icon_kind(panel, theme)?;
             Some(Pair {
-                logo,
-                rgb: images.cell_for(style).0,
+                logo: Logo::of(kind)?,
+                rgb: images.cell_for(sidebar::icon_style(theme, kind, style)).0,
             })
         };
         let mut out = Vec::new();
@@ -349,7 +349,7 @@ impl App {
         let kind_pair = |kind: IconKind, style: Style| {
             Some(Pair {
                 logo: Logo::of(kind)?,
-                rgb: images.cell_for(style).0,
+                rgb: images.cell_for(sidebar::icon_style(theme, kind, style)).0,
             })
         };
         if self.menu.is_some() {
