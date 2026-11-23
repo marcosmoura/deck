@@ -114,7 +114,7 @@ fn the_sidebar_shows_the_session_project_and_first_panel() {
     let path = h.capture("sidebar");
     assert!(path.is_file());
     let rows = rows(&h);
-    assert!(rows[0].starts_with(" Session "), "{}", rows[0]);
+    assert!(rows[0].starts_with(" Workspaces "), "{}", rows[0]);
     assert!(rows[2].starts_with(" ▾ dk"), "{}", rows[2]);
     assert!(rows[3].starts_with("▌  ❯  sh"), "{}", rows[3]);
     assert_eq!(rows[0].chars().nth(28), Some('│'));

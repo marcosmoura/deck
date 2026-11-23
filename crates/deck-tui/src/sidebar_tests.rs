@@ -124,7 +124,7 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let side: Vec<String> = rows.iter().map(|r| r.chars().take(29).collect()).collect();
     assert_eq!(
         side[0],
-        format!("{}│", pad(" Session main + New project ", 28))
+        format!("{}│", pad(" Workspaces   + New project ", 28))
     );
     assert_eq!(side[1], format!("{}│", pad("", 28)));
     assert_eq!(side[2], format!("{}│", pad(" ▾ terminal-multiplexer", 28)));
@@ -152,9 +152,8 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
     let buf = t.backend().buffer();
     // Styles: header and the active project bold, the active panel accent and bold with a
     // gutter marker, `no panels` and the count muted.
-    assert!(buf[(9, 0)].modifier.contains(Modifier::BOLD));
-    assert!(!buf[(1, 0)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(1, 0)].fg, Color::DarkGray);
+    assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(1, 0)].fg, Color::Blue);
     assert!(buf[(3, 2)].modifier.contains(Modifier::BOLD));
     assert!(!buf[(3, 6)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(0, 3)].fg, Color::Blue);

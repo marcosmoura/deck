@@ -338,12 +338,12 @@ fn the_bottom_bar_shows_the_new_chip_and_the_restore_chip_at_the_right() {
 }
 
 #[test]
-fn the_header_names_the_session_and_holds_the_new_project_chip() {
+fn the_header_reads_workspaces_and_holds_the_new_project_chip() {
     let h = attached();
     wait_bar(&h);
     let header = rows(&h)[0].clone();
     let sidebar: String = header.chars().take(28).collect();
-    assert!(sidebar.starts_with(" Session "), "{header:?}");
+    assert!(sidebar.starts_with(" Workspaces "), "{header:?}");
     assert!(sidebar.trim_end().ends_with("+ New project"), "{header:?}");
     h.capture("header");
 }

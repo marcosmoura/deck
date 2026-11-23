@@ -49,8 +49,8 @@ pub enum Hover {
     Restore,
 }
 
-/// The word before the session's name in the header.
-const SESSION_LABEL: &str = "Session ";
+/// The sidebar's title, on the header row.
+const HEADER_TITLE: &str = "Workspaces";
 /// Cells an icon takes: a text icon and a blank, or a logo.
 pub const ICON_CELLS: u16 = 2;
 /// The column the icon of a panel row starts in, and the one its name starts in with icons.
@@ -67,7 +67,7 @@ fn bar_rows(height: u16) -> u16 {
 }
 
 /// The `New project` chip of the header: `"+ New project"`, or `"+"` in a narrow sidebar.
-/// No side padding, so `Session main` fits beside it in the default 28 columns.
+/// No side padding, so the title keeps its room in narrow sidebars.
 fn new_project_chip(width: u16) -> &'static str {
     if width < BAR_WIDE {
         "+"
@@ -554,26 +554,10 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             muted
         }
     };
-    // `Session <name>`, cut before the `New project` chip, which the name gives way to.
+    // The title, cut before the `New project` chip, which it gives way to.
     let span = new_project_span(w);
-    let header = truncate(
-        &format!("{SESSION_LABEL}{}", view.name),
-        span.start.saturating_sub(2),
-    );
-    let label_len = SESSION_LABEL.len();
-    if header.starts_with(SESSION_LABEL) {
-        let (label, name) = header.split_at(label_len);
-        put(buf, area.y, 1, label, muted);
-        put(
-            buf,
-            area.y,
-            1 + width(label),
-            name,
-            accent.add_modifier(Modifier::BOLD),
-        );
-    } else {
-        put(buf, area.y, 1, &header, muted);
-    }
+    let header = truncate(HEADER_TITLE, span.start.saturating_sub(2));
+    put(buf, area.y, 1, &header, accent.add_modifier(Modifier::BOLD));
     let style = style_of(Hover::NewProject);
     buf.set_style(
         Rect::new(area.x + span.start, area.y, span.end - span.start, 1),

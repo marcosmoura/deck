@@ -5,7 +5,7 @@ A session holds projects, a project holds panels, and a panel shows one terminal
 ## The sidebar
 
 ```text
- Session main + New project │
+ Workspaces   + New project │
                             │
  ▾ terminal-multiplexer     │
 ▌  ✎  editor                │
@@ -17,7 +17,7 @@ A session holds projects, a project holds panels, and a panel shows one terminal
   + New            Restore  │
 ```
 
-- The header reads `Session <name>` (`Session` muted) with a `+ New project` chip right-aligned on it, one cell from the edge (`+` alone when the sidebar is under 26 columns wide); the name is cut with `…` to leave room for the chip. Each project is a row with `▾` (expanded) or `▸` (collapsed), its name and, when collapsed, its panel count at the right. Each panel of an expanded project is a row with its name and, when it holds more than one terminal, the terminal count at the right. A project with no panels shows a muted `no panels`. Names that do not fit end in `…`.
+- The header reads `Workspaces` (accent, bold) with a `+ New project` chip right-aligned on it, one cell from the edge (`+` alone when the sidebar is under 26 columns wide); the title is cut with `…` to leave room for the chip. The session's name is in the status bar. Each project is a row with `▾` (expanded) or `▸` (collapsed), its name and, when collapsed, its panel count at the right. Each panel of an expanded project is a row with its name and, when it holds more than one terminal, the terminal count at the right. A project with no panels shows a muted `no panels`. Names that do not fit end in `…`.
 - The active panel is drawn in the accent colour, bold, with a `▌` in the left gutter; the active project's name is bold. The cell before each name shows the agent status of the panel's most urgent terminal (see [agents](agents.md)). A panel whose agent needed you while you were not looking is bold with a `•` after its name, and a collapsed project shows `!<n>` for its waiting panels ([attention](agents.md#attention)).
 - With more rows than fit, the list scrolls to keep the active panel (or, in sidebar focus, the selection) in view. The wheel scrolls it too, three rows a notch.
 - The last row of the sidebar is a bottom bar with a `+ New` chip at the left (`+` alone when the sidebar is under 26 columns wide), and the row above it is blank, so the list is two rows shorter. A sidebar under 8 rows tall draws neither. The right-hand end has the `Restore` button (`Restore`, or `↻` under 26 columns), which opens the [restore dialog](agents.md#the-restore-dialog). All chips, the header's included, are muted and are drawn in the selection colours under the pointer; a click is a press and a release on the same chip. With no project, `+ New` flashes `no project` and `Restore` flashes `no project to restore into`.

@@ -80,15 +80,15 @@ const BAR: u16 = 22;
 const CHIP: u16 = 15;
 
 #[test]
-fn the_header_names_the_session_and_holds_the_new_project_chip_at_the_right() {
+fn the_header_reads_workspaces_and_holds_the_new_project_chip_at_the_right() {
     // (sidebar width, the left part as shown, the chip's glyph text)
     for (width, left, chip) in [
-        (40, " Session main", "+ New project"),
-        (30, " Session main", "+ New project"),
-        (28, " Session main", "+ New project"),
-        (26, " Session m…", "+ New project"),
-        (25, " Session main", "+"),
-        (20, " Session main", "+"),
+        (40, " Workspaces", "+ New project"),
+        (30, " Workspaces", "+ New project"),
+        (28, " Workspaces", "+ New project"),
+        (26, " Workspaces", "+ New project"),
+        (25, " Workspaces", "+"),
+        (20, " Workspaces", "+"),
     ] {
         let a = app_at((100, 24), width, mockup());
         let buf = draw_app(&a);
@@ -100,8 +100,8 @@ fn the_header_names_the_session_and_holds_the_new_project_chip_at_the_right() {
     }
     let a = app();
     let buf = draw_app(&a);
-    assert_eq!(buf[(1, 0)].fg, color(a.theme.muted));
-    assert!(buf[(9, 0)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(1, 0)].fg, color(a.theme.accent));
+    assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(CHIP, 0)].fg, color(a.theme.muted));
 }
 
