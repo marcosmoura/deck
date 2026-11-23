@@ -95,3 +95,5 @@ All four change `deck-tui`'s drawing and mouse handling, so they run in order.
 - `docs/architecture.md`: the client's screen (no status bar, the floating bar, dialogs), notices, agent logos (no status-bar icon), the panel area and the protocol version wherever they are described.
 
 Reviewed by spec-reviewer on 23 Nov 2026.
+
+Approved on 23 Nov 2026.
