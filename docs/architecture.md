@@ -162,6 +162,13 @@ Declared once in the root `[workspace.dependencies]` with these versions (the ne
 
 Tools, pinned in `.mise.toml`: Rust (stable channel at a pinned version, with rustfmt and Clippy), `just`, `cargo-nextest`, `lefthook`, `oxfmt` (the native binary from the aqua backend, no Node; formats the Markdown, TOML, JSON and YAML files rustfmt does not, with its default settings).
 
+## Releases
+
+- **Local**: `just install` runs `cargo install --path crates/deck --locked` into `$PREFIX/bin`, `~/.local/bin` by default.
+- **CI** (GitHub Actions, repository `marcosmoura/deck`): `.github/workflows/ci.yml` runs `just check` on macOS and Linux for pushes to `main` and pull requests, with the tools from `.mise.toml` (`jdx/mise-action`). `.github/workflows/release.yml` runs on a pushed `v<version>` tag, which must match the workspace version: it builds `deck` in release mode on native runners for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` (Ubuntu 22.04, for glibc 2.35), packs each as `deck-<version>-<target>.tar.gz` (the binary and `README.md`) with a `.sha256` file, and publishes them in a GitHub release with `gh`.
+- **Cutting a release**: bump `version` in the root `[workspace.package]`, run `just check` (it updates `Cargo.lock`), commit `Cargo.toml` and `Cargo.lock` together, then `git tag v<version>` and push the tag. The repository must be public: the ARM Linux runners are free only there, and a private repository's aarch64 Linux job never starts.
+- **`install.sh`** (POSIX `sh`, at the root) picks the target from `uname`, downloads the latest release (or `DECK_VERSION`), checks the SHA-256 and installs `deck` into `${DECK_INSTALL_DIR:-$HOME/.local/bin}` through a rename. `DECK_REPO` and `DECK_DOWNLOAD_URL` override where it downloads from (the latter is how it is tested against a local tarball).
+
 The workspace denies Clippy's `unwrap_used`, `expect_used`, `panic` and `indexing_slicing` lints. The root `clippy.toml` allows these in tests. Integration-test helpers and closures that Clippy misses use scoped exceptions. Production exceptions document the invariant or test hook at the point of use. `just lint` checks every workspace target with warnings denied.
 
 ## Decisions
@@ -177,3 +184,4 @@ The workspace denies Clippy's `unwrap_used`, `expect_used`, `panic` and `indexin
 | 22 Nov 2026 | One config file, `~/.config/deck/config.toml`, read only by the daemon and reloaded live; `[theme]` with semantic colour roles and border style; `deck config default/check/path`.                                                          |
 | 22 Nov 2026 | OSC 52 copy is forwarded to the outer terminal; clipboard reads are denied. No copy mode in v1.                                                                                                                                             |
 | 22 Nov 2026 | `kill-server` stops a daemon of any version (pid in `deck.lock`, `SIGTERM`); a second lock next to `state.json` keeps one daemon per state.                                                                                                 |
+| 23 Nov 2026 | Releases: `just install` into `~/.local/bin`; GitHub Actions for `just check` and for tag-triggered tarballs on four targets; `install.sh` installs a release into `~/.local/bin`.                                                          |

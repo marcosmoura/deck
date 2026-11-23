@@ -29,3 +29,7 @@ run *args:
     cargo build -p deck
     mkdir -p "${TMPDIR:-/tmp}/deck-dev-{{ shell('printf %.8s "$1"', sha256(justfile_directory())) }}"
     DECK_HOME="${TMPDIR:-/tmp}/deck-dev-{{ shell('printf %.8s "$1"', sha256(justfile_directory())) }}" target/debug/deck "$@"
+
+# Build and install deck into $PREFIX/bin (default ~/.local/bin).
+install:
+    cargo install --path crates/deck --locked --root "${PREFIX:-$HOME/.local}"

@@ -8,8 +8,6 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-1. [DECK-14](#deck-14): release workflow and local install
-
 ### Not ordered yet
 
 Open tasks the user has not placed in the queue: none.
@@ -30,7 +28,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-11 | Restore agent sessions                 | done   | DECK-06, DECK-10 | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
 | DECK-12 | Agent logos as images                  | done   | DECK-09          | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
 | DECK-13 | OpenCode v2 hooks                      | done   | DECK-06          | —                                                                            |
-| DECK-14 | Release workflow and local install     | todo   | —                | —                                                                            |
+| DECK-14 | Release workflow and local install     | done   | —                | —                                                                            |
 
 ### Withdrawn
 

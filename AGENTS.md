@@ -37,6 +37,7 @@ equivalents in [docs/workflow.md](docs/workflow.md#checks). Run them from the re
 | `just test`                   | All tests with cargo-nextest                                     |
 | `just test-crate <crate> [f]` | Tests of one crate, optionally filtered, e.g. `deck-core layout` |
 | `just run [args]`             | Build and run `deck` with an isolated socket and state dir       |
+| `just install`                | Install `deck` into `$PREFIX/bin` (default `~/.local/bin`)       |
 
 `just check` is the gate before a commit. Plain `cargo` commands (`cargo build -p
 <crate>`, `cargo nextest run -p <crate> <filter>`, `cargo clippy -p <crate>`) are

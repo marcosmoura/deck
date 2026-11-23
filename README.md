@@ -4,12 +4,20 @@ A terminal multiplexer written in Rust, built for coding agents. A background da
 
 Status: early. Today `deck` attaches to a session with one shell. Projects, panels, the sidebar and agent support come with later work (see [docs/backlog.md](docs/backlog.md)).
 
-## Install from source
+## Install
 
-macOS or Linux, with the Rust toolchain pinned in `.mise.toml` (`mise install`):
+macOS (Apple silicon or Intel) or Linux (x86_64 or aarch64), from the latest release into `~/.local/bin`:
 
 ```sh
-cargo install --path crates/deck
+curl -fsSL https://raw.githubusercontent.com/marcosmoura/deck/main/install.sh | sh
+```
+
+For a given version or another directory, set the variables on `sh`: `curl -fsSL … | DECK_VERSION=0.1.0 DECK_INSTALL_DIR=~/bin sh`.
+
+From source, with the toolchain pinned in `.mise.toml` (`mise install`), into `~/.local/bin` (or `PREFIX=<dir> just install` for `<dir>/bin`):
+
+```sh
+just install
 ```
 
 To try it without installing, with an isolated socket and state directory: `just run`.
