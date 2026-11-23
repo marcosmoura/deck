@@ -59,3 +59,5 @@ Both change the sidebar's rows and mouse handling in `deck-tui`, so they run in 
 - `docs/architecture.md`: the protocol version and the new actions, wherever actions are listed.
 
 Reviewed by spec-reviewer on 23 Nov 2026.
+
+Approved on 23 Nov 2026.
