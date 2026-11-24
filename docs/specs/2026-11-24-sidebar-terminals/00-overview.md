@@ -31,7 +31,7 @@ Asked on 24 Nov 2026: "When we have multiple terminals in a grid, we need to be 
 
 - **Which panels.** A panel with two or more terminals is followed by one terminal row per terminal, in grid order, whenever its space is expanded. A panel with one terminal has no terminal row, and its row is unchanged. The rows come and go as terminals are added and closed.
 - **The panel row** of a grid panel keeps its icon, name, unseen marker and status slot (the most urgent terminal). It drops its terminal count, because its terminal rows show the count. A collapsed space still shows its panel count.
-- **A terminal row** starts with a muted tree glyph in column 4 (the panel names' column): `├` for every terminal but the last, `└` for the last. Then come a space, the terminal's icon (two cells, from its own agent or program, like a panel's icon), a space and its label. The label starts at column 9. The label is the terminal's title with the spinner and status glyphs removed (`naming::title_core`; the grid border keeps the raw title), else its program when the cleaned title is empty or missing. A kept terminal that exited adds ` · exited <code>` in muted text; the label is cut first, then the note, as on a panel row. The status slot at the right shows that terminal's agent status, with the same rules as a panel's slot. A terminal row has no number, no count and no unseen marker.
+- **A terminal row** starts with a muted tree glyph in column 4 (the panel names' column): `├` for every terminal but the last, `└` for the last. Then come a space, the terminal's icon (two cells, from its own agent or program, like a panel's icon), a space and its label. The label starts at column 9. The label is the terminal's title with the spinner and status glyphs removed (`naming::title_core`; the grid border keeps the raw title), else its program when the cleaned title is empty or missing. A kept terminal that exited adds ` · exited <code>` in muted text; the label is cut first, then the note, as on a panel row. The status slot at the right shows that terminal's agent status, with the same rules as a panel's slot. A terminal row has no number (the icon and title are enough, and a number costs two cells), no count and no unseen marker.
 - **Focus.** The focused terminal of the active panel has its row drawn in the accent colour, bold. The band stays on the active panel's row, as today. In sidebar focus, the band goes to the selected row, which may be a terminal row.
 - **Selection.** `Sel` gains `Terminal(ProjectId, PanelId, TerminalId)`. In sidebar focus, `Up`/`Down` pass through terminal rows. Entering sidebar focus still starts on the active panel's row. On a terminal row:
   - `Enter` makes its panel active and focuses that terminal (`Act::FocusPanel`, then `Act::FocusTerminal`, as `NextAttention` does), and returns to the terminal.
@@ -54,9 +54,5 @@ Asked on 24 Nov 2026: "When we have multiple terminals in a grid, we need to be 
 
 - `docs/features/sidebar.md`: the mockup, the panel row without a count for grid panels, terminal rows, sidebar focus keys on a terminal row, clicks, the row menu table and reordering. Also fix "a panel shows one terminal (the grid comes later)".
 - `docs/architecture.md`: the bottom bar and hover paragraph (`Hover::Row(Sel)` now covers terminal rows), the sidebar row gestures (a press on a terminal row, which never drags), and the context menu (opened from a terminal row of any panel, with the row it came from).
-
-## Open questions
-
-- Should a terminal row show the terminal's number (`├ 2 ✻  Write tests`) to match the grid border's `<number> · <title>`? Recommended: no. The icon and title are enough, and the number costs two cells in a 28-column sidebar.
 
 Reviewed by spec-reviewer on 2026-11-24.

@@ -9,17 +9,16 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
 3. DECK-23 Daemon stats and stress tests
-4. DECK-25 Release automation and Homebrew
-5. DECK-21 Live upgrade
-6. DECK-22 Terminal compatibility
-7. DECK-24 Scrollback search and copy mode
-8. DECK-26 Security, privacy and performance reviews
+4. DECK-27 Terminals in the sidebar
+5. DECK-25 Release automation and Homebrew
+6. DECK-21 Live upgrade
+7. DECK-22 Terminal compatibility
+8. DECK-24 Scrollback search and copy mode
+9. DECK-26 Security, privacy and performance reviews
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue:
-
-- DECK-27 Terminals in the sidebar
+Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
@@ -50,7 +49,7 @@ Open tasks the user has not placed in the queue:
 | DECK-24 | Scrollback search and copy mode           | ready       | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
 | DECK-25 | Release automation and Homebrew           | ready       | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
 | DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
-| DECK-27 | Terminals in the sidebar                  | draft spec  | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
+| DECK-27 | Terminals in the sidebar                  | ready       | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
 
 ### Withdrawn
 
