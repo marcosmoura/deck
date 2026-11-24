@@ -2,12 +2,11 @@
 
 ## [0.2.0](https://github.com/marcosmoura/deck/compare/v0.1.0...v0.2.0) (2026-11-24)
 
-
 ### Features
 
-* scrollback search and copy mode (DECK-24) ([3de8935](https://github.com/marcosmoura/deck/commit/3de89359ee8837674a911b72e946ccba1a94124f))
-* show blinking cursor shapes (DECK-30) ([4d0d383](https://github.com/marcosmoura/deck/commit/4d0d383063e9117c734a1114f042dd8031fbf0f4))
-* terminal compatibility (DECK-22) ([7bc365b](https://github.com/marcosmoura/deck/commit/7bc365bccb3376c7c74e8bc385f630087d8b53eb))
+- scrollback search and copy mode (DECK-24) ([3de8935](https://github.com/marcosmoura/deck/commit/3de89359ee8837674a911b72e946ccba1a94124f))
+- show blinking cursor shapes (DECK-30) ([4d0d383](https://github.com/marcosmoura/deck/commit/4d0d383063e9117c734a1114f042dd8031fbf0f4))
+- terminal compatibility (DECK-22) ([7bc365b](https://github.com/marcosmoura/deck/commit/7bc365bccb3376c7c74e8bc385f630087d8b53eb))
 
 ## 0.1.0 (2026-11-24)
 
