@@ -182,11 +182,12 @@ fn the_sidebar_shows_the_session_projects_and_panels() {
 }
 
 #[test]
-fn long_names_end_in_an_ellipsis_and_a_count_keeps_its_place() {
+fn long_names_end_in_an_ellipsis_and_a_grid_panel_has_no_count() {
     let mut view = mockup();
     view.projects[0].name = "a-very-long-project-name-indeed".into();
     view.projects[0].panels[1].name = "a-very-long-panel-name-indeed-too".into();
-    let extra = view.projects[0].panels[0].terminals[0].clone();
+    let mut extra = view.projects[0].panels[0].terminals[0].clone();
+    extra.id = TerminalId(99);
     view.projects[0].panels[1].terminals.push(extra);
     let a = app_at(&Config::default(), (100, 24), view);
     let (_, rows) = screen(&a);
@@ -194,10 +195,10 @@ fn long_names_end_in_an_ellipsis_and_a_count_keeps_its_place() {
         rows[2].chars().take(29).collect::<String>(),
         format!("{}│", pad(" a-very-long-project-na… ▾", 28))
     );
-    // The terminal count of a panel with two terminals is at the right.
+    // The panel row of a panel with two terminals has no count.
     assert_eq!(
         rows[4].chars().take(29).collect::<String>(),
-        format!("{}│", pad(" ❯  a-very-long-panel-na… 2 ", 28))
+        format!("{}│", pad(" ❯  a-very-long-panel-name…", 28))
     );
 }
 
@@ -1014,6 +1015,7 @@ fn kinds(rows: &[Row]) -> String {
         .map(|r| match r {
             Row::Project(_) => 'P',
             Row::Panel(..) => 'p',
+            Row::Terminal(..) => 't',
             Row::NoPanels => 'n',
             Row::Gap => '_',
         })

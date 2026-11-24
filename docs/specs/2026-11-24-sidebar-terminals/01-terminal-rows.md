@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — Terminal rows under grid panels
@@ -44,27 +44,27 @@ In the sidebar, a panel with two or more terminals shows one nested row per term
  deck                    ▾  │
  ✻  Fix login bug        ⠹  │
  ❯  api + tests          !  │   ← band (active panel); status = most urgent
-    ├ ❯  zsh                │   ← muted tree glyph; label in sidebar_fg
-    ├ ✻  Write tests     !  │   ← focused terminal: accent, bold
-    └ ✎  main.rs            │
+  ├ ❯  zsh                  │   ← muted tree glyph; label in sidebar_fg
+  ├ ✻  Write tests       !  │   ← focused terminal: accent, bold
+  └ ✎  main.rs              │
  ❯  zsh                     │   ← single terminal: one row, unchanged
  dotfiles              2 ▸  │
                             │
   +  New         ↻  Resume  │
 ```
 
-A narrow (20-column) sidebar: the label starts at column 9 and the status slot takes columns 17 and 18, so a terminal with an agent gets 7 cells for its label. A kept terminal that exited has no status slot and gets 10 cells; ` · exited 1` is 11, so the label goes entirely and the note is cut:
+A narrow (20-column) sidebar: the label starts at column 7 and the status slot takes columns 17 and 18, so a terminal with an agent gets 9 cells for its label. A kept terminal that exited has no status slot and gets 12 cells; ` · exited 1` is 11, so the label is cut to `…`:
 
 ```text
-    ├ ❯   · exited… │
-    └ ✻  Review…  ⠹ │
+  ├ ❯  … · exited 1 │
+  └ ✻  Review t… ⠹  │
 ```
 
 Sidebar focus, selection on a terminal row. The band moves to it, and the active panel's row is accent, bold, with no band:
 
 ```text
  ❯  api + tests          !  │   ← accent, bold
-    ├ ❯  zsh                │   ← band (selected)
+  ├ ❯  zsh                  │   ← band (selected)
 ```
 
 Dragging the panel `api + tests` (dimmed, its terminal rows too) onto the place of `Fix login bug`:
@@ -72,9 +72,9 @@ Dragging the panel `api + tests` (dimmed, its terminal rows too) onto the place 
 ```text
 ➤  ✻  Fix login bug      ⠹  │
  ❯  api + tests          !  │   ← dimmed
-    ├ ❯  zsh                │   ← dimmed
-    ├ ✻  Write tests     !  │   ← dimmed
-    └ ✎  main.rs            │   ← dimmed
+  ├ ❯  zsh                  │   ← dimmed
+  ├ ✻  Write tests       !  │   ← dimmed
+  └ ✎  main.rs              │   ← dimmed
 ```
 
 ## Acceptance criteria
@@ -109,3 +109,5 @@ Dragging the panel `api + tests` (dimmed, its terminal rows too) onto the place 
 ## Notes
 
 Reviewed against the code on 24 Nov 2026: `FocusTerminal` alone does not change the active panel (daemon `server.rs`), hence the `FocusPanel` + `FocusTerminal` pair.
+
+Changed after trying it (24 Nov 2026): the indent was too wide. The tree glyph moved from column 4 to column 2 (under the panel icon), the terminal icon to column 4 (under the panel names) and the label to column 9 → 7, so a terminal row has two more cells for its label.

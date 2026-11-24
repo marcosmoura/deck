@@ -659,21 +659,17 @@ fn with_agent(mut view: SessionView, panel: u64, status: AgentStatus) -> Session
 fn glyphs_on_a_reversed_band_keep_the_text_colour() {
     let mut view = with_agent(mockup(), 3, AgentStatus::Idle);
     view.projects[0].panels[0].unseen = true;
-    let extra = view.projects[0].panels[1].terminals[0].clone();
-    view.projects[0].panels[0].terminals.push(extra);
     let a = app_at((100, 24), 28, view);
     let buf = draw_app(&a);
-    // The status glyph (column 25), the name and the terminal count (column 23).
+    // The status glyph (column 25) and the name.
     assert_eq!(buf[(25, 3)].symbol(), "●");
-    assert_eq!(buf[(23, 3)].symbol(), "2");
     let name = &buf[(4, 3)];
-    for x in [25, 23] {
-        assert_eq!(buf[(x, 3)].fg, name.fg, "column {x}");
-        assert!(
-            buf[(x, 3)].modifier.contains(Modifier::REVERSED),
-            "column {x}"
-        );
-    }
+    let x = 25;
+    assert_eq!(buf[(x, 3)].fg, name.fg, "column {x}");
+    assert!(
+        buf[(x, 3)].modifier.contains(Modifier::REVERSED),
+        "column {x}"
+    );
     // The unseen mark after the name too.
     let mark = (0..28).find(|&x| buf[(x, 3)].symbol() == "•").unwrap();
     assert_eq!(buf[(mark, 3)].fg, name.fg);

@@ -44,6 +44,8 @@ pub struct ContextMenu {
     /// The pressed cell: the menu's top-left corner, and the New menu's anchor.
     pub at: (u16, u16),
     pub selected: usize,
+    /// The sidebar row the menu was opened from; none when opened from the grid.
+    row: Option<Sel>,
 }
 
 impl ContextMenu {
@@ -55,26 +57,26 @@ impl ContextMenu {
         }
     }
 
-    /// The sidebar row the menu belongs to, which keeps its hover background.
-    pub(crate) fn row(&self, app: &App) -> Option<Sel> {
-        match self.target {
-            ContextTarget::Terminal(_) => None,
-            ContextTarget::Panel(panel) => app
-                .mirror
-                .find_panel(panel)
-                .map(|(project, _)| Sel::Panel(project.id, panel)),
-            ContextTarget::Project(project) => Some(Sel::Project(project)),
-        }
+    /// The sidebar row the menu was opened from, which keeps its hover background.
+    pub(crate) fn row(&self) -> Option<Sel> {
+        self.row
     }
 }
 
 impl App {
-    fn open_context(&mut self, target: ContextTarget, name: String, at: (u16, u16)) {
+    fn open_context(
+        &mut self,
+        target: ContextTarget,
+        name: String,
+        at: (u16, u16),
+        row: Option<Sel>,
+    ) {
         self.context = Some(ContextMenu {
             target,
             name,
             at,
             selected: 0,
+            row,
         });
         self.swallow_release = true;
         self.dirty = true;
@@ -83,7 +85,7 @@ impl App {
     /// Opens the menu of a terminal of the active panel.
     pub(crate) fn open_terminal_menu(&mut self, terminal: TerminalId, at: (u16, u16)) {
         if self.mirror.find_terminal(terminal).is_some() {
-            self.open_context(ContextTarget::Terminal(terminal), String::new(), at);
+            self.open_context(ContextTarget::Terminal(terminal), String::new(), at, None);
         }
     }
 
@@ -93,13 +95,23 @@ impl App {
             Sel::Panel(_, panel) => {
                 if let Some((_, p)) = self.mirror.find_panel(panel) {
                     let name = p.name.clone();
-                    self.open_context(ContextTarget::Panel(panel), name, at);
+                    self.open_context(ContextTarget::Panel(panel), name, at, Some(sel));
+                }
+            }
+            Sel::Terminal(_, _, terminal) => {
+                if self.mirror.find_terminal(terminal).is_some() {
+                    self.open_context(
+                        ContextTarget::Terminal(terminal),
+                        String::new(),
+                        at,
+                        Some(sel),
+                    );
                 }
             }
             Sel::Project(project) => {
                 if let Some(p) = self.mirror.find_project(project) {
                     let name = p.name.clone();
-                    self.open_context(ContextTarget::Project(project), name, at);
+                    self.open_context(ContextTarget::Project(project), name, at, Some(sel));
                 }
             }
         }
@@ -140,9 +152,13 @@ impl App {
         };
         self.dirty = true;
         match (menu.target, index) {
-            (ContextTarget::Terminal(_), 0) => {
-                if self.mirror.active_panel().is_some() {
-                    vec![self.act(Act::NewTerminal { panel: None }, None)]
+            (ContextTarget::Terminal(terminal), 0) => {
+                if let Some((panel, _, _)) = self.mirror.find_terminal(terminal) {
+                    let panel = panel.id;
+                    vec![
+                        self.act(Act::FocusPanel { panel }, None),
+                        self.act(Act::NewTerminal { panel: Some(panel) }, None),
+                    ]
                 } else {
                     self.set_flash(
                         "no panel to add a terminal to".into(),

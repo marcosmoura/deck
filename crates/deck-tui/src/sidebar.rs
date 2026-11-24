@@ -2,10 +2,11 @@
 //! drawing.
 
 use deck_core::action::Action as Act;
+use deck_core::agents::AgentStatus;
 use deck_core::icons::{Icon, IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
-use deck_core::model::{PanelId, PanelView, ProjectId, SessionView};
-use deck_core::naming::source_terminal_view;
+use deck_core::model::{PanelId, PanelView, ProjectId, SessionView, TerminalId, TerminalView};
+use deck_core::naming::{source_terminal_view, title_core};
 use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
@@ -54,12 +55,14 @@ pub(crate) struct RowDrag {
 pub enum Sel {
     Project(ProjectId),
     Panel(ProjectId, PanelId),
+    /// A terminal of a grid panel.
+    Terminal(ProjectId, PanelId, TerminalId),
 }
 
 /// What the pointer is over in the sidebar. Client-local: never sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
-    /// A space or panel row of the list.
+    /// A space, panel or terminal row of the list.
     Row(Sel),
     /// The `+ New space` chip of the header.
     NewProject,
@@ -74,6 +77,11 @@ pub const ICON_CELLS: u16 = 2;
 /// on the right.
 const ICON_X: u16 = 1;
 const NAME_X: u16 = ICON_X + ICON_CELLS + 1;
+/// The columns of a terminal row: its tree glyph under the panel's icon, its icon under the
+/// panel's name, and its label after the icon and a space.
+const TREE_X: u16 = ICON_X + 1;
+const TERMINAL_ICON_X: u16 = NAME_X;
+const TERMINAL_LABEL_X: u16 = TERMINAL_ICON_X + ICON_CELLS + 1;
 
 /// Rows the bottom bar and its spacer take in a sidebar `height` rows tall.
 fn bar_rows(height: u16) -> u16 {
@@ -145,7 +153,7 @@ fn restore_span(w: u16) -> std::ops::Range<u16> {
 impl Sel {
     pub fn project(self) -> ProjectId {
         match self {
-            Self::Project(p) | Self::Panel(p, _) => p,
+            Self::Project(p) | Self::Panel(p, _) | Self::Terminal(p, _, _) => p,
         }
     }
 }
@@ -155,6 +163,8 @@ impl Sel {
 pub enum Row {
     Project(ProjectId),
     Panel(ProjectId, PanelId),
+    /// A terminal of a panel with two or more, under its panel's row.
+    Terminal(ProjectId, PanelId, TerminalId),
     /// The muted `no panels` of an empty project.
     NoPanels,
     /// A blank row between two spaces (`sidebar_space_gap`).
@@ -166,6 +176,7 @@ impl Row {
         match self {
             Self::Project(p) => Some(Sel::Project(p)),
             Self::Panel(p, panel) => Some(Sel::Panel(p, panel)),
+            Self::Terminal(p, panel, t) => Some(Sel::Terminal(p, panel, t)),
             Self::NoPanels | Self::Gap => None,
         }
     }
@@ -224,7 +235,19 @@ pub fn rows_with(view: &SessionView, gap: u8, reorder: Option<Reorder>) -> Vec<R
         {
             moved(&mut panels, from, to);
         }
-        rows.extend(panels.into_iter().map(|p| Row::Panel(project.id, p)));
+        for id in panels {
+            rows.push(Row::Panel(project.id, id));
+            if let Some(panel) = project.panels.iter().find(|p| p.id == id)
+                && panel.terminals.len() > 1
+            {
+                rows.extend(
+                    panel
+                        .terminals
+                        .iter()
+                        .map(|t| Row::Terminal(project.id, id, t.id)),
+                );
+            }
+        }
     }
     rows
 }
@@ -341,7 +364,13 @@ impl App {
             return;
         }
         let project = Sel::Project(sel.project());
-        self.selection = if rows.contains(&project) {
+        let panel = match sel {
+            Sel::Terminal(p, panel, _) => Some(Sel::Panel(p, panel)),
+            _ => None,
+        };
+        self.selection = if let Some(panel) = panel.filter(|p| rows.contains(p)) {
+            Some(panel)
+        } else if rows.contains(&project) {
             Some(project)
         } else {
             self.default_selection()
@@ -428,6 +457,13 @@ impl App {
                 Vec::new()
             }
             KeyCode::Enter => match sel {
+                Some(Sel::Terminal(_, panel, terminal)) => {
+                    self.sidebar_focus = false;
+                    vec![
+                        self.act(Act::FocusPanel { panel }, None),
+                        self.act(Act::FocusTerminal { terminal }, None),
+                    ]
+                }
                 Some(Sel::Panel(_, panel)) => {
                     self.sidebar_focus = false;
                     vec![self.act(Act::FocusPanel { panel }, None)]
@@ -463,20 +499,28 @@ impl App {
             KeyCode::Char('R') => self.open_restore(std::time::Instant::now()),
             KeyCode::Char('r') => {
                 match sel {
-                    Some(Sel::Panel(_, panel)) => self.open_rename_panel(panel),
+                    Some(Sel::Panel(_, panel) | Sel::Terminal(_, panel, _)) => {
+                        self.open_rename_panel(panel);
+                    }
                     Some(Sel::Project(project)) => self.open_rename_project(project),
                     None => {}
                 }
                 Vec::new()
             }
-            KeyCode::Char('x') => {
-                match sel {
-                    Some(Sel::Panel(_, panel)) => self.confirm_close_panel(panel),
-                    Some(Sel::Project(project)) => self.confirm_close_project(project),
-                    None => {}
+            KeyCode::Char('x') => match sel {
+                Some(Sel::Terminal(_, _, terminal)) => {
+                    self.confirm_close_terminal(terminal, std::time::Instant::now())
                 }
-                Vec::new()
-            }
+                Some(Sel::Panel(_, panel)) => {
+                    self.confirm_close_panel(panel);
+                    Vec::new()
+                }
+                Some(Sel::Project(project)) => {
+                    self.confirm_close_project(project);
+                    Vec::new()
+                }
+                None => Vec::new(),
+            },
             KeyCode::Esc | KeyCode::Tab => {
                 self.sidebar_focus = false;
                 Vec::new()
@@ -492,6 +536,10 @@ impl App {
         self.selection = Some(item);
         match item {
             Sel::Panel(_, panel) => vec![self.act(Act::FocusPanel { panel }, None)],
+            Sel::Terminal(_, panel, terminal) => vec![
+                self.act(Act::FocusPanel { panel }, None),
+                self.act(Act::FocusTerminal { terminal }, None),
+            ],
             Sel::Project(project) => self.toggle_collapsed(project),
         }
     }
@@ -546,6 +594,7 @@ impl App {
                 let panels = &view.projects.iter().find(|p| p.id == project)?.panels;
                 panels.get(drag.to).map(|p| Sel::Panel(project, p.id))
             }
+            Sel::Terminal(..) => None,
         }
     }
 
@@ -561,6 +610,7 @@ impl App {
                 .panels
                 .iter()
                 .position(|p| p.id == id),
+            Sel::Terminal(..) => None,
         }
     }
 
@@ -571,14 +621,14 @@ impl App {
             Sel::Project(_) => {
                 // A blank row or `no panels` belongs to the space above it.
                 let owner = rows.get(..=at)?.iter().rev().find_map(|r| match r {
-                    Row::Project(p) | Row::Panel(p, _) => Some(*p),
+                    Row::Project(p) | Row::Panel(p, _) | Row::Terminal(p, _, _) => Some(*p),
                     Row::NoPanels | Row::Gap => None,
                 })?;
                 view.projects.iter().position(|p| p.id == owner)
             }
             Sel::Panel(project, _) => {
                 let panels = &view.projects.iter().find(|p| p.id == project)?.panels;
-                if let Some(Row::Panel(p, panel)) = rows.get(at)
+                if let Some(Row::Panel(p, panel) | Row::Terminal(p, panel, _)) = rows.get(at)
                     && *p == project
                 {
                     return panels.iter().position(|x| x.id == *panel);
@@ -593,6 +643,7 @@ impl App {
                     panels.len().saturating_sub(1)
                 })
             }
+            Sel::Terminal(..) => None,
         }
     }
 
@@ -653,6 +704,7 @@ impl App {
                 to: drag.to,
             },
             Sel::Panel(_, panel) => Act::MovePanel { panel, to: drag.to },
+            Sel::Terminal(..) => return Vec::new(),
         };
         vec![self.act(action, None)]
     }
@@ -680,6 +732,11 @@ impl App {
                 .and_then(|l| rows.get(self.sidebar_offset + l))
                 .is_some_and(|r| r.sel() != Some(item));
             if !reached {
+                return;
+            }
+            // A terminal row is never dragged: reaching another row ends the press.
+            if matches!(item, Sel::Terminal(..)) {
+                self.end_row_gesture(true);
                 return;
             }
             self.row_press = None;
@@ -747,14 +804,32 @@ impl App {
     }
 }
 
+/// The kind of icon of a terminal: the one of its agent or program.
+pub fn terminal_icon_kind(term: &TerminalView) -> IconKind {
+    icon_for(term.agent.as_ref().map(|a| a.kind), Some(&term.program))
+}
+
 /// The kind of icon of a panel: the one of its source terminal's agent or program; none
 /// without terminals.
 pub fn panel_icon_kind(panel: &PanelView) -> Option<IconKind> {
-    let term = source_terminal_view(panel)?;
-    Some(icon_for(
-        term.agent.as_ref().map(|a| a.kind),
-        Some(&term.program),
-    ))
+    source_terminal_view(panel).map(terminal_icon_kind)
+}
+
+/// What a terminal row says: the title without its spinner and status glyphs, else the
+/// program.
+fn terminal_label(term: &TerminalView) -> String {
+    let title = term.title.as_deref().map_or("", title_core);
+    if title.is_empty() {
+        &term.program
+    } else {
+        title
+    }
+    .to_string()
+}
+
+/// The status of a terminal's agent.
+fn terminal_status(term: &TerminalView) -> AgentStatus {
+    AgentStatus::most_urgent(term.agent.iter().map(|a| a.status))
 }
 
 /// The style of an icon of `kind` in a row styled `style`: Claude's is always its orange. On
@@ -924,7 +999,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             .saturating_sub(HEADER_ROWS + bar_rows(area.height)),
     );
     // The row a context menu belongs to keeps the hover background.
-    let menu_row = app.context.as_ref().and_then(|menu| menu.row(app));
+    let menu_row = app.context.as_ref().and_then(|menu| menu.row());
     let selected = if app.sidebar_focus {
         app.selection
     } else {
@@ -944,7 +1019,10 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         // The drop target is drawn two columns to the right, after a caret; the dragged row
         // is dimmed.
         let shifted = row.sel().is_some() && row.sel() == target;
-        let dimmed = row.sel().is_some() && row.sel() == dragged;
+        // A dragged panel carries its terminal rows.
+        let dimmed = row.sel().is_some()
+            && (row.sel() == dragged
+                || matches!(*row, Row::Terminal(p, panel, _) if dragged == Some(Sel::Panel(p, panel))));
         // A band or hover background starts after the caret.
         let (lead, full) = if shifted {
             (2, w.saturating_sub(2))
@@ -1094,18 +1172,13 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                         icon_slot(app, icon, keep(row_style.patch(glyph_style)));
                     put(buf, y, w.saturating_sub(ICON_CELLS + 1), &text, slot_style);
                 }
-                let (count, count_w) = if p.terminals.len() > 1 {
-                    side(p.terminals.len().to_string())
-                } else {
-                    (String::new(), 0)
-                };
                 // The unseen marker is a slot after the name and one space.
                 let marker_w = if p.unseen { ICON_CELLS + 1 } else { 0 };
                 // The icon and its space come before the name.
                 let icon = panel_icon_cell(app, p, style);
                 let name_x = NAME_X;
                 let room = w
-                    .saturating_sub(name_x + 1 + if count_w > 0 { count_w + 1 } else { 0 })
+                    .saturating_sub(name_x + 1)
                     .saturating_sub(marker_w + status_w);
                 if p.unseen && !dimmed {
                     style = style.add_modifier(Modifier::BOLD);
@@ -1136,15 +1209,60 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                         icon_slot(app, Icon::Unseen, keep(row_style.patch(accent_fg)));
                     put(buf, y, name_x + 1 + name_end, &text, slot_style);
                 }
-                if count_w > 0 {
-                    put(
-                        buf,
-                        y,
-                        w.saturating_sub(count_w + 1 + status_w),
-                        &count,
-                        keep(row_style.patch(muted)),
-                    );
+            }
+            Row::Terminal(_, panel, id) => {
+                let Some((_, p)) = app.mirror.find_panel(panel) else {
+                    continue;
+                };
+                let Some((index, t)) = p.terminals.iter().enumerate().find(|(_, t)| t.id == id)
+                else {
+                    continue;
+                };
+                let focused = view.active_panel == Some(panel) && p.focused_terminal == Some(id);
+                let mut style = panel_style(theme, base, band, focused);
+                if hovered {
+                    style = style.bg(hover_bg);
                 }
+                if dimmed {
+                    style = row_style;
+                }
+                let status = agent::status_icon(terminal_status(t), theme);
+                let status_w = if status.is_some() { ICON_CELLS + 1 } else { 0 };
+                if let Some((icon, glyph_style)) = status {
+                    let glyph_style = if hovered && glyph_style.fg == Some(color(theme.muted)) {
+                        fg(theme.sidebar_fg)
+                    } else {
+                        glyph_style
+                    };
+                    let (text, slot_style) =
+                        icon_slot(app, icon, keep(row_style.patch(glyph_style)));
+                    put(buf, y, w.saturating_sub(ICON_CELLS + 1), &text, slot_style);
+                }
+                let glyph = if index + 1 == p.terminals.len() {
+                    "└"
+                } else {
+                    "├"
+                };
+                put(buf, y, TREE_X, glyph, keep(row_style.patch(muted)));
+                let (icon, icon_style) = icon_slot(app, Icon::Kind(terminal_icon_kind(t)), style);
+                put(buf, y, TERMINAL_ICON_X, &icon, icon_style);
+                let room = w
+                    .saturating_sub(TERMINAL_LABEL_X + 1)
+                    .saturating_sub(status_w);
+                let exited = t
+                    .exit_status
+                    .map(|code| format!(" · exited {code}"))
+                    .unwrap_or_default();
+                let label = truncate(&terminal_label(t), room.saturating_sub(width(&exited)));
+                put(buf, y, TERMINAL_LABEL_X, &label, style);
+                let exited = truncate(&exited, room.saturating_sub(width(&label)));
+                put(
+                    buf,
+                    y,
+                    TERMINAL_LABEL_X + width(&label),
+                    &exited,
+                    keep(row_style.patch(muted)),
+                );
             }
             Row::NoPanels => put(buf, y, 3, "no panels", keep(row_style.patch(muted))),
             Row::Gap => {}

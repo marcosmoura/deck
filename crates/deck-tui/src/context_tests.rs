@@ -115,8 +115,8 @@ fn reporting(a: &mut App, terminal: u64) {
 const T30: (u16, u16) = (34, 5);
 const T31: (u16, u16) = (70, 5);
 /// The rows of the sidebar: the `budget` space and its `api` panel.
-const BUDGET: u16 = 6;
-const API: u16 = 7;
+const BUDGET: u16 = 8;
+const API: u16 = 9;
 
 fn context(a: &App) -> &crate::context::ContextMenu {
     a.context.as_ref().expect("a context menu")
@@ -160,10 +160,10 @@ fn the_row_menus_have_their_items_and_a_minimum_width() {
     assert_eq!(context(&a).target, ContextTarget::Project(ProjectId(2)));
     assert_eq!(context(&a).items(), ["Rename", "New panel", "Close"]);
     let rect = a.context_rect().unwrap();
-    assert_eq!((rect.x, rect.y, rect.width, rect.height), (14, 6, 18, 5));
+    assert_eq!((rect.x, rect.y, rect.width, rect.height), (14, 8, 18, 5));
     let buf = buffer(&a);
-    assert_eq!(text(&buf, 7, 14, 32), "│ Rename       1 │");
-    assert_eq!(text(&buf, 8, 14, 32), "│ New panel    2 │");
+    assert_eq!(text(&buf, 9, 14, 32), "│ Rename       1 │");
+    assert_eq!(text(&buf, 10, 14, 32), "│ New panel    2 │");
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn nothing_else_opens_a_menu() {
         (2, 0),
         (20, 0),
         (2, 1),
-        (6, 9),
+        (6, 11),
         (3, 23),
         (28, 5),
         (29, 5),
@@ -217,7 +217,15 @@ fn the_items_do_what_their_bindings_do() {
     let mut a = app();
     right(&mut a, T30.0, T30.1);
     let outs = ch(&mut a, '1');
-    assert_eq!(outs, vec![act(Act::NewTerminal { panel: None })]);
+    assert_eq!(
+        outs,
+        vec![
+            act(Act::FocusPanel { panel: PanelId(3) }),
+            act(Act::NewTerminal {
+                panel: Some(PanelId(3))
+            })
+        ]
+    );
     assert!(a.context.is_none());
     // Rename panel.
     let mut a = app();
@@ -537,7 +545,7 @@ fn the_row_keeps_its_hover_background_and_the_bar_is_not_drawn() {
     assert_eq!(a.hover, None);
     assert!(a.overlay_open());
     assert_eq!(
-        context(&a).row(&a),
+        context(&a).row(),
         Some(Sel::Panel(ProjectId(2), PanelId(6)))
     );
     let buf = buffer(&a);

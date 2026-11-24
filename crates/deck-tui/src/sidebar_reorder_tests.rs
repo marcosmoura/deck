@@ -109,6 +109,7 @@ fn preview(a: &App) -> String {
         .map(|r| match r {
             Row::Project(p) => format!("P{}", p.0),
             Row::Panel(_, p) => format!("p{}", p.0),
+            Row::Terminal(_, _, t) => format!("t{}", t.0),
             Row::NoPanels => "n".into(),
             Row::Gap => "_".into(),
         })
@@ -607,10 +608,10 @@ fn the_shifted_row_keeps_its_content_inside_the_sidebar() {
     let buf = buffer(&a);
     let row: Vec<&str> = (0..28).map(|x| buf[(x, 4)].symbol()).collect();
     assert_eq!(&row[..2], ["\u{27a4}", " "]);
-    // The name is cut with `…` before the count, and the count stays inside the sidebar.
+    // The name is cut with `…` and stays inside the sidebar.
     let line: String = row.concat();
     assert!(line.contains('…'), "{line}");
-    assert!(line.trim_end().ends_with('2'), "{line}");
+    assert!(line.trim_end().ends_with('…'), "{line}");
     assert_eq!(buf[(28, 4)].symbol(), "│");
     assert!(normal.contains('…'));
     // A space drag shifts the space row, its glyph included.

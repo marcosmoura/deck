@@ -212,10 +212,11 @@ fn the_sessions_panels_and_grid_come_back_after_kill_server() {
     add_terminals(&mut h, 3);
     prefixed(&mut h, "c");
     wait_until("a third panel", TIMEOUT, || {
-        h.is_active_row(5)
+        // The second panel's three terminals have rows under it.
+        h.is_active_row(8)
             && h.screen_text()
                 .lines()
-                .nth(5)
+                .nth(8)
                 .is_some_and(|r| r.starts_with(" ❯  sh"))
     });
     add_terminals(&mut h, 5);

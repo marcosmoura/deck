@@ -116,14 +116,14 @@ fn the_sidebar_of_the_spec_at_28_columns() {
 }
 
 #[test]
-fn a_terminal_count_and_a_long_name_leave_room_for_the_icon() {
+fn a_grid_panel_has_no_count_and_a_long_name_leaves_room_for_the_icon() {
     let mut view = titled();
     view.projects[0].panels[1].name = "a-very-long-panel-name-indeed".into();
     let extra = view.projects[0].panels[1].terminals[0].clone();
     view.projects[0].panels[1].terminals.push(extra);
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad(" ✎  a-very-long-panel-na… 2 "));
+    assert_eq!(sidebar(&rows)[4], pad(" ✎  a-very-long-panel-name…"));
 }
 
 #[test]
@@ -262,9 +262,9 @@ fn the_status_marks_keep_their_roles() {
 }
 
 #[test]
-fn the_name_is_cut_before_the_unseen_slot_the_count_and_the_status_slot() {
+fn the_name_is_cut_before_the_unseen_slot_and_the_status_slot() {
     let mut view = titled();
-    // Panel 4 has a working agent; it is also unseen, with a count and a long name.
+    // Panel 4 has a working agent; it is also unseen, with a long name and two terminals.
     let panel = &mut view.projects[0].panels[0];
     panel.name = "a-very-long-panel-name-indeed".into();
     panel.unseen = true;
@@ -272,6 +272,6 @@ fn the_name_is_cut_before_the_unseen_slot_the_count_and_the_status_slot() {
     panel.terminals.push(extra);
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    // Name from column 4, then the unseen slot, the count and the status slot, one space each.
-    assert_eq!(sidebar(&rows)[3], pad(&st(" ✻  a-very-long-pa… •  2", "⠋")));
+    // Name from column 4, then the unseen slot and the status slot, one space each.
+    assert_eq!(sidebar(&rows)[3], pad(&st(" ✻  a-very-long-pane… •", "⠋")));
 }

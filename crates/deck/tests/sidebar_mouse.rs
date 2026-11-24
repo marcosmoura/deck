@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use support::{Harness, TIMEOUT, stdout, wait_until};
+use support::{ACCENT, Harness, TIMEOUT, stdout, wait_until};
 
 const SIZE: (u16, u16) = (100, 24);
 const PREFIX: &[u8] = b"\x1b ";
@@ -873,4 +873,69 @@ fn dragging_a_panel_row_above_its_sibling_reorders_the_panel_numbers() {
     wait_until("prefix 1 on the moved panel", TIMEOUT, || {
         h.is_active_row(3)
     });
+}
+
+/// How many terminal rows (a tree glyph at column 2) the sidebar shows.
+fn terminal_rows(h: &Harness) -> usize {
+    side(h)
+        .iter()
+        .filter(|r| r.chars().nth(2).is_some_and(|c| c == '├' || c == '└'))
+        .count()
+}
+
+/// Whether the grid's box titled with the terminal number `n` has the focused border.
+fn grid_focus_on(h: &Harness, n: usize) -> bool {
+    let title = format!("╭─ {n} · ");
+    rows(h).iter().enumerate().any(|(y, row)| {
+        row.find(&title).is_some_and(|i| {
+            let x = row[..i].chars().count();
+            h.cell(y, x).fg == ACCENT
+        })
+    })
+}
+
+#[test]
+fn a_grid_panel_shows_a_row_per_terminal_and_a_click_focuses_it() {
+    let mut h = attached();
+    prefixed(&mut h, "t");
+    prefixed(&mut h, "t");
+    wait_until("three terminal rows", TIMEOUT, || terminal_rows(&h) == 3);
+    let side_rows = side(&h);
+    assert!(side_rows[4].starts_with("  ├ "), "{side_rows:?}");
+    assert!(side_rows[6].starts_with("  └ "), "{side_rows:?}");
+    // The new terminal has focus; its row is not the band, the panel's row is.
+    wait_until("focus on 3", TIMEOUT, || grid_focus_on(&h, 3));
+    assert!(h.is_active_row(3));
+    h.capture("sidebar-terminal-rows");
+    // A click on the first terminal's row moves the grid's focused border to it.
+    click_at(&mut h, 10, 4);
+    wait_until("focus on 1", TIMEOUT, || grid_focus_on(&h, 1));
+    h.capture("sidebar-terminal-row-clicked");
+}
+
+#[test]
+fn a_click_on_a_terminal_row_of_another_panel_makes_that_panel_active() {
+    let mut h = attached();
+    prefixed(&mut h, "t");
+    wait_until("two terminal rows", TIMEOUT, || terminal_rows(&h) == 2);
+    prefixed(&mut h, "c");
+    // Rows: the space, the grid panel with its two terminals, the new active panel.
+    wait_until("the second panel active", TIMEOUT, || h.is_active_row(6));
+    assert!(!h.is_active_row(3));
+    click_at(&mut h, 10, 4);
+    wait_until("the grid panel active, terminal 1 focused", TIMEOUT, || {
+        h.is_active_row(3) && grid_focus_on(&h, 1)
+    });
+    h.capture("sidebar-terminal-row-other-panel");
+}
+
+#[test]
+fn closing_a_terminal_removes_its_row() {
+    let mut h = attached();
+    prefixed(&mut h, "t");
+    prefixed(&mut h, "t");
+    wait_until("three terminal rows", TIMEOUT, || terminal_rows(&h) == 3);
+    h.send_keys("exit\r");
+    wait_until("two terminal rows", TIMEOUT, || terminal_rows(&h) == 2);
+    h.capture("sidebar-terminal-row-closed");
 }
