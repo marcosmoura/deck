@@ -8,9 +8,10 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-7. DECK-40 List OpenCode sessions without loading repositories
-8. DECK-26 Security, privacy and performance reviews
-9. DECK-28 Stress suite follow-ups
+7. DECK-41 Flaky test of the output pause during an upgrade
+8. DECK-40 List OpenCode sessions without loading repositories
+9. DECK-26 Security, privacy and performance reviews
+10. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
@@ -67,6 +68,7 @@ Open tasks the user has not placed in the queue:
 | DECK-38 | Daemon not dumpable on Linux                        | todo        | —                                                             | —                                                                            |
 | DECK-39 | Client exits when its terminal closes               | done        | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
 | DECK-40 | List OpenCode sessions without loading repositories | todo        | DECK-26                                                       | —                                                                            |
+| DECK-41 | Flaky test of the output pause during an upgrade    | todo        | —                                                             | —                                                                            |
 
 ### Withdrawn
 
@@ -77,6 +79,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-41
+
+**Flaky test of the output pause during an upgrade.** Found on 25 Nov 2026: CI on `main` is red. On macOS (`check (macos-15)`, run 45438787232 at `89edb06`) `deck-daemon`'s `terminal::tests::a_pause_inside_a_csi_holds_it` failed with `assertion left == right failed: held bytes` at `crates/deck-daemon/src/terminal.rs:1275`; it passes locally. The user put it first in the queue so CI goes green. (The same run's Linux failure, `kill_server_during_the_handoff_is_answered_by_the_new_daemon_which_then_stops`, is a real bug and is fixed in DECK-26.)
+
+- What: find why the test of DECK-21's reader pause (bytes of an unfinished escape sequence are held back while the reader is paused) gives a different held-bytes count on a CI runner, and make the test, or the pause, deterministic. A read-only reviewer diagnoses first, from the code and the CI log.
+- Why: a red CI on `main` hides real failures; if the pause itself can split a sequence wrongly under load, a live upgrade could hand a half sequence to the new image.
+- Acceptance: the cause is named; the test passes 200 runs in a row under parallel load locally and in CI on both platforms; if the pause logic was at fault, a test that failed before the fix.
 
 ### DECK-40
 
