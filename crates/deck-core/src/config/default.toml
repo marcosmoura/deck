@@ -1,41 +1,30 @@
-# deck configuration. Every key is optional; the values below are the defaults.
+# deck configuration. Every key is optional and shows its default value.
+# Check your file with `deck config check`. Most changes apply as soon as you save.
 
-# The prefix key that starts a binding. On macOS, Option+Space needs Option to act as Alt in
-# the terminal; the non-breaking space some terminals send instead is accepted too. Launchers
-# such as Raycast and Alfred may claim Option+Space: change either one.
+# The key you press before every shortcut. M-Space is Option+Space (Alt+Space).
+# On macOS, set Option to act as Alt in your terminal.
 prefix = "M-Space"
 
-# The shell for new terminals; unset means $SHELL, else /bin/sh.
+# The shell for new terminals. When unset, deck uses $SHELL.
 # shell = "/bin/zsh"
-
-# Arguments passed to the shell.
 shell_args = ["-l"]
 
-# Lines of scrollback kept per terminal.
+# How many lines of history each terminal keeps.
 scrollback_lines = 10000
 
-# The sidebar of spaces and panels: shown or hidden, and its width in columns (20 to 60).
-# It also hides while the window is narrower than its width plus 21 columns.
-# sidebar_space_gap is the number of blank rows between two spaces (0 to 3).
+# The sidebar: shown or hidden, its width (20 to 60 columns),
+# and the blank rows between spaces (0 to 3).
 sidebar = true
 sidebar_width = 28
 sidebar_space_gap = 0
 
-# How deck tells you, through the outer terminal, that an agent needs you or finished while
-# you were not looking: "osc9" (a desktop notification in iTerm2, Ghostty and WezTerm; other
-# terminals ignore it), "bell", or "none". Inside tmux or over ssh, OSC 9 reaches the desktop
-# only if they pass it through.
+# How deck alerts you when an agent needs you: "osc9" (desktop notification), "bell" or "none".
 notify = "osc9"
 
-# After a daemon restart (deck kill-server, a reboot), reopen each terminal's coding agent on
-# its conversation: a shell terminal runs the agent's resume command first and then your
-# shell; a terminal started with an explicit agent command runs the resume command instead.
+# Reopen your coding agents' conversations after a restart or reboot.
 resume_agents = true
 
-# Key bindings, pressed after the prefix. An action takes one key or a list of keys, and
-# replaces that action's default keys; [] unbinds the action. A key you set for an action
-# is taken from any other action that only has it by default, with a warning; one key set
-# on two of your actions is an error.
+# Shortcuts, pressed after the prefix. Use one key or a list of keys; [] turns a shortcut off.
 [keys]
 detach = "d" # Detach from the session
 sessions = "s" # Switch, create or kill sessions
@@ -76,47 +65,34 @@ focus_sidebar = "Tab" # Move focus into the sidebar
 next_attention = "a" # Jump to the next agent that needs you
 help = "?" # This help
 
-# Colours and glyphs of deck's own UI; terminal contents keep their programs' colours.
-# A colour is "default" (the terminal's own), a name (black, red, green, yellow, blue,
-# magenta, cyan, white and their bright- forms), a number 0 to 255 (the 256-colour palette),
-# "#rrggbb", or the name of another role. Without truecolor, "#rrggbb" is drawn as the
-# nearest palette colour.
+# Colours of deck's own interface. A colour is "default" (your terminal's), a name such as
+# "blue" or "bright-black", a number from 0 to 255, "#rrggbb", or another role's name.
 [theme]
-accent = "blue" # focused border and title, active panel row, session name in the sidebar header
-muted = "bright-black" # hints, space names, empty states, exited terminals
-ok = "green" # success states
-warning = "yellow" # PREFIX, SCROLL and RESIZE badges, scroll indicator
-error = "red" # error flashes
-border = "bright-black" # unfocused terminal borders and the sidebar separator
+accent = "blue" # focused border and title, active panel, session name
+muted = "bright-black" # hints, space names, exited terminals
+ok = "green" # success messages
+warning = "yellow" # PREFIX, SCROLL and RESIZE badges
+error = "red" # error messages
+border = "bright-black" # unfocused borders and the sidebar edge
 border_focused = "accent" # the focused terminal's border
 title = "default" # unfocused terminal titles
 sidebar_fg = "default" # sidebar text
 sidebar_bg = "default" # sidebar background
-status_fg = "default" # floating bar text and hint keys
+status_fg = "default" # floating bar text
 status_bg = "default" # floating bar background
-selection_fg = "default" # selected row text (reversed while both selection roles are default)
+selection_fg = "default" # selected row text
 selection_bg = "default" # selected row background
-overlay_bg = "default" # help and picker overlays
-hover = "bright-black" # background of the sidebar row or chip under the pointer
-# rounded, plain, thick or double: borders of terminals and overlays.
+overlay_bg = "default" # help and picker background
+hover = "bright-black" # row under the mouse pointer
+# Border shape: rounded, plain, thick or double.
 border_style = "rounded"
 
-# How deck recognises each coding agent in a terminal: the program names (the command as
-# typed, or the script that node, bun, deno, sh, bash, zsh or dash runs, without extension)
-# whose process in the foreground of the terminal means that agent.
-#
-# `resume` reopens a conversation and `resume_latest` the most recent one, which is used when
-# the session id is unknown or not a plain id. A template is a program and arguments split on
-# whitespace; `{session_id}` is allowed only as a whole argument of `resume`. Quotes,
-# backslashes, `$`, backticks and other shell syntax are errors: the command is joined with
-# spaces and run by `sh -c`. With several agents of one kind in one directory and no session
-# ids, each one runs `resume_latest`.
-#
-# `command` is what a new panel for that agent runs (the `New` menu), directly and with no
-# shell, in the space's directory. It is a program and arguments split on whitespace, with
-# the same restrictions and no `{session_id}`; a program with a `/` must be an absolute path.
-# A program that is not in `process` is not detected as the agent, so a daemon restart
-# relaunches it fresh instead of resuming it.
+# Coding agents. For each one:
+#   process        program names that mean this agent is running
+#   command        what a new agent panel runs
+#   resume         reopens a conversation by its id
+#   resume_latest  reopens the most recent conversation
+# Commands are plain words: no quotes or other shell syntax.
 [agents.claude]
 process = ["claude"] # Claude Code
 command = "claude"
