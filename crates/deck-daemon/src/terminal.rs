@@ -7,7 +7,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use deck_core::model::{SessionId, TerminalId};
@@ -22,6 +22,16 @@ use crate::emu::Emu;
 use crate::env::Env;
 use crate::lock;
 use crate::server::Shared;
+
+/// The daemon's own argv, as [`crate::platform::foreground_process`] reads a process's.
+fn daemon_argv() -> &'static Vec<String> {
+    static ARGV: OnceLock<Vec<String>> = OnceLock::new();
+    ARGV.get_or_init(|| {
+        std::env::args_os()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    })
+}
 
 /// At most one frame per terminal in this interval.
 pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -174,9 +184,12 @@ impl TermHandle {
         });
     }
 
-    /// The foreground process of the PTY: its pid and argv.
+    /// The foreground process of the PTY: its pid and argv. `None` while the terminal's own
+    /// process has not run its program yet: between fork and exec it still holds the
+    /// daemon's argv.
     pub fn foreground(&self) -> Option<(u32, Vec<String>)> {
-        crate::platform::foreground_process(lock(&self.master).as_ref())
+        let (pid, argv) = crate::platform::foreground_process(lock(&self.master).as_ref())?;
+        (Some(pid) != self.pid || argv != *daemon_argv()).then_some((pid, argv))
     }
 
     /// Runs `f` on the emulator; `None` once the terminal was released.
