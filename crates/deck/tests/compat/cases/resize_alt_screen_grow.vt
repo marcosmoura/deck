@@ -1,0 +1,4 @@
+#! size 30x6
+#! resize 50x9
+# The alternate screen grows.
+primary\r\n\e[?1049h\e[2J\e[1;1HALT\e[6;1Hbottom\e[3;20Hmid

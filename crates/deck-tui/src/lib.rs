@@ -4,6 +4,7 @@ mod agent;
 #[cfg(test)]
 mod agent_tests;
 mod app;
+mod backend;
 mod bar;
 #[cfg(test)]
 mod bar_tests;
@@ -31,6 +32,8 @@ mod grid_tests;
 #[cfg(test)]
 mod icons_tests;
 mod input;
+#[cfg(test)]
+mod kitty_tests;
 mod menu;
 #[cfg(test)]
 mod menu_tests;
@@ -82,7 +85,6 @@ use deck_core::protocol::{
     Role, ServerMsg, encode,
 };
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event as ct;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal as ct_terminal;
@@ -186,6 +188,7 @@ async fn run_async(mut options: Options) -> Exit {
     let mut app = App::new(&Config::default(), size, &probe.leftover).with_dirs(cwd.clone(), home);
     app.cell = measure_cell();
     app.truecolor = convert::truecolor(std::env::var("COLORTERM").ok().as_deref());
+    app.outer_kitty = probe.kitty_keyboard;
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let plan = caps::plan(
         probe.xtversion.as_deref(),
@@ -248,19 +251,28 @@ async fn run_async(mut options: Options) -> Exit {
         })
     };
 
-    let mut terminal = match Terminal::new(CrosstermBackend::new(io::stdout())) {
+    let mut terminal = match Terminal::new(backend::DeckBackend::new(io::stdout())) {
         Ok(t) => t,
         Err(e) => return Exit::Error(format!("cannot start the screen: {e}")),
     };
     let panic_after_first_draw = std::env::var_os("DECK_TEST_PANIC").is_some_and(|v| v == "1");
     let mut shape = None;
     let mut drawn_once = false;
+    // The kitty keyboard flags pushed on the outer terminal.
+    let mut keyboard = 0u8;
 
     let mut last_draw = Instant::now() - REDRAW;
     // What was typed ahead runs once the daemon's config has arrived (`Welcome`).
     let mut early: Vec<Out> = Vec::new();
 
     let exit = 'run: loop {
+        // The focused terminal or an overlay may have changed what the keyboard should send;
+        // checked on every pass, whichever branch ended the last one.
+        let wanted = app.outer_keyboard();
+        if wanted != keyboard {
+            term::set_keyboard(wanted);
+            keyboard = wanted;
+        }
         // No timer runs while the screen is idle: one is armed for the next draw (at most
         // every 16 ms) or for the end of a flash message.
         let wake = if app.is_dirty() {
@@ -714,7 +726,7 @@ mod tests {
     ];
 
     /// Colours and theme glyphs of deck's own UI come from the theme: no `Color` constructor
-    /// outside the conversion module and no icon glyph outside `deck-core`.
+    /// outside the conversion module and the backend (which writes resets) and no icon glyph outside `deck-core`.
     #[test]
     fn no_colour_or_theme_glyph_literals_in_the_drawing_code() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -723,7 +735,11 @@ mod tests {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || name == "convert.rs" {
+            if !name.ends_with(".rs")
+                || name.ends_with("_tests.rs")
+                || name == "convert.rs"
+                || name == "backend.rs"
+            {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();

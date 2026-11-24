@@ -28,7 +28,7 @@ In any other outer terminal (Alacritty, WezTerm, tmux, ...) the image's cells sh
 - Very large placements (hundreds of cells at large cell sizes) cost a lot of CPU and bytes when first drawn, and again after a cell size change.
 - The outer terminal's own image quota may evict images silently.
 - Only the terminals of the active panel show images.
-- A program's cells use the image's first virtual placement: deck's frames carry no underline colour, so several placements of one image told apart by placement id are not told apart.
+- A program's cells use the image's first virtual placement: deck does not read the placement id (which a program puts in the underline colour of its placeholder cells), so several placements of one image told apart by placement id are not told apart.
 
 ## Selection and copy
 

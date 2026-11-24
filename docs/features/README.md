@@ -13,4 +13,5 @@ One page per feature, written by the work that ships it and kept current by ever
 - [Control API](control-api.md): `deck ls --json`, `new-space`, `new-panel`, `new-terminal`, `focus`, `close`, `rename-panel`, `--keep` and the `DECK_*` targets.
 - [Agents](agents.md): the agent states and glyphs, detection by process, `[agents.<kind>] process`, hook events.
 - [Images](images.md): pictures from programs (`kitten icat`, yazi, chafa) in Ghostty and kitty, what shows elsewhere, the limits.
+- [Compatibility](compatibility.md): what the differential suite covers and how deck differs from the reference emulator.
 - [Stats](stats.md): `deck stats`, `deck stats --json` and the stats line in `daemon.log`.

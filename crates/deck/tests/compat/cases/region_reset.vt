@@ -1,0 +1,3 @@
+#! size 20x10
+# DECSTBM homes the cursor; a bare CSI r resets the region; a bad region is ignored.
+\e[2J\e[H\e[1;1Hrow01 abcdefgh\e[2;1Hrow02 abcdefgh\e[3;1Hrow03 abcdefgh\e[4;1Hrow04 abcdefgh\e[5;1Hrow05 abcdefgh\e[6;1Hrow06 abcdefgh\e[7;1Hrow07 abcdefgh\e[8;1Hrow08 abcdefgh\e[9;1Hrow09 abcdefgh\e[10;1Hrow10 abcdefgh\e[5;1H\e[3;7r\e[1;1HA\e[r\e[10;1H\n\e[8;3r\e[5;5r\e[3;3r\e[10;1H\nB

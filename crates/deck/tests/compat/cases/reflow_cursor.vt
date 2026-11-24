@@ -1,0 +1,4 @@
+#! size 40x10
+#! resize 100x10
+# The cursor in the middle of a wrapped line follows its text when the line joins.
+0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-0123456789-0123456789-\e[2;5H

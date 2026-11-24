@@ -1,0 +1,5 @@
+# git diff --color in a scratch repository.
+size 100x30
+setup git init -q . && cp "$DECK_SCENARIOS/files/sample.rs" sample.rs && git add sample.rs && git commit -q -m 'add sample'
+setup sed -i.bak -e 's/apple/orange/' -e 's/"pear", 5/"pear", 7/' -e '/Print the total/d' sample.rs && rm sample.rs.bak && printf 'fn extra() {}\n' >> sample.rs
+run git --no-pager diff --color=always

@@ -139,7 +139,7 @@ impl Shared {
             .ok_or_else(|| format!("no terminal {terminal}"))?;
         let bytes: Vec<u8> = keys
             .iter()
-            .flat_map(|k| keys::encode(&k.to_event(), modes))
+            .flat_map(|k| keys::encode_key(&k.to_event(), keys::KeyEventKind::Press, modes))
             .collect();
         handle.write(bytes);
         Ok(())

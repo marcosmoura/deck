@@ -1,0 +1,2 @@
+# Wide characters, also at the right edge.
+\xe4\xb8\xad\xe6\x96\x87 wide \xf0\x9f\x98\x80 emoji\r\n\e[1;80H\xe4\xb8\xad\r\n

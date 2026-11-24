@@ -18,7 +18,7 @@ On macOS:
 - Launchers such as Raycast and Alfred may claim `Option+Space` before the terminal sees it: change the launcher's shortcut or set `prefix` here.
 - `Ctrl+Space` is not the default because macOS reserves it for switching input sources.
 
-`Shift+Enter` arrives as `Enter`: deck does not use the kitty keyboard protocol.
+**The kitty keyboard protocol.** A program that asks for it (Claude Code, Codex, Neovim and other editors push flags such as `CSI > 1 u`) gets it inside deck, whatever your terminal: `Shift+Enter`, `Ctrl+Enter`, `Ctrl+Tab`, `Ctrl+Backspace`, `Ctrl+I` versus `Tab`, key releases when it asks for them, and every key with every modifier, as in Ghostty or kitty. Keys that your terminal cannot tell apart still arrive as one key, so `Shift+Enter` and similar keys need an outer terminal with the protocol (Ghostty, kitty, WezTerm, iTerm2, foot, Alacritty); in any other terminal they reach the program as plain `Enter`. deck asks your terminal at start-up whether it has the protocol, turns it on while the focused terminal's program uses it, and turns it off when focus moves to another terminal, when a dialog or menu opens, and when deck exits. Limits: a program that asks for every key as an escape code (flag 8) gets no presses or releases of modifier keys on their own, the base-layout key and the lock modifiers (Caps Lock, Num Lock) are not sent, and a shifted symbol loses its base key (`Shift+1` is `CSI 33u`). Key bindings ignore Hyper and Meta but not Super. The prefix key works the same either way, and pressed twice it sends the key to the program in the program's encoding.
 
 ## The floating bar
 

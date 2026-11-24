@@ -1,0 +1,2 @@
+# ED and EL, with a background colour set.
+line one\r\nline two\r\nline three\r\nline four\r\n\e[2;5H\e[K\e[3;5H\e[1K\e[44m\e[4;3H\e[0J\e[0m\e[1;3H\e[1J\e[2;1Hx\e[2K

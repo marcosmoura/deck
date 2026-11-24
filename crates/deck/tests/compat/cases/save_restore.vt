@@ -1,0 +1,3 @@
+#! size 30x6
+# DECSC and DECRC keep the position and attributes; CSI s and CSI u keep the position.
+\e[2;5H\e[1;31;44m\e7\e[0m\e[4;1Hplain\e8X\e[0m\e[3;1H\e[s\e[5;10H\e[4mUU\e[0m\e[u\e[mcsi\e[6;1H\e8Y\e[1;1H\e[?6h\e7\e[?6l\e[5;1H\e8Z

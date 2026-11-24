@@ -1,0 +1,4 @@
+#! size 20x5
+#! history
+# ED 3 clears the scrollback but not the screen.
+1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n\e[3J

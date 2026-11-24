@@ -7,7 +7,7 @@ use std::time::Duration;
 use deck_core::model::TerminalId;
 use deck_core::protocol::{
     CellPx, Color, Cursor, CursorShape, Frame, Line as FrameLine, Modes, Placement, Run, ScrollTo,
-    Style,
+    Style, Underline as Under,
 };
 use ghostty_vt::render::{
     CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator, Snapshot,
@@ -508,10 +508,10 @@ fn convert(event: Event, cell_known: bool, named: bool) -> Option<EmuEvent> {
 }
 
 /// Answers `libghostty-vt` gives and the daemon has never given, which cannot be switched
-/// off one by one, so they are dropped here:
+/// off one by one, so they are dropped here. The kitty keyboard query (`CSI ? u`) is not
+/// one of them: it is answered with `CSI ? <flags> u`, as DECK-22 sub-spec 04 has the client
+/// encode keys for the flags a program set:
 ///
-/// - the kitty keyboard query (`CSI ? u`) is answered with `CSI ? <flags> u`; deck encodes
-///   keys the legacy way, so programs keep seeing no support for the protocol;
 /// - the cell size report (`CSI 16 t`) is answered with `CSI 6 ; <height> ; <width> t`, while
 ///   the size reports (`CSI 14 t`, `CSI 18 t`) are kept. It is dropped only while no client
 ///   has reported the cell size (alacritty never answered it); with a real size it passes;
@@ -519,10 +519,6 @@ fn convert(event: Event, cell_known: bool, named: bool) -> Option<EmuEvent> {
 ///   It passes once a name is set (the outer terminal's, see `Emu::set_xtversion`).
 fn is_unanswered(bytes: &[u8], cell_known: bool, named: bool) -> bool {
     let digits = |b: &[u8]| !b.is_empty() && b.iter().all(u8::is_ascii_digit);
-    let kitty_keyboard = bytes
-        .strip_prefix(b"\x1b[?")
-        .and_then(|rest| rest.strip_suffix(b"u"))
-        .is_some_and(|flags| digits(flags) || flags.is_empty());
     let cell_size = bytes
         .strip_prefix(b"\x1b[6;")
         .and_then(|rest| rest.strip_suffix(b"t"))
@@ -532,7 +528,7 @@ fn is_unanswered(bytes: &[u8], cell_known: bool, named: bool) -> bool {
         })
         .is_some_and(|(h, w, end)| end && digits(h) && digits(w));
     let xtversion = bytes.starts_with(b"\x1bP>|");
-    kitty_keyboard || (cell_size && !cell_known) || (xtversion && !named)
+    (cell_size && !cell_known) || (xtversion && !named)
 }
 
 /// The rows of a snapshot as lines: every row, or the dirty ones.
@@ -638,12 +634,13 @@ fn modes_of(term: &Terminal) -> Modes {
         ),
         (on(Mode::ALT_SCROLL), Modes::ALTERNATE_SCROLL),
     ];
-    Modes(
-        table
-            .iter()
-            .filter(|(set, _)| *set)
-            .fold(0, |acc, (_, bit)| acc | bit),
-    )
+    let modes = table
+        .iter()
+        .filter(|(set, _)| *set)
+        .fold(0, |acc, (_, bit)| acc | bit);
+    // The kitty keyboard flags of the active screen (each screen has its own stack).
+    let kitty = term.kitty_keyboard_flags().map_or(0, |flags| flags.bits());
+    Modes(modes).with_kitty_flags(kitty)
 }
 
 /// The style of a cell: its style (if it has one), and the background colour of a cell that
@@ -655,7 +652,6 @@ fn style_of(raw: Cell, style: Option<GStyle>) -> Style {
             (s.bold, Style::BOLD),
             (s.faint, Style::DIM),
             (s.italic, Style::ITALIC),
-            (s.underline != Underline::None, Style::UNDERLINE),
             (s.inverse, Style::REVERSE),
             (s.strikethrough, Style::STRIKETHROUGH),
             (s.invisible, Style::HIDDEN),
@@ -663,6 +659,17 @@ fn style_of(raw: Cell, style: Option<GStyle>) -> Style {
         out = Style {
             fg: color(s.fg_color),
             bg: color(s.bg_color),
+            underline_color: color(s.underline_color),
+            underline: match s.underline {
+                Underline::None => Under::None,
+                Underline::Single => Under::Single,
+                Underline::Double => Under::Double,
+                Underline::Curly => Under::Curly,
+                Underline::Dotted => Under::Dotted,
+                Underline::Dashed => Under::Dashed,
+                // A kind this deck does not know is still an underline.
+                _ => Under::Single,
+            },
             flags: table
                 .iter()
                 .filter(|(set, _)| *set)
@@ -846,6 +853,30 @@ mod tests {
     }
 
     #[test]
+    fn the_kitty_keyboard_flags_are_in_the_frame_for_each_screen() {
+        let mut e = emu(10, 4);
+        let flags = |e: &mut Emu| e.full_frame(TerminalId(1)).modes.kitty_flags();
+        assert_eq!(flags(&mut e), 0);
+        e.feed(b"\x1b[>1u");
+        assert_eq!(flags(&mut e), 1);
+        e.feed(b"\x1b[>11u");
+        assert_eq!(flags(&mut e), 11);
+        // The alternate screen has its own stack, and the other bits stay.
+        e.feed(b"\x1b[?1049h");
+        assert_eq!(flags(&mut e), 0);
+        e.feed(b"\x1b[>2u");
+        let frame = e.full_frame(TerminalId(1));
+        assert_eq!(frame.modes.kitty_flags(), 2);
+        assert!(frame.modes.has(Modes::ALTERNATE_SCREEN));
+        e.feed(b"\x1b[?1049l");
+        assert_eq!(flags(&mut e), 11);
+        e.feed(b"\x1b[<u");
+        assert_eq!(flags(&mut e), 1);
+        e.feed(b"\x1b[<5u");
+        assert_eq!(flags(&mut e), 0);
+    }
+
+    #[test]
     fn modes_and_cursor_are_reported() {
         let mut e = emu(10, 4);
         e.feed(b"\x1b[?1h\x1b[?2004h\x1b[?25l\x1b[6 q\x1b[3;4H");
@@ -988,20 +1019,22 @@ mod tests {
         let runs = &frame.lines[0].1.runs;
         let flags: Vec<u16> = runs.iter().map(|r| r.style.flags).collect();
         assert_eq!(
-            flags[..7],
+            flags[..8],
             [
                 Style::BOLD,
                 Style::DIM,
                 Style::ITALIC,
-                // Single and curly underline are one flag, so one run.
-                Style::UNDERLINE,
+                0,
+                0,
                 Style::REVERSE,
                 Style::STRIKETHROUGH,
                 Style::HIDDEN
             ]
         );
+        let kinds: Vec<Under> = runs[..8].iter().map(|r| r.style.underline).collect();
+        assert_eq!(kinds[3..5], [Under::Single, Under::Curly]);
         let colors: Vec<(Color, Color)> =
-            runs[8..].iter().map(|r| (r.style.fg, r.style.bg)).collect();
+            runs[9..].iter().map(|r| (r.style.fg, r.style.bg)).collect();
         assert_eq!(
             colors,
             [
@@ -1247,7 +1280,7 @@ mod tests {
     #[test]
     fn replies_to_queries_are_pinned() {
         let none: &[&str] = &[];
-        let cases: [(&[u8], &[&str]); 13] = [
+        let cases: [(&[u8], &[&str]); 15] = [
             // DA1 and DA2.
             (b"\x1b[c", &["reply \"\\u{1b}[?6c\""]),
             (b"\x1b[>c", &["reply \"\\u{1b}[>0;2600;1c\""]),
@@ -1261,10 +1294,15 @@ mod tests {
             // DECRQM: cursor visible (set), bracketed paste (unset).
             (b"\x1b[?25$p", &["reply \"\\u{1b}[?25;1$y\""]),
             (b"\x1b[?2004$p", &["reply \"\\u{1b}[?2004;2$y\""]),
-            // XTVERSION, and the kitty keyboard query alone and after a push: no answer.
+            // XTVERSION: no answer. The kitty keyboard query: the flags in force.
             (b"\x1b[>q", none),
-            (b"\x1b[?u", none),
-            (b"\x1b[>1u\x1b[?u", none),
+            (b"\x1b[?u", &["reply \"\\u{1b}[?0u\""]),
+            (b"\x1b[>1u\x1b[?u", &["reply \"\\u{1b}[?1u\""]),
+            (
+                b"\x1b[>1u\x1b[>9u\x1b[<u\x1b[?u",
+                &["reply \"\\u{1b}[?1u\""],
+            ),
+            (b"\x1b[>1u\x1b[=2;2u\x1b[?u", &["reply \"\\u{1b}[?3u\""]),
             // OSC 4 for a palette index the program never set: the xterm colour.
             (
                 b"\x1b]4;5;?\x07",
@@ -1318,7 +1356,7 @@ mod tests {
             answers(&mut e, b"\x1b[14t"),
             ["reply \"\\u{1b}[4;384;640t\""]
         );
-        // The kitty keyboard query and XTVERSION stay unanswered with a known size.
+        // XTVERSION stays unanswered with a known size.
         e.resize_with_cell(
             80,
             24,
@@ -1327,7 +1365,7 @@ mod tests {
                 height: 18,
             }),
         );
-        assert_eq!(answers(&mut e, b"\x1b[?u\x1b[>q"), Vec::<String>::new());
+        assert_eq!(answers(&mut e, b"\x1b[>q"), Vec::<String>::new());
         assert_eq!(
             e.cell(),
             Some(CellPx {

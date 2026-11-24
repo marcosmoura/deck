@@ -201,6 +201,7 @@ mod tests {
                 ctrl: true,
                 alt: true,
                 shift: true,
+                ..Modifiers::NONE
             },
         };
         assert_eq!(text(encode(&ev, SGR)), "\x1b[<28;1;1M");

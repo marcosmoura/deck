@@ -9,9 +9,8 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
 6. DECK-21 Live upgrade
-7. DECK-22 Terminal compatibility
-8. DECK-26 Security, privacy and performance reviews
-9. DECK-28 Stress suite follow-ups
+7. DECK-26 Security, privacy and performance reviews
+8. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
@@ -43,7 +42,7 @@ Open tasks the user has not placed in the queue:
 | DECK-19 | Images in panels                          | done        | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
 | DECK-20 | Built-in icons                            | done        | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
 | DECK-21 | Live upgrade                              | in-progress | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
-| DECK-22 | Terminal compatibility                    | in-progress | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
+| DECK-22 | Terminal compatibility                    | done        | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
 | DECK-23 | Daemon stats and stress tests             | done        | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
 | DECK-24 | Scrollback search and copy mode           | done        | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
 | DECK-25 | Release automation and Homebrew           | done        | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |

@@ -1,0 +1,3 @@
+#! size 30x6
+# ESC ( 0 and SO/SI, as tmux, htop and mc draw boxes.
+\e(0lqqqk\e(B\r\n\e(0x\e(B x \e(0x\r\nmqqqj\e(B\r\n\x0elqk\x0f abc \x0e~\x0f\r\n\e)0\x0elqk\x0f\e)B\x0elqk\x0f

@@ -1,0 +1,4 @@
+# bat on a sample file.
+size 100x30
+setup cp "$DECK_SCENARIOS/files/sample.rs" sample.rs
+run bat --paging=never --color=always --style=full sample.rs

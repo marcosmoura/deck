@@ -1,0 +1,2 @@
+# 24-bit colours, both semicolon and colon forms.
+\e[38;2;255;128;0mA\e[48;2;0;64;128mB\e[0m\r\n\e[38:2::10:20:30mC\e[48:2::200:100:50mD\e[0m\r\n

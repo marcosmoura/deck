@@ -1,0 +1,2 @@
+# The 16 colours as foreground and background.
+\e[30mk\e[31mr\e[32mg\e[33my\e[34mb\e[35mm\e[36mc\e[37mw\e[0m\r\n\e[90mK\e[91mR\e[92mG\e[93mY\e[94mB\e[95mM\e[96mC\e[97mW\e[0m\r\n\e[40m \e[41m \e[42m \e[43m \e[44m \e[45m \e[46m \e[47m \e[0m\r\n\e[100m \e[101m \e[102m \e[103m \e[104m \e[105m \e[106m \e[107m \e[0m\r\n

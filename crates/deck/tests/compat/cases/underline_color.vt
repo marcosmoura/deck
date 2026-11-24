@@ -1,0 +1,5 @@
+# The underline colour (SGR 58) in its 256-colour and RGB forms, and SGR 59.
+\e[4:3m\e[58;5;196mindexed\e[0m \e[4:3m\e[58:5:21mcolon\e[0m \e[4:3m\e[58;2;255;0;0mrgb\e[0m\r\n
+\e[4m\e[58:2::0:255:0mrgb colon\e[0m \e[4:2m\e[58;2;1;2;3mdouble\e[59m reset\e[0m\r\n
+\e[58;5;9mcolour without underline\e[4m now underlined\e[24m gone\e[0m\r\n\e[4:3m\e[58;5;9mcleared\e[59m by 59\e[0m\r\n
+\e[4:3;58;2;255;0;0;31mred text\e[0m \e[4:4;58;5;2;44mon blue\e[0m\r\n

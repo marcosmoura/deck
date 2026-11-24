@@ -1,4 +1,5 @@
-//! Key specs (`M-Space`, `C-a`), key events and xterm key encoding.
+//! Key specs (`M-Space`, `C-a`), key events, xterm key encoding and the kitty keyboard
+//! protocol's encoding.
 
 use std::fmt;
 use std::str::FromStr;
@@ -25,8 +26,64 @@ pub enum KeyCode {
     End,
     PageUp,
     PageDown,
-    /// `F(1)` to `F(12)`.
+    /// `F(1)` to `F(12)`; the keys the kitty protocol adds, `F(13)` to `F(35)`, come from
+    /// the outer terminal only (the config has no name for them).
     F(u8),
+    /// The keypad's `5` with Num Lock off. Only kitty reports it; the legacy encoding has no
+    /// form for it.
+    KeypadBegin,
+    Media(MediaKey),
+    /// A modifier key pressed or released on its own.
+    Modifier(ModifierKey),
+    Special(SpecialKey),
+}
+
+/// The media keys of the kitty protocol, in the order of its key numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MediaKey {
+    Play,
+    Pause,
+    PlayPause,
+    Reverse,
+    Stop,
+    FastForward,
+    Rewind,
+    TrackNext,
+    TrackPrevious,
+    Record,
+    LowerVolume,
+    RaiseVolume,
+    MuteVolume,
+}
+
+/// The modifier keys of the kitty protocol, in the order of its key numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModifierKey {
+    LeftShift,
+    LeftControl,
+    LeftAlt,
+    LeftSuper,
+    LeftHyper,
+    LeftMeta,
+    RightShift,
+    RightControl,
+    RightAlt,
+    RightSuper,
+    RightHyper,
+    RightMeta,
+    IsoLevel3Shift,
+    IsoLevel5Shift,
+}
+
+/// The other keys of the kitty protocol that make no text, in the order of its key numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SpecialKey {
+    CapsLock,
+    ScrollLock,
+    NumLock,
+    PrintScreen,
+    Pause,
+    Menu,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -34,6 +91,10 @@ pub struct Modifiers {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
+    /// Super (Cmd, the logo key), Hyper and Meta: only the kitty protocol reports them.
+    pub sup: bool,
+    pub hyper: bool,
+    pub meta: bool,
 }
 
 impl Modifiers {
@@ -41,21 +102,33 @@ impl Modifiers {
         ctrl: false,
         alt: false,
         shift: false,
+        sup: false,
+        hyper: false,
+        meta: false,
     };
     pub const CTRL: Self = Self {
         ctrl: true,
         alt: false,
         shift: false,
+        sup: false,
+        hyper: false,
+        meta: false,
     };
     pub const ALT: Self = Self {
         ctrl: false,
         alt: true,
         shift: false,
+        sup: false,
+        hyper: false,
+        meta: false,
     };
     pub const SHIFT: Self = Self {
         ctrl: false,
         alt: false,
         shift: true,
+        sup: false,
+        hyper: false,
+        meta: false,
     };
 }
 
@@ -64,12 +137,35 @@ impl Modifiers {
 pub struct KeyEvent {
     pub code: KeyCode,
     pub mods: Modifiers,
+    /// The key is on the keypad (`code` is what it types: a digit, `Enter`, `Left`). Only the
+    /// kitty encoding tells it from the main key.
+    pub keypad: bool,
 }
 
 impl KeyEvent {
     pub fn new(code: KeyCode, mods: Modifiers) -> Self {
-        Self { code, mods }
+        Self {
+            code,
+            mods,
+            keypad: false,
+        }
     }
+
+    /// The same key on the keypad.
+    #[must_use]
+    pub fn on_keypad(mut self) -> Self {
+        self.keypad = true;
+        self
+    }
+}
+
+/// What happened to a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyEventKind {
+    Press,
+    /// The key is held down.
+    Repeat,
+    Release,
 }
 
 /// A key as written in the config: a code and modifiers.
@@ -195,10 +291,7 @@ impl KeySpec {
     }
 
     pub fn to_event(self) -> KeyEvent {
-        KeyEvent {
-            code: self.code,
-            mods: self.mods,
-        }
+        KeyEvent::new(self.code, self.mods)
     }
 
     /// Whether `event` is this key. For character keys the `Shift` flag is ignored on both
@@ -209,6 +302,12 @@ impl KeySpec {
         }
         let mut a = self.mods;
         let mut b = event.mods;
+        // Hyper and Meta are reported only by the kitty protocol and no binding names them;
+        // Super counts.
+        for m in [&mut a, &mut b] {
+            m.hyper = false;
+            m.meta = false;
+        }
         if matches!(self.code, KeyCode::Char(_)) {
             a.shift = false;
             b.shift = false;
@@ -309,8 +408,300 @@ pub fn encode(key: &KeyEvent, modes: Modes) -> Vec<u8> {
         KeyCode::F(n @ 5..=12) => [15, 17, 18, 19, 20, 21, 23, 24]
             .get(usize::from(n) - 5)
             .map_or_else(Vec::new, |&code| tilde(code)),
-        KeyCode::F(_) => Vec::new(),
+        KeyCode::F(_)
+        | KeyCode::KeypadBegin
+        | KeyCode::Media(_)
+        | KeyCode::Modifier(_)
+        | KeyCode::Special(_) => Vec::new(),
     }
+}
+
+/// Kitty keyboard flag: keys that the legacy encoding cannot tell apart get escape codes.
+pub const KITTY_DISAMBIGUATE: u8 = 1;
+/// Kitty keyboard flag: releases and repeats are reported.
+pub const KITTY_EVENT_TYPES: u8 = 2;
+/// Kitty keyboard flag: a shifted letter carries its shifted key.
+pub const KITTY_ALTERNATE_KEYS: u8 = 4;
+/// Kitty keyboard flag: every key, text included, is an escape code.
+pub const KITTY_ALL_KEYS: u8 = 8;
+/// Kitty keyboard flag: the text a key types goes with its escape code.
+pub const KITTY_TEXT: u8 = 16;
+
+/// Encodes a key for a terminal in `modes`: with the kitty protocol when the program set
+/// flags and the protocol has a form for the key, else as [`encode`]. A release gives nothing
+/// unless the program asked for event types.
+pub fn encode_key(key: &KeyEvent, kind: KeyEventKind, modes: Modes) -> Vec<u8> {
+    let flags = modes.kitty_flags();
+    if flags != 0
+        && let Some(bytes) = encode_kitty(key, kind, flags)
+    {
+        return bytes;
+    }
+    match kind {
+        KeyEventKind::Release => Vec::new(),
+        _ => encode(key, modes),
+    }
+}
+
+/// What an unmodified key does while the program has not asked for every key as an escape
+/// code.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Plain {
+    /// A text key: its text, also with Shift.
+    Text,
+    /// `Enter`, `Tab` and `Backspace`: the legacy byte, and no release.
+    Enter,
+    /// The arrows, `Home`, `End`, `Insert`, `Delete`, `PageUp`, `PageDown`, `F1` to `F12`:
+    /// the legacy sequence.
+    Legacy,
+    /// Always an escape code.
+    Always,
+    /// Only reported when every key is (the modifier and lock keys).
+    AllOnly,
+}
+
+/// The shape of a key's escape code.
+#[derive(Clone, Copy)]
+enum Form {
+    /// `CSI number u`.
+    U(u32),
+    /// `CSI 1 ; mods final`.
+    Letter(char),
+    /// `CSI number ; mods ~`.
+    Tilde(u8),
+}
+
+/// The kitty key number of a keypad key, and the rule for it.
+fn keypad_key(code: KeyCode) -> Option<(u32, Plain)> {
+    Some(match code {
+        KeyCode::Char(c @ '0'..='9') => (57399 + u32::from(c) - u32::from('0'), Plain::Text),
+        KeyCode::Char('.') => (57409, Plain::Text),
+        KeyCode::Char('/') => (57410, Plain::Text),
+        KeyCode::Char('*') => (57411, Plain::Text),
+        KeyCode::Char('-') => (57412, Plain::Text),
+        KeyCode::Char('+') => (57413, Plain::Text),
+        KeyCode::Enter => (57414, Plain::Always),
+        KeyCode::Char('=') => (57415, Plain::Text),
+        KeyCode::Char(',') => (57416, Plain::Text),
+        KeyCode::Left => (57417, Plain::Always),
+        KeyCode::Right => (57418, Plain::Always),
+        KeyCode::Up => (57419, Plain::Always),
+        KeyCode::Down => (57420, Plain::Always),
+        KeyCode::PageUp => (57421, Plain::Always),
+        KeyCode::PageDown => (57422, Plain::Always),
+        KeyCode::Home => (57423, Plain::Always),
+        KeyCode::End => (57424, Plain::Always),
+        KeyCode::Insert => (57425, Plain::Always),
+        KeyCode::Delete => (57426, Plain::Always),
+        _ => return None,
+    })
+}
+
+/// The kitty key number of a key, its shape and its rule.
+fn kitty_form(key: &KeyEvent) -> Option<(Form, Plain)> {
+    if key.keypad
+        && let Some((number, plain)) = keypad_key(key.code)
+    {
+        return Some((Form::U(number), plain));
+    }
+    let offset = |base: u32, index: usize| base + u32::try_from(index).unwrap_or(0);
+    Some(match key.code {
+        KeyCode::Char(c) => {
+            // The key number is the unshifted character.
+            let base = if c.is_uppercase() {
+                c.to_lowercase().next().unwrap_or(c)
+            } else {
+                c
+            };
+            (Form::U(u32::from(base)), Plain::Text)
+        }
+        KeyCode::Enter => (Form::U(13), Plain::Enter),
+        KeyCode::Tab => (Form::U(9), Plain::Enter),
+        KeyCode::Backspace => (Form::U(127), Plain::Enter),
+        KeyCode::Esc => (Form::U(27), Plain::Always),
+        KeyCode::Up => (Form::Letter('A'), Plain::Legacy),
+        KeyCode::Down => (Form::Letter('B'), Plain::Legacy),
+        KeyCode::Right => (Form::Letter('C'), Plain::Legacy),
+        KeyCode::Left => (Form::Letter('D'), Plain::Legacy),
+        KeyCode::Home => (Form::Letter('H'), Plain::Legacy),
+        KeyCode::End => (Form::Letter('F'), Plain::Legacy),
+        KeyCode::Insert => (Form::Tilde(2), Plain::Legacy),
+        KeyCode::Delete => (Form::Tilde(3), Plain::Legacy),
+        KeyCode::PageUp => (Form::Tilde(5), Plain::Legacy),
+        KeyCode::PageDown => (Form::Tilde(6), Plain::Legacy),
+        KeyCode::F(1) => (Form::Letter('P'), Plain::Legacy),
+        KeyCode::F(2) => (Form::Letter('Q'), Plain::Legacy),
+        KeyCode::F(3) => (Form::Tilde(13), Plain::Legacy),
+        KeyCode::F(4) => (Form::Letter('S'), Plain::Legacy),
+        KeyCode::F(n @ 5..=12) => (
+            Form::Tilde(*[15, 17, 18, 19, 20, 21, 23, 24].get(usize::from(n) - 5)?),
+            Plain::Legacy,
+        ),
+        KeyCode::F(n @ 13..=35) => (Form::U(57376 + u32::from(n) - 13), Plain::Always),
+        KeyCode::F(_) => return None,
+        KeyCode::KeypadBegin => (Form::U(57427), Plain::Always),
+        KeyCode::Media(k) => (Form::U(offset(57428, k as usize)), Plain::Always),
+        KeyCode::Modifier(k) => (Form::U(offset(57441, k as usize)), Plain::AllOnly),
+        KeyCode::Special(k) => {
+            let plain = match k {
+                SpecialKey::CapsLock | SpecialKey::ScrollLock | SpecialKey::NumLock => {
+                    Plain::AllOnly
+                }
+                _ => Plain::Always,
+            };
+            (Form::U(offset(57358, k as usize)), plain)
+        }
+    })
+}
+
+/// The modifier bit a modifier key stands for, as in the kitty protocol's `modifiers` field
+/// minus one.
+fn modifier_key_bit(key: ModifierKey) -> u8 {
+    match key {
+        ModifierKey::LeftShift | ModifierKey::RightShift => 1,
+        ModifierKey::LeftAlt | ModifierKey::RightAlt => 2,
+        ModifierKey::LeftControl | ModifierKey::RightControl => 4,
+        ModifierKey::LeftSuper | ModifierKey::RightSuper => 8,
+        ModifierKey::LeftHyper | ModifierKey::RightHyper => 16,
+        ModifierKey::LeftMeta | ModifierKey::RightMeta => 32,
+        ModifierKey::IsoLevel3Shift | ModifierKey::IsoLevel5Shift => 0,
+    }
+}
+
+/// Encodes a key with the kitty keyboard protocol for the `flags` the program set
+/// (`KITTY_*`). `None` when the legacy encoding applies (text, `Enter`, the arrows... without
+/// modifiers); `Some` of nothing when the key is not reported (a release the program did not
+/// ask for). The shifted key (flag 4) is the character given, so a terminal has to report it;
+/// the base layout key is never sent.
+pub fn encode_kitty(key: &KeyEvent, kind: KeyEventKind, flags: u8) -> Option<Vec<u8>> {
+    let all = flags & KITTY_ALL_KEYS != 0;
+    let events = flags & KITTY_EVENT_TYPES != 0;
+    if flags & (KITTY_DISAMBIGUATE | KITTY_ALL_KEYS) == 0 {
+        return (kind == KeyEventKind::Release).then(Vec::new);
+    }
+    if kind == KeyEventKind::Release && !events {
+        return Some(Vec::new());
+    }
+    // Without event types a repeat is a press.
+    let kind = if events { kind } else { KeyEventKind::Press };
+    let (form, plain) = kitty_form(key)?;
+
+    let mut bits = [
+        key.mods.shift,
+        key.mods.alt,
+        key.mods.ctrl,
+        key.mods.sup,
+        key.mods.hyper,
+        key.mods.meta,
+    ]
+    .iter()
+    .enumerate()
+    .fold(0u8, |acc, (i, held)| acc | (u8::from(*held) << i));
+    if let (KeyCode::Modifier(m), KeyEventKind::Release) = (key.code, kind) {
+        bits &= !modifier_key_bit(m);
+    }
+    // A character that is uppercase was shifted, even when the terminal left Shift out of
+    // the modifiers (flag 4 reports the shifted key instead).
+    let mut shifted = None;
+    if let KeyCode::Char(c) = key.code
+        && !key.keypad
+        && c.is_uppercase()
+        && c.to_lowercase().next() != Some(c)
+    {
+        bits |= 1;
+        shifted = Some(c);
+    }
+    let text_mods = bits & !1 == 0;
+
+    if plain == Plain::AllOnly && !all {
+        return Some(Vec::new());
+    }
+    if !all && kind != KeyEventKind::Release {
+        let legacy = match plain {
+            Plain::Text => text_mods,
+            Plain::Enter => bits == 0,
+            Plain::Legacy => bits == 0 && kind == KeyEventKind::Press,
+            Plain::Always | Plain::AllOnly => false,
+        };
+        if legacy {
+            return None;
+        }
+    }
+    if kind == KeyEventKind::Release && !all && plain == Plain::Enter {
+        return Some(Vec::new());
+    }
+
+    let event = match kind {
+        KeyEventKind::Press => 1,
+        KeyEventKind::Repeat => 2,
+        KeyEventKind::Release => 3,
+    };
+    let modifiers = if bits != 0 || event != 1 {
+        let mut text = (1 + u32::from(bits)).to_string();
+        if event != 1 {
+            text.push_str(&format!(":{event}"));
+        }
+        text
+    } else {
+        String::new()
+    };
+
+    let out = match form {
+        Form::Letter(final_byte) => {
+            if modifiers.is_empty() {
+                format!("\x1b[{final_byte}")
+            } else {
+                format!("\x1b[1;{modifiers}{final_byte}")
+            }
+        }
+        Form::Tilde(number) => {
+            if modifiers.is_empty() {
+                format!("\x1b[{number}~")
+            } else {
+                format!("\x1b[{number};{modifiers}~")
+            }
+        }
+        Form::U(number) => {
+            let mut code = number.to_string();
+            if flags & KITTY_ALTERNATE_KEYS != 0
+                && let Some(shifted) = shifted
+            {
+                code.push_str(&format!(":{}", u32::from(shifted)));
+            }
+            let text = (flags & KITTY_TEXT != 0 && all && kind != KeyEventKind::Release)
+                .then(|| associated_text(key, bits, shifted))
+                .flatten();
+            match text {
+                Some(text) => format!("\x1b[{code};{modifiers};{text}u"),
+                None if modifiers.is_empty() => format!("\x1b[{code}u"),
+                None => format!("\x1b[{code};{modifiers}u"),
+            }
+        }
+    };
+    Some(out.into_bytes())
+}
+
+/// The text a key types, as the kitty protocol's code points (`97`, `65:66`): only for text
+/// keys with at most Shift held.
+fn associated_text(key: &KeyEvent, bits: u8, shifted: Option<char>) -> Option<String> {
+    let KeyCode::Char(c) = key.code else {
+        return None;
+    };
+    if bits & !1 != 0 {
+        return None;
+    }
+    let c = match shifted {
+        Some(shifted) => shifted,
+        None if bits & 1 != 0 => {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(u), None) => u,
+                _ => c,
+            }
+        }
+        None => c,
+    };
+    Some(u32::from(c).to_string())
 }
 
 fn encode_char(c: char, ctrl: bool) -> Vec<u8> {
@@ -342,7 +733,15 @@ mod tests {
     }
 
     fn ev(code: KeyCode, ctrl: bool, alt: bool, shift: bool) -> KeyEvent {
-        KeyEvent::new(code, Modifiers { ctrl, alt, shift })
+        KeyEvent::new(
+            code,
+            Modifiers {
+                ctrl,
+                alt,
+                shift,
+                ..Modifiers::NONE
+            },
+        )
     }
 
     #[test]
@@ -416,6 +815,13 @@ mod tests {
         assert!(!spec("Tab").matches(&ev(KeyCode::Tab, false, false, true)));
         assert!(spec("C-Space").matches(&ev(KeyCode::Char(' '), true, false, false)));
         assert!(spec("d").to_event() == ev(KeyCode::Char('d'), false, false, false));
+        // Hyper and Meta are ignored, Super is not.
+        let mut held = ev(KeyCode::Char('d'), false, false, false);
+        held.mods.hyper = true;
+        held.mods.meta = true;
+        assert!(spec("d").matches(&held));
+        held.mods.sup = true;
+        assert!(!spec("d").matches(&held));
     }
 
     fn enc(code: KeyCode, mods: Modifiers, app: bool) -> Vec<u8> {
@@ -527,6 +933,7 @@ mod tests {
             ctrl: true,
             alt: true,
             shift: false,
+            ..Modifiers::NONE
         };
         assert_eq!(enc(KeyCode::Char('a'), ctrl_alt, false), b"\x1b\x01");
     }
@@ -542,6 +949,7 @@ mod tests {
                     ctrl: false,
                     alt: true,
                     shift: true,
+                    ..Modifiers::NONE
                 },
                 4,
             ),
@@ -551,6 +959,7 @@ mod tests {
                     ctrl: true,
                     alt: false,
                     shift: true,
+                    ..Modifiers::NONE
                 },
                 6,
             ),
@@ -559,6 +968,7 @@ mod tests {
                     ctrl: true,
                     alt: true,
                     shift: false,
+                    ..Modifiers::NONE
                 },
                 7,
             ),
@@ -567,6 +977,7 @@ mod tests {
                     ctrl: true,
                     alt: true,
                     shift: true,
+                    ..Modifiers::NONE
                 },
                 8,
             ),
@@ -638,5 +1049,388 @@ mod tests {
         assert_eq!(encode(&ev, Modes::default()), [0]);
         let ev: KeyEvent = KeySpec::parse("S-Tab").unwrap().into();
         assert_eq!(encode(&ev, Modes::default()), b"\x1b[Z");
+    }
+
+    fn kitty(code: KeyCode, mods: Modifiers, kind: KeyEventKind, flags: u8) -> Option<String> {
+        encode_kitty(&KeyEvent::new(code, mods), kind, flags)
+            .map(|bytes| String::from_utf8(bytes).unwrap().replace('\x1b', "<"))
+    }
+
+    fn press(code: KeyCode, mods: Modifiers, flags: u8) -> Option<String> {
+        kitty(code, mods, KeyEventKind::Press, flags)
+    }
+
+    const CTRL_SHIFT: Modifiers = Modifiers {
+        ctrl: true,
+        shift: true,
+        ..Modifiers::NONE
+    };
+
+    /// The protocol's own examples for flag 1.
+    #[test]
+    fn kitty_disambiguate() {
+        let f = KITTY_DISAMBIGUATE;
+        let some = |s: &str| Some(s.to_string());
+        // Esc is always an escape code.
+        assert_eq!(press(KeyCode::Esc, Modifiers::NONE, f), some("<[27u"));
+        // Shift+Enter, Ctrl+Enter, Ctrl+Tab, Ctrl+Backspace, Ctrl+I versus Tab.
+        assert_eq!(press(KeyCode::Enter, Modifiers::SHIFT, f), some("<[13;2u"));
+        assert_eq!(press(KeyCode::Enter, Modifiers::CTRL, f), some("<[13;5u"));
+        assert_eq!(press(KeyCode::Tab, Modifiers::CTRL, f), some("<[9;5u"));
+        assert_eq!(press(KeyCode::Tab, Modifiers::SHIFT, f), some("<[9;2u"));
+        assert_eq!(
+            press(KeyCode::Backspace, Modifiers::CTRL, f),
+            some("<[127;5u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('i'), Modifiers::CTRL, f),
+            some("<[105;5u")
+        );
+        // Plain keys keep their legacy form.
+        assert_eq!(press(KeyCode::Enter, Modifiers::NONE, f), None);
+        assert_eq!(press(KeyCode::Tab, Modifiers::NONE, f), None);
+        assert_eq!(press(KeyCode::Backspace, Modifiers::NONE, f), None);
+        assert_eq!(press(KeyCode::Char('a'), Modifiers::NONE, f), None);
+        assert_eq!(press(KeyCode::Char('A'), Modifiers::SHIFT, f), None);
+        assert_eq!(press(KeyCode::Up, Modifiers::NONE, f), None);
+        assert_eq!(press(KeyCode::F(5), Modifiers::NONE, f), None);
+        // Modified text and functional keys.
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::CTRL, f),
+            some("<[97;5u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::ALT, f),
+            some("<[97;3u")
+        );
+        assert_eq!(
+            press(KeyCode::Char(' '), Modifiers::ALT, f),
+            some("<[32;3u")
+        );
+        assert_eq!(press(KeyCode::Char('i'), CTRL_SHIFT, f), some("<[105;6u"));
+        assert_eq!(press(KeyCode::Up, Modifiers::SHIFT, f), some("<[1;2A"));
+        assert_eq!(press(KeyCode::F(1), Modifiers::CTRL, f), some("<[1;5P"));
+        assert_eq!(press(KeyCode::F(3), Modifiers::ALT, f), some("<[13;3~"));
+        assert_eq!(press(KeyCode::Delete, Modifiers::CTRL, f), some("<[3;5~"));
+        assert_eq!(press(KeyCode::F(12), Modifiers::SHIFT, f), some("<[24;2~"));
+        let sup = Modifiers {
+            sup: true,
+            ..Modifiers::NONE
+        };
+        let all = Modifiers {
+            ctrl: true,
+            alt: true,
+            shift: true,
+            sup: true,
+            hyper: true,
+            meta: true,
+        };
+        assert_eq!(press(KeyCode::Char('a'), sup, f), some("<[97;9u"));
+        assert_eq!(press(KeyCode::Char('a'), all, f), some("<[97;64u"));
+        // Keys with no legacy form.
+        assert_eq!(press(KeyCode::F(13), Modifiers::NONE, f), some("<[57376u"));
+        assert_eq!(press(KeyCode::F(35), Modifiers::NONE, f), some("<[57398u"));
+        assert_eq!(
+            press(KeyCode::Media(MediaKey::MuteVolume), Modifiers::NONE, f),
+            some("<[57440u")
+        );
+        assert_eq!(
+            press(KeyCode::KeypadBegin, Modifiers::NONE, f),
+            some("<[57427u")
+        );
+        assert_eq!(
+            press(KeyCode::Special(SpecialKey::Menu), Modifiers::NONE, f),
+            some("<[57363u")
+        );
+        // Modifier and lock keys only with flag 8.
+        assert_eq!(
+            press(
+                KeyCode::Modifier(ModifierKey::LeftShift),
+                Modifiers::SHIFT,
+                f
+            ),
+            some("")
+        );
+    }
+
+    #[test]
+    fn kitty_keypad_keys() {
+        let f = KITTY_DISAMBIGUATE;
+        let pad = |code, mods, flags| {
+            encode_kitty(
+                &KeyEvent::new(code, mods).on_keypad(),
+                KeyEventKind::Press,
+                flags,
+            )
+            .map(|b| String::from_utf8(b).unwrap().replace('\x1b', "<"))
+        };
+        assert_eq!(
+            pad(KeyCode::Enter, Modifiers::NONE, f),
+            Some("<[57414u".into())
+        );
+        assert_eq!(
+            pad(KeyCode::Left, Modifiers::NONE, f),
+            Some("<[57417u".into())
+        );
+        assert_eq!(
+            pad(KeyCode::Delete, Modifiers::CTRL, f),
+            Some("<[57426;5u".into())
+        );
+        // A keypad digit is text until every key is an escape code.
+        assert_eq!(pad(KeyCode::Char('5'), Modifiers::NONE, f), None);
+        assert_eq!(
+            pad(KeyCode::Char('5'), Modifiers::NONE, KITTY_ALL_KEYS),
+            Some("<[57404u".into())
+        );
+        assert_eq!(
+            pad(KeyCode::Char('+'), Modifiers::NONE, KITTY_ALL_KEYS),
+            Some("<[57413u".into())
+        );
+    }
+
+    #[test]
+    fn kitty_event_types() {
+        let f = KITTY_DISAMBIGUATE | KITTY_EVENT_TYPES;
+        let some = |s: &str| Some(s.to_string());
+        let on = |code, mods, kind| kitty(code, mods, kind, f);
+        // Releases and repeats of text keys, functional keys and modified keys.
+        assert_eq!(
+            on(KeyCode::Char('a'), Modifiers::NONE, KeyEventKind::Release),
+            some("<[97;1:3u")
+        );
+        // A repeat of a text key is its text, as in Ghostty.
+        assert_eq!(
+            on(KeyCode::Char('a'), Modifiers::NONE, KeyEventKind::Repeat),
+            None
+        );
+        assert_eq!(
+            on(KeyCode::Char('a'), Modifiers::CTRL, KeyEventKind::Repeat),
+            some("<[97;5:2u")
+        );
+        assert_eq!(
+            on(KeyCode::Char('a'), Modifiers::NONE, KeyEventKind::Press),
+            None
+        );
+        assert_eq!(
+            on(KeyCode::Up, Modifiers::NONE, KeyEventKind::Release),
+            some("<[1;1:3A")
+        );
+        assert_eq!(
+            on(KeyCode::Delete, Modifiers::CTRL, KeyEventKind::Release),
+            some("<[3;5:3~")
+        );
+        assert_eq!(
+            on(KeyCode::Esc, Modifiers::NONE, KeyEventKind::Release),
+            some("<[27;1:3u")
+        );
+        assert_eq!(
+            on(KeyCode::Enter, Modifiers::SHIFT, KeyEventKind::Release),
+            some("")
+        );
+        // Enter, Tab and Backspace have no release without flag 8.
+        for code in [KeyCode::Enter, KeyCode::Tab, KeyCode::Backspace] {
+            assert_eq!(on(code, Modifiers::NONE, KeyEventKind::Release), some(""));
+            assert_eq!(on(code, Modifiers::NONE, KeyEventKind::Repeat), None);
+        }
+        // Without flag 2 a release is nothing and a repeat is a press.
+        assert_eq!(
+            kitty(
+                KeyCode::Char('a'),
+                Modifiers::CTRL,
+                KeyEventKind::Release,
+                KITTY_DISAMBIGUATE
+            ),
+            some("")
+        );
+        assert_eq!(
+            kitty(
+                KeyCode::Char('a'),
+                Modifiers::CTRL,
+                KeyEventKind::Repeat,
+                KITTY_DISAMBIGUATE
+            ),
+            some("<[97;5u")
+        );
+    }
+
+    #[test]
+    fn kitty_alternate_keys() {
+        let f = KITTY_DISAMBIGUATE | KITTY_ALTERNATE_KEYS;
+        // The terminal reports the shifted key (and drops Shift); the key number is the base.
+        assert_eq!(
+            press(KeyCode::Char('A'), Modifiers::NONE, f | KITTY_ALL_KEYS),
+            Some("<[97:65;2u".into())
+        );
+        assert_eq!(
+            press(KeyCode::Char('A'), Modifiers::SHIFT, f | KITTY_ALL_KEYS),
+            Some("<[97:65;2u".into())
+        );
+        assert_eq!(
+            press(KeyCode::Char('A'), Modifiers::CTRL, f),
+            Some("<[97:65;6u".into())
+        );
+        // Without the flag, no shifted key.
+        assert_eq!(
+            press(KeyCode::Char('A'), Modifiers::CTRL, KITTY_DISAMBIGUATE),
+            Some("<[97;6u".into())
+        );
+        // A key with no shifted form gets none.
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::CTRL, f),
+            Some("<[97;5u".into())
+        );
+    }
+
+    #[test]
+    fn kitty_all_keys() {
+        let f = KITTY_DISAMBIGUATE | KITTY_ALL_KEYS;
+        let some = |s: &str| Some(s.to_string());
+        assert_eq!(press(KeyCode::Char('a'), Modifiers::NONE, f), some("<[97u"));
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::SHIFT, f),
+            some("<[97;2u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('A'), Modifiers::SHIFT, f),
+            some("<[97;2u")
+        );
+        assert_eq!(press(KeyCode::Char(' '), Modifiers::NONE, f), some("<[32u"));
+        assert_eq!(press(KeyCode::Enter, Modifiers::NONE, f), some("<[13u"));
+        assert_eq!(press(KeyCode::Tab, Modifiers::NONE, f), some("<[9u"));
+        assert_eq!(
+            press(KeyCode::Backspace, Modifiers::NONE, f),
+            some("<[127u")
+        );
+        assert_eq!(press(KeyCode::Up, Modifiers::NONE, f), some("<[A"));
+        assert_eq!(press(KeyCode::F(1), Modifiers::NONE, f), some("<[P"));
+        assert_eq!(press(KeyCode::Insert, Modifiers::NONE, f), some("<[2~"));
+        assert_eq!(
+            press(
+                KeyCode::Modifier(ModifierKey::LeftShift),
+                Modifiers::SHIFT,
+                f
+            ),
+            some("<[57441;2u")
+        );
+        assert_eq!(
+            press(
+                KeyCode::Modifier(ModifierKey::RightControl),
+                Modifiers::CTRL,
+                f
+            ),
+            some("<[57448;5u")
+        );
+        // A modifier key's release no longer holds the modifier.
+        assert_eq!(
+            kitty(
+                KeyCode::Modifier(ModifierKey::LeftShift),
+                Modifiers::SHIFT,
+                KeyEventKind::Release,
+                f | KITTY_EVENT_TYPES
+            ),
+            some("<[57441;1:3u")
+        );
+        assert_eq!(
+            press(KeyCode::Special(SpecialKey::CapsLock), Modifiers::NONE, f),
+            some("<[57358u")
+        );
+        // Release of Enter is reported with flag 8.
+        assert_eq!(
+            kitty(
+                KeyCode::Enter,
+                Modifiers::NONE,
+                KeyEventKind::Release,
+                f | KITTY_EVENT_TYPES
+            ),
+            some("<[13;1:3u")
+        );
+    }
+
+    #[test]
+    fn kitty_associated_text() {
+        let f = KITTY_DISAMBIGUATE | KITTY_ALL_KEYS | KITTY_TEXT;
+        let some = |s: &str| Some(s.to_string());
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::NONE, f),
+            some("<[97;;97u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::SHIFT, f),
+            some("<[97;2;65u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('A'), Modifiers::NONE, f),
+            some("<[97;2;65u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('é'), Modifiers::NONE, f),
+            some("<[233;;233u")
+        );
+        // Not for keys that type nothing, with Ctrl or Alt held, or for a release.
+        assert_eq!(press(KeyCode::Enter, Modifiers::NONE, f), some("<[13u"));
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::CTRL, f),
+            some("<[97;5u")
+        );
+        assert_eq!(
+            press(KeyCode::Char('a'), Modifiers::ALT, f),
+            some("<[97;3u")
+        );
+        assert_eq!(
+            kitty(
+                KeyCode::Char('a'),
+                Modifiers::NONE,
+                KeyEventKind::Release,
+                f | KITTY_EVENT_TYPES
+            ),
+            some("<[97;1:3u")
+        );
+        // Text goes with the shifted key too.
+        assert_eq!(
+            press(
+                KeyCode::Char('A'),
+                Modifiers::NONE,
+                f | KITTY_ALTERNATE_KEYS
+            ),
+            some("<[97:65;2;65u")
+        );
+    }
+
+    #[test]
+    fn encode_key_falls_back_to_the_legacy_encoding() {
+        let flags = |f| Modes::default().with_kitty_flags(f);
+        let enter = KeyEvent::new(KeyCode::Enter, Modifiers::SHIFT);
+        let press = KeyEventKind::Press;
+        assert_eq!(encode_key(&enter, press, flags(1)), b"\x1b[13;2u");
+        // No flags: the legacy form, and no release.
+        assert_eq!(encode_key(&enter, press, flags(0)), b"\r");
+        assert_eq!(encode_key(&enter, KeyEventKind::Release, flags(0)), b"");
+        let a = KeyEvent::new(KeyCode::Char('a'), Modifiers::NONE);
+        assert_eq!(encode_key(&a, press, flags(1)), b"a");
+        assert_eq!(encode_key(&a, KeyEventKind::Release, flags(1)), b"");
+        assert_eq!(
+            encode_key(&a, KeyEventKind::Release, flags(3)),
+            b"\x1b[97;1:3u"
+        );
+        // The modes' other bits still count for the legacy form.
+        let up = KeyEvent::new(KeyCode::Up, Modifiers::NONE);
+        let app = Modes(Modes::APPLICATION_CURSOR).with_kitty_flags(1);
+        assert_eq!(encode_key(&up, press, app), b"\x1bOA");
+        // Keys the legacy encoding cannot write give nothing.
+        let f13 = KeyEvent::new(KeyCode::F(13), Modifiers::NONE);
+        assert_eq!(encode_key(&f13, press, flags(0)), b"");
+        assert_eq!(encode_key(&f13, press, flags(1)), b"\x1b[57376u");
+    }
+
+    #[test]
+    fn the_kitty_flags_live_in_the_modes() {
+        let modes = Modes(Modes::ALTERNATE_SCROLL | Modes::BRACKETED_PASTE);
+        assert_eq!(modes.kitty_flags(), 0);
+        let with = modes.with_kitty_flags(0b10101);
+        assert_eq!(with.kitty_flags(), 0b10101);
+        assert!(with.has(Modes::ALTERNATE_SCROLL) && with.has(Modes::BRACKETED_PASTE));
+        assert_eq!(with.with_kitty_flags(0), modes);
+        // Only the five defined bits.
+        assert_eq!(modes.with_kitty_flags(0xff).kitty_flags(), 31);
     }
 }

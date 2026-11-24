@@ -1,0 +1,3 @@
+#! size 30x6
+# ICH, DCH, ECH and REP, with a colour set.
+0123456789abcdefghijklmnopqrst\e[1;4H\e[3@\e[2;1H0123456789abcdefghijklmnopqrst\e[2;4H\e[4P\e[3;1H0123456789abcdefghijklmnopqrst\e[44m\e[3;4H\e[5X\e[0m\e[4;1Hx\e[5b\e[4;12Hy\e[10b\e[5;1H\e[44m\e[3@\e[2P\e[0m

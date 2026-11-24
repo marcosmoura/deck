@@ -1,0 +1,12 @@
+# less: a long file, a search, scrolling.
+size 100x30
+setup awk 'BEGIN { for (i = 1; i <= 300; i++) printf "line %03d  the quick brown fox jumps over the lazy dog\n", i }' > long.txt
+run less long.txt
+wait line 001
+send /line 150\r
+wait line 150
+key Up
+key Up
+key Up
+sleep 500
+stop

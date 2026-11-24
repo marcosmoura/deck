@@ -1,0 +1,4 @@
+# Every underline kind, each on its own word: SGR 4, 4:0 to 4:5, 21 and 24.
+\e[4mone\e[0m \e[4:1mone\e[0m \e[4:2mdouble\e[0m \e[4:3mcurly\e[0m \e[4:4mdotted\e[0m \e[4:5mdashed\e[0m\r\n
+\e[21mdouble\e[0m \e[4:3mcurly\e[4:0m none \e[4mon\e[24m off \e[4:2mdb\e[4:0m off\r\n
+\e[4:3mcurly \e[1mand bold\e[22m \e[4:5mthen dashed\e[0m\r\n

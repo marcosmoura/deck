@@ -5,9 +5,12 @@
 #![allow(
     clippy::expect_used,
     clippy::indexing_slicing,
+    clippy::panic,
     reason = "shared integration-test helpers require a working PTY and screen"
 )]
 
+pub mod compat;
+pub mod record;
 pub mod sys;
 
 use std::ffi::OsString;
@@ -22,7 +25,7 @@ use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config, Term};
+use alacritty_terminal::term::{Config, Term, TermMode};
 pub use alacritty_terminal::vte::ansi::Color;
 use alacritty_terminal::vte::ansi::{Processor, Rgb};
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
@@ -233,9 +236,42 @@ pub struct CellView {
     pub fg: Color,
     pub bg: Color,
     pub flags: Flags,
+    /// The colour of the underline (SGR 58), if one was set.
+    pub underline_color: Option<Color>,
+}
+
+/// The kind of underline of a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Underline {
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
 }
 
 impl CellView {
+    /// The base character and its combining marks.
+    pub fn grapheme(&self) -> String {
+        std::iter::once(self.ch)
+            .chain(self.zerowidth.iter().copied())
+            .collect()
+    }
+
+    /// The kind of underline, if the cell has one.
+    pub fn underline_kind(&self) -> Option<Underline> {
+        [
+            (Flags::UNDERLINE, Underline::Single),
+            (Flags::DOUBLE_UNDERLINE, Underline::Double),
+            (Flags::UNDERCURL, Underline::Curly),
+            (Flags::DOTTED_UNDERLINE, Underline::Dotted),
+            (Flags::DASHED_UNDERLINE, Underline::Dashed),
+        ]
+        .into_iter()
+        .find(|(flag, _)| self.flags.contains(*flag))
+        .map(|(_, kind)| kind)
+    }
+
     pub fn bold(&self) -> bool {
         self.flags.contains(Flags::BOLD)
     }
@@ -307,6 +343,7 @@ pub struct Builder {
     colors: ColorAnswers,
     cell_px: (u16, u16),
     xtversion: Option<String>,
+    kitty_keyboard: bool,
 }
 
 impl Builder {
@@ -363,6 +400,14 @@ impl Builder {
         self
     }
 
+    /// Makes the outer terminal one that speaks the kitty keyboard protocol: it answers
+    /// the client's `CSI ? u` and keeps the flag stack the client pushes (see
+    /// [`Harness::keyboard_flags`]). Off by default, like a terminal without it.
+    pub fn kitty_keyboard(mut self) -> Self {
+        self.kitty_keyboard = true;
+        self
+    }
+
     /// Makes the terminal ignore colour queries.
     pub fn silent_colors(mut self) -> Self {
         self.colors = ColorAnswers::Silent;
@@ -391,6 +436,7 @@ impl Builder {
             self.colors,
             self.cell_px,
             self.xtversion,
+            self.kitty_keyboard,
         )
     }
 }
@@ -425,6 +471,7 @@ impl Harness {
             colors: ColorAnswers::Default,
             cell_px: (0, 0),
             xtversion: None,
+            kitty_keyboard: false,
         }
     }
 
@@ -445,10 +492,21 @@ impl Harness {
         answers: ColorAnswers,
         cell_px: (u16, u16),
         xtversion: Option<String>,
+        kitty_keyboard: bool,
     ) -> Self {
-        let pty = native_pty_system()
-            .openpty(pty_size(size, cell_px))
-            .expect("open a PTY");
+        // The system has a limited number of PTYs; a heavily parallel run can find them all
+        // taken for a moment.
+        let mut attempts = 0;
+        let pty = loop {
+            match native_pty_system().openpty(pty_size(size, cell_px)) {
+                Ok(pty) => break pty,
+                Err(e) if attempts >= 50 => panic!("open a PTY: {e}"),
+                Err(_) => {
+                    attempts += 1;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        };
         let mut cmd = CommandBuilder::new(argv[0]);
         cmd.args(&argv[1..]);
         cmd.env_clear();
@@ -468,7 +526,10 @@ impl Harness {
                 .any(|(k, v)| k == "TERM" && v.to_string_lossy().contains("ghostty"));
         let events = Listener::default();
         let term = Term::new(
-            Config::default(),
+            Config {
+                kitty_keyboard,
+                ..Config::default()
+            },
             &Size {
                 cols: usize::from(size.0),
                 rows: usize::from(size.1),
@@ -676,6 +737,31 @@ impl Harness {
         lines.join("\n")
     }
 
+    /// The scrollback and the screen, one line per row, trailing spaces removed, and the
+    /// empty rows at the end dropped: what `deck capture --history` prints for the other side.
+    pub fn history_text(&self) -> String {
+        let mirror = lock(&self.mirror);
+        let grid = mirror.term.grid();
+        let top = grid.topmost_line().0;
+        let bottom = i32::try_from(mirror.term.screen_lines()).unwrap_or(i32::MAX);
+        let mut lines = Vec::new();
+        for row in top..bottom {
+            let mut line = String::new();
+            for col in 0..mirror.term.columns() {
+                let cell = &grid[Line(row)][Column(col)];
+                if !cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    line.push(cell.c);
+                    line.extend(cell.zerowidth().into_iter().flatten());
+                }
+            }
+            lines.push(line.trim_end().to_string());
+        }
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+
     /// Whether the sidebar row `row` has the selection band (reversed with the default
     /// colours): the active panel's row outside sidebar focus.
     pub fn is_active_row(&self, row: usize) -> bool {
@@ -711,7 +797,49 @@ impl Harness {
             fg: cell.fg,
             bg: cell.bg,
             flags: cell.flags,
+            underline_color: cell.underline_color(),
         }
+    }
+
+    /// The screen's size in columns and rows.
+    pub fn size(&self) -> (u16, u16) {
+        self.size
+    }
+
+    /// The cursor's row and column, and whether it is shown.
+    pub fn cursor(&self) -> (usize, usize, bool) {
+        let mirror = lock(&self.mirror);
+        let point = mirror.term.grid().cursor.point;
+        let row = usize::try_from(point.line.0).unwrap_or(0);
+        let shown = mirror.term.mode().contains(TermMode::SHOW_CURSOR);
+        (row, point.column.0, shown)
+    }
+
+    /// The cursor's shape and whether it blinks, as text (`"Beam blinking"`).
+    pub fn cursor_style(&self) -> String {
+        let style = lock(&self.mirror).term.cursor_style();
+        format!(
+            "{:?} {}",
+            style.shape,
+            if style.blinking { "blinking" } else { "steady" }
+        )
+    }
+
+    /// The kitty keyboard flags in force on the screen now (1 disambiguate, 2 event types,
+    /// 4 alternate keys, 8 all keys, 16 text), as the client pushed them; 0 without
+    /// [`Builder::kitty_keyboard`].
+    pub fn keyboard_flags(&self) -> u8 {
+        let mode = *lock(&self.mirror).term.mode();
+        [
+            (TermMode::DISAMBIGUATE_ESC_CODES, 1),
+            (TermMode::REPORT_EVENT_TYPES, 2),
+            (TermMode::REPORT_ALTERNATE_KEYS, 4),
+            (TermMode::REPORT_ALL_KEYS_AS_ESC, 8),
+            (TermMode::REPORT_ASSOCIATED_TEXT, 16),
+        ]
+        .iter()
+        .filter(|(flag, _)| mode.contains(*flag))
+        .fold(0, |acc, (_, bit)| acc | bit)
     }
 
     /// Every byte the program wrote so far.

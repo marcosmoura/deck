@@ -1,0 +1,3 @@
+#! size 20x5
+# The cursor hidden at the end.
+\e[2 qabc\e[?25l

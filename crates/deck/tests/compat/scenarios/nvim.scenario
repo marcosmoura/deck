@@ -1,0 +1,15 @@
+# neovim: a Rust file with syntax highlighting, a vertical split, a `:` command.
+size 100x30
+setup cp "$DECK_SCENARIOS/files/sample.rs" sample.rs
+run nvim sample.rs
+wait Inventory
+sleep 800
+send :vsplit\r
+sleep 500
+send 12G
+sleep 300
+send :set number cursorline\r
+sleep 300
+send :echo "deck"
+sleep 500
+stop

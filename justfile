@@ -35,6 +35,11 @@ test-crate crate filter="":
 stress filter="":
     ulimit -n 4096 && cargo nextest run --release -p deck --test stress --run-ignored only --test-threads 1 --no-capture {{filter}}
 
+# Record a program's output from `crates/deck/tests/compat/scenarios/<name>.scenario`; FORCE=1
+# replaces an existing recording.
+record-compat name:
+    DECK_RECORD={{name}} cargo nextest run -p deck --test compat_record --run-ignored only --no-capture
+
 # Build and run deck with an isolated socket and state dir.
 run *args:
     cargo build -p deck

@@ -1,0 +1,4 @@
+#! size 20x5
+#! history
+# ED 3 and then more output: only the later lines are in the history.
+1\r\n2\r\n3\r\n4\r\n5\r\n6\e[3J\r\n7\r\n8\r\n9\r\n10

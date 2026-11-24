@@ -36,7 +36,6 @@ pub fn style(s: protocol::Style) -> Style {
         (protocol::Style::BOLD, Modifier::BOLD),
         (protocol::Style::DIM, Modifier::DIM),
         (protocol::Style::ITALIC, Modifier::ITALIC),
-        (protocol::Style::UNDERLINE, Modifier::UNDERLINED),
         (protocol::Style::REVERSE, Modifier::REVERSED),
         (protocol::Style::STRIKETHROUGH, Modifier::CROSSED_OUT),
         (protocol::Style::HIDDEN, Modifier::HIDDEN),
@@ -48,7 +47,8 @@ pub fn style(s: protocol::Style) -> Style {
     Style::new()
         .fg(color(s.fg))
         .bg(color(s.bg))
-        .add_modifier(modifiers)
+        .add_modifier(modifiers | crate::backend::modifier_of(s.underline))
+        .underline_color(color(s.underline_color))
 }
 
 /// The foreground of an image placeholder cell: the image id's three bytes as an RGB colour.
@@ -157,6 +157,7 @@ pub fn downsample(buf: &mut Buffer) {
     for cell in &mut buf.content {
         cell.fg = reduce(cell.fg);
         cell.bg = reduce(cell.bg);
+        cell.underline_color = reduce(cell.underline_color);
     }
 }
 
@@ -189,7 +190,9 @@ mod tests {
         buf[(0, 0)].set_fg(Color::Rgb(255, 0, 0));
         buf[(1, 0)].set_bg(Color::Indexed(236));
         buf[(2, 0)].set_fg(Color::Blue);
+        buf[(2, 0)].underline_color = Color::Rgb(255, 0, 0);
         downsample(&mut buf);
+        assert_eq!(buf[(2, 0)].underline_color, Color::Indexed(196));
         assert_eq!(buf[(0, 0)].fg, Color::Indexed(196));
         assert_eq!(buf[(1, 0)].bg, Color::Indexed(236));
         assert_eq!(buf[(2, 0)].fg, Color::Blue);

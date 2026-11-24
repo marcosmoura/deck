@@ -1,0 +1,3 @@
+#! size 30x6
+# ?1047 clears the alternate screen on leaving it; the cursor is not saved.
+primary one\r\nprimary two\e[?1047hALT\e[3;3Hxx\e[?1047l\r\nback\e[?1047hSECOND\e[?1047l

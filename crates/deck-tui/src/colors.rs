@@ -1,6 +1,6 @@
 //! Asking the outer terminal for its foreground and background (OSC 10 and OSC 11), its 16
-//! base colours (OSC 4), its name (XTVERSION) and whether it speaks the kitty graphics
-//! protocol.
+//! base colours (OSC 4), its name (XTVERSION), and whether it speaks the kitty graphics
+//! protocol and the kitty keyboard protocol.
 
 use std::time::{Duration, Instant};
 
@@ -13,15 +13,16 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_millis(200);
 pub const LATE_WINDOW: Duration = Duration::from_secs(3);
 
 /// The colour queries (foreground, background, then palette entries 0 to 15), BEL-terminated,
-/// XTVERSION, the kitty graphics query, then a device-attributes request (DA1). Terminals
-/// answer in order, so the DA1 reply tells that no other answer is still on its way.
+/// XTVERSION, the kitty graphics query, the kitty keyboard flags query (`CSI ? u`), then a
+/// device-attributes request (DA1). Terminals answer in order, so the DA1 reply tells that no
+/// other answer is still on its way (a terminal without the keyboard protocol sends none).
 pub const QUERY: &[u8] = b"\x1b]10;?\x07\x1b]11;?\x07\
 \x1b]4;0;?\x07\x1b]4;1;?\x07\x1b]4;2;?\x07\x1b]4;3;?\x07\
 \x1b]4;4;?\x07\x1b]4;5;?\x07\x1b]4;6;?\x07\x1b]4;7;?\x07\
 \x1b]4;8;?\x07\x1b]4;9;?\x07\x1b]4;10;?\x07\x1b]4;11;?\x07\
 \x1b]4;12;?\x07\x1b]4;13;?\x07\x1b]4;14;?\x07\x1b]4;15;?\x07\
 \x1b[>0q\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\
-\x1b[c";
+\x1b[?u\x1b[c";
 
 /// An RGB colour as the terminal reported it.
 pub type Rgb = (u8, u8, u8);
@@ -42,6 +43,8 @@ pub struct Probe {
     pub xtversion: Option<String>,
     /// The kitty graphics reply: `Some(true)` for `OK`, `Some(false)` for an error text.
     pub graphics: Option<bool>,
+    /// The terminal answered the kitty keyboard query: it speaks the protocol.
+    pub kitty_keyboard: bool,
     /// Bytes that were not part of an answer, to pass on as input.
     pub leftover: Vec<u8>,
     /// Answers that may still arrive: 0 once the DA1 reply was seen, else the number of
@@ -88,6 +91,7 @@ pub fn probe(read: ReadInput<'_>, timeout: Duration) -> Probe {
         palette: parsed.palette,
         xtversion: parsed.xtversion,
         graphics: parsed.graphics,
+        kitty_keyboard: parsed.kitty_keyboard,
         colors: parsed
             .fg
             .zip(parsed.bg)
@@ -256,6 +260,8 @@ pub struct Answers {
     pub xtversion: Option<String>,
     /// The graphics reply: `OK` or not.
     pub graphics: Option<bool>,
+    /// The kitty keyboard flags reply (`CSI ? flags u`) was seen.
+    pub kitty_keyboard: bool,
     /// The DA1 reply was seen.
     pub da1: bool,
     /// Everything else, without a trailing unfinished reply.
@@ -284,6 +290,10 @@ pub fn parse_answers(bytes: &[u8]) -> Answers {
             }
             Some((Reply::Da1, len)) => {
                 out.da1 = true;
+                i += len;
+            }
+            Some((Reply::KittyKeyboard, len)) => {
+                out.kitty_keyboard = true;
                 i += len;
             }
             Some((Reply::Version(text), len)) => {
@@ -342,6 +352,8 @@ enum Reply {
     Graphics(bool),
     /// A base colour: its index and colour.
     Palette(usize, Option<Rgb>),
+    /// The kitty keyboard flags of the terminal (`CSI ? flags u`).
+    KittyKeyboard,
     Da1,
 }
 
@@ -361,7 +373,14 @@ fn reply_at(bytes: &[u8]) -> Option<(Reply, usize)> {
             .iter()
             .enumerate()
             .find(|&(_, &b)| !(b.is_ascii_digit() || b == b';'))?;
-        return (*byte == b'c').then_some((Reply::Da1, 3 + end + 1));
+        return match byte {
+            b'c' => Some((Reply::Da1, 3 + end + 1)),
+            // Only digits: the flags.
+            b'u' if body.get(..end)?.iter().all(u8::is_ascii_digit) => {
+                Some((Reply::KittyKeyboard, 3 + end + 1))
+            }
+            _ => None,
+        };
     }
     let body = bytes.strip_prefix(b"\x1b]")?;
     // `4;n;` for a palette entry, `10;` or `11;` for the foreground and background.
@@ -585,8 +604,33 @@ mod tests {
 
     #[test]
     fn the_query_asks_xtversion_and_graphics_before_da1() {
-        let tail = b"\x1b[>0q\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c";
+        let tail = b"\x1b[>0q\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[?u\x1b[c";
         assert!(QUERY.ends_with(tail));
+    }
+
+    #[test]
+    fn the_kitty_keyboard_reply_is_read_with_the_others_and_stays_out_of_the_input() {
+        for flags in ["0", "1", "31", ""] {
+            let mut input = b"a\x1b[?".to_vec();
+            input.extend_from_slice(flags.as_bytes());
+            input.extend_from_slice(b"ub\x1b[?62;4c");
+            let a = parse_answers(&input);
+            assert!(a.kitty_keyboard && a.da1, "{flags}");
+            assert_eq!(a.rest, b"ab");
+        }
+        // No answer: DA1 alone.
+        let a = parse_answers(b"\x1b[?6c");
+        assert!(!a.kitty_keyboard && a.da1);
+        // The probe reports it, in one round trip with the rest.
+        let mut chunks = vec![b"\x1b]11;rgb:0/0/0\x07\x1b[?0u\x1b[?6c".to_vec()].into_iter();
+        let mut read = |_: Duration| chunks.next();
+        let p = probe(&mut read, Duration::from_secs(1));
+        assert!(p.kitty_keyboard);
+        assert_eq!(p.late, 0);
+        assert!(p.leftover.is_empty());
+        let mut chunks = vec![b"\x1b[?6c".to_vec()].into_iter();
+        let mut read = |_: Duration| chunks.next();
+        assert!(!probe(&mut read, Duration::from_secs(1)).kitty_keyboard);
     }
 
     #[test]

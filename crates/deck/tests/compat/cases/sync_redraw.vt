@@ -1,0 +1,3 @@
+#! size 30x8
+# A full-screen redraw inside synchronized output.
+old\r\nold\r\nold\e[?2026h\e[2J\e[Hnew one\r\nnew two\e[8;1Hlast\e[?2026l

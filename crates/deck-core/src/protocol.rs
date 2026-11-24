@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -560,14 +560,28 @@ pub struct Run {
 pub struct Style {
     pub fg: Color,
     pub bg: Color,
+    /// The colour of the underline (SGR 58); `Default` means the text colour.
+    pub underline_color: Color,
+    pub underline: Underline,
     pub flags: u16,
+}
+
+/// The kind of underline of a cell (SGR 4, 4:0 to 4:5, 21 and 24).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Underline {
+    #[default]
+    None,
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
 }
 
 impl Style {
     pub const BOLD: u16 = 1;
     pub const DIM: u16 = 1 << 1;
     pub const ITALIC: u16 = 1 << 2;
-    pub const UNDERLINE: u16 = 1 << 3;
     pub const REVERSE: u16 = 1 << 4;
     pub const STRIKETHROUGH: u16 = 1 << 5;
     pub const HIDDEN: u16 = 1 << 6;
@@ -617,9 +631,25 @@ impl Modes {
     pub const ALTERNATE_SCREEN: u16 = 1 << 7;
     /// `?1007`: on the alternate screen the wheel stands for the cursor keys.
     pub const ALTERNATE_SCROLL: u16 = 1 << 8;
+    /// Where the kitty keyboard flags sit: bits 9 to 13.
+    const KITTY_SHIFT: u32 = 9;
+    const KITTY_MASK: u16 = 0b1_1111 << Self::KITTY_SHIFT;
 
     pub fn has(self, flag: u16) -> bool {
         self.0 & flag != 0
+    }
+
+    /// The kitty keyboard flags the program set (its current stack entry): 1 disambiguate,
+    /// 2 event types, 4 alternate keys, 8 all keys as escape codes, 16 associated text.
+    pub fn kitty_flags(self) -> u8 {
+        u8::try_from((self.0 & Self::KITTY_MASK) >> Self::KITTY_SHIFT).unwrap_or(0)
+    }
+
+    /// These modes with the kitty keyboard flags replaced (only the five defined bits count).
+    #[must_use]
+    pub fn with_kitty_flags(self, flags: u8) -> Self {
+        let bits = (u16::from(flags) << Self::KITTY_SHIFT) & Self::KITTY_MASK;
+        Self((self.0 & !Self::KITTY_MASK) | bits)
     }
 }
 
@@ -797,7 +827,9 @@ mod tests {
                             style: Style {
                                 fg: Color::Indexed(2),
                                 bg: Color::Rgb(1, 2, 3),
-                                flags: Style::BOLD | Style::UNDERLINE,
+                                underline_color: Color::Rgb(255, 0, 0),
+                                underline: Underline::Curly,
+                                flags: Style::BOLD,
                             },
                         },
                         Run {
@@ -1351,6 +1383,32 @@ mod tests {
             reason: ByeReason::VersionMismatch { daemon: 1 },
         });
         assert_eq!(&bye[4..], &[4, 0, 1]);
+    }
+
+    #[test]
+    fn the_style_encoding_is_pinned() {
+        let style = Style {
+            fg: Color::Indexed(2),
+            bg: Color::Default,
+            underline_color: Color::Rgb(255, 0, 0),
+            underline: Underline::Curly,
+            flags: Style::BOLD,
+        };
+        assert_eq!(
+            postcard::to_stdvec(&style).unwrap(),
+            [1, 2, 0, 2, 255, 0, 0, 3, 1]
+        );
+        let kinds = [
+            Underline::None,
+            Underline::Single,
+            Underline::Double,
+            Underline::Curly,
+            Underline::Dotted,
+            Underline::Dashed,
+        ];
+        for (i, kind) in kinds.into_iter().enumerate() {
+            assert_eq!(postcard::to_stdvec(&kind).unwrap(), [i as u8]);
+        }
     }
 
     #[test]

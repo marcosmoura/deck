@@ -1,0 +1,2 @@
+# Raw program output: keep every byte (CR included) as recorded.
+*.vt -text

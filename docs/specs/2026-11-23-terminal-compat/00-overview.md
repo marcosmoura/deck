@@ -40,11 +40,11 @@ Asked by the user on 23 Nov 2026, as part of making deck a daily driver.
 
 | Sub-spec                         | Type       | Crate                            | Summary                                                                                      | Depends | Status |
 | -------------------------------- | ---------- | -------------------------------- | -------------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-differential-harness.md) | foundation | deck (tests)                     | Differential compare, normalisation, known-differences table, first corpus                   | DECK-19 | todo   |
-| [02](02-escape-corpus.md)        | shippable  | deck-daemon, deck-tui, tests     | Full escape-sequence corpus through deck, resize cases, fixes                                | 01      | todo   |
-| [03](03-underline-styles.md)     | shippable  | deck-core, deck-daemon, deck-tui | Underline kinds and colour in `Style`, written to the outer terminal                         | 02      | todo   |
-| [04](04-kitty-keyboard.md)       | shippable  | deck-core, deck-daemon, deck-tui | Kitty keyboard protocol from the program through deck to the outer terminal                  | 03      | todo   |
-| [05](05-app-recordings.md)       | shippable  | deck (tests), repo               | `just record-compat`, recordings of real programs replayed differentially, fixes, compat doc | 02      | todo   |
+| [01](01-differential-harness.md) | foundation | deck (tests)                     | Differential compare, normalisation, known-differences table, first corpus                   | DECK-19 | done   |
+| [02](02-escape-corpus.md)        | shippable  | deck-daemon, deck-tui, tests     | Full escape-sequence corpus through deck, resize cases, fixes                                | 01      | done   |
+| [03](03-underline-styles.md)     | shippable  | deck-core, deck-daemon, deck-tui | Underline kinds and colour in `Style`, written to the outer terminal                         | 02      | done   |
+| [04](04-kitty-keyboard.md)       | shippable  | deck-core, deck-daemon, deck-tui | Kitty keyboard protocol from the program through deck to the outer terminal                  | 03      | done   |
+| [05](05-app-recordings.md)       | shippable  | deck (tests), repo               | `just record-compat`, recordings of real programs replayed differentially, fixes, compat doc | 02      | done   |
 
 ## Affected docs
 

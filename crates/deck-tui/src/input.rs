@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 
 use deck_core::config::{Config, DEFAULT_BINDINGS, HelpGroup};
-use deck_core::keys::{KeyCode, KeyEvent, KeySpec, Modifiers};
+use deck_core::keys::{
+    KITTY_ALL_KEYS, KITTY_DISAMBIGUATE, KITTY_EVENT_TYPES, KITTY_TEXT, KeyCode, KeyEvent,
+    KeyEventKind, KeySpec, MediaKey, ModifierKey, Modifiers, SpecialKey,
+};
 use deck_core::layout::Direction;
 use ratatui::crossterm::event as ct;
 
@@ -295,15 +298,16 @@ pub fn event_label(key: &KeyEvent) -> String {
     .to_string()
 }
 
-/// Converts a crossterm key event; `None` for releases and keys deck cannot encode.
+/// Converts a crossterm key event; `None` for keys deck cannot encode. Releases convert like
+/// presses; [`kind`] tells them apart.
 pub fn convert(key: ct::KeyEvent) -> Option<KeyEvent> {
-    if key.kind == ct::KeyEventKind::Release {
-        return None;
-    }
     let mut mods = Modifiers {
         ctrl: key.modifiers.contains(ct::KeyModifiers::CONTROL),
         alt: key.modifiers.contains(ct::KeyModifiers::ALT),
         shift: key.modifiers.contains(ct::KeyModifiers::SHIFT),
+        sup: key.modifiers.contains(ct::KeyModifiers::SUPER),
+        hyper: key.modifiers.contains(ct::KeyModifiers::HYPER),
+        meta: key.modifiers.contains(ct::KeyModifiers::META),
     };
     let code = match key.code {
         ct::KeyCode::Char(c) => KeyCode::Char(c),
@@ -325,10 +329,84 @@ pub fn convert(key: ct::KeyEvent) -> Option<KeyEvent> {
         ct::KeyCode::End => KeyCode::End,
         ct::KeyCode::PageUp => KeyCode::PageUp,
         ct::KeyCode::PageDown => KeyCode::PageDown,
-        ct::KeyCode::F(n @ 1..=12) => KeyCode::F(n),
+        ct::KeyCode::F(n @ 1..=35) => KeyCode::F(n),
+        ct::KeyCode::KeypadBegin => KeyCode::KeypadBegin,
+        ct::KeyCode::CapsLock => KeyCode::Special(SpecialKey::CapsLock),
+        ct::KeyCode::ScrollLock => KeyCode::Special(SpecialKey::ScrollLock),
+        ct::KeyCode::NumLock => KeyCode::Special(SpecialKey::NumLock),
+        ct::KeyCode::PrintScreen => KeyCode::Special(SpecialKey::PrintScreen),
+        ct::KeyCode::Pause => KeyCode::Special(SpecialKey::Pause),
+        ct::KeyCode::Menu => KeyCode::Special(SpecialKey::Menu),
+        ct::KeyCode::Media(media) => KeyCode::Media(media_key(media)),
+        ct::KeyCode::Modifier(modifier) => KeyCode::Modifier(modifier_key(modifier)),
         _ => return None,
     };
-    Some(KeyEvent::new(code, mods))
+    let event = KeyEvent::new(code, mods);
+    Some(if key.state.contains(ct::KeyEventState::KEYPAD) {
+        event.on_keypad()
+    } else {
+        event
+    })
+}
+
+/// Whether a crossterm key event is a press, a repeat or a release.
+pub fn kind(key: &ct::KeyEvent) -> KeyEventKind {
+    match key.kind {
+        ct::KeyEventKind::Press => KeyEventKind::Press,
+        ct::KeyEventKind::Repeat => KeyEventKind::Repeat,
+        ct::KeyEventKind::Release => KeyEventKind::Release,
+    }
+}
+
+fn media_key(key: ct::MediaKeyCode) -> MediaKey {
+    match key {
+        ct::MediaKeyCode::Play => MediaKey::Play,
+        ct::MediaKeyCode::Pause => MediaKey::Pause,
+        ct::MediaKeyCode::PlayPause => MediaKey::PlayPause,
+        ct::MediaKeyCode::Reverse => MediaKey::Reverse,
+        ct::MediaKeyCode::Stop => MediaKey::Stop,
+        ct::MediaKeyCode::FastForward => MediaKey::FastForward,
+        ct::MediaKeyCode::Rewind => MediaKey::Rewind,
+        ct::MediaKeyCode::TrackNext => MediaKey::TrackNext,
+        ct::MediaKeyCode::TrackPrevious => MediaKey::TrackPrevious,
+        ct::MediaKeyCode::Record => MediaKey::Record,
+        ct::MediaKeyCode::LowerVolume => MediaKey::LowerVolume,
+        ct::MediaKeyCode::RaiseVolume => MediaKey::RaiseVolume,
+        ct::MediaKeyCode::MuteVolume => MediaKey::MuteVolume,
+    }
+}
+
+fn modifier_key(key: ct::ModifierKeyCode) -> ModifierKey {
+    match key {
+        ct::ModifierKeyCode::LeftShift => ModifierKey::LeftShift,
+        ct::ModifierKeyCode::LeftControl => ModifierKey::LeftControl,
+        ct::ModifierKeyCode::LeftAlt => ModifierKey::LeftAlt,
+        ct::ModifierKeyCode::LeftSuper => ModifierKey::LeftSuper,
+        ct::ModifierKeyCode::LeftHyper => ModifierKey::LeftHyper,
+        ct::ModifierKeyCode::LeftMeta => ModifierKey::LeftMeta,
+        ct::ModifierKeyCode::RightShift => ModifierKey::RightShift,
+        ct::ModifierKeyCode::RightControl => ModifierKey::RightControl,
+        ct::ModifierKeyCode::RightAlt => ModifierKey::RightAlt,
+        ct::ModifierKeyCode::RightSuper => ModifierKey::RightSuper,
+        ct::ModifierKeyCode::RightHyper => ModifierKey::RightHyper,
+        ct::ModifierKeyCode::RightMeta => ModifierKey::RightMeta,
+        ct::ModifierKeyCode::IsoLevel3Shift => ModifierKey::IsoLevel3Shift,
+        ct::ModifierKeyCode::IsoLevel5Shift => ModifierKey::IsoLevel5Shift,
+    }
+}
+
+/// The kitty keyboard flags to push on the outer terminal for a program that set `program`
+/// (0: push nothing). The outer terminal gets what the client needs to build the program's
+/// encoding: flag 1 always, 2 for the events, 4 (the shifted key) when the program wants
+/// every key or its text. Never 8 (crossterm would then report Caps Lock in a state deck
+/// drops, and AltGr characters as their base key, so typing would come out wrong; the cost is
+/// that a program gets no modifier-key presses) and never 16 (the client computes the text).
+pub fn outer_flags(program: u8) -> u8 {
+    if program == 0 {
+        return 0;
+    }
+    let wants_text_keys = program & (KITTY_ALL_KEYS | KITTY_TEXT) != 0;
+    KITTY_DISAMBIGUATE | (program & KITTY_EVENT_TYPES) | if wants_text_keys { 4 } else { 0 }
 }
 
 /// Keys from bytes read before the event reader started. Plain keys and `ESC` plus a
@@ -399,7 +477,7 @@ mod tests {
                 Modifiers {
                     ctrl: true,
                     alt: true,
-                    shift: false
+                    ..Modifiers::NONE
                 }
             )
         );
@@ -410,7 +488,7 @@ mod tests {
             KeyCode::F(5)
         );
         assert_eq!(
-            convert(press(ct::KeyCode::F(13), ct::KeyModifiers::NONE)),
+            convert(press(ct::KeyCode::F(36), ct::KeyModifiers::NONE)),
             None
         );
         assert_eq!(
@@ -420,12 +498,77 @@ mod tests {
     }
 
     #[test]
-    fn back_tab_is_shift_tab_and_releases_are_dropped() {
+    fn back_tab_is_shift_tab_and_releases_are_told_apart() {
         let k = convert(press(ct::KeyCode::BackTab, ct::KeyModifiers::SHIFT)).unwrap();
         assert_eq!(k, KeyEvent::new(KeyCode::Tab, Modifiers::SHIFT));
         let mut release = press(ct::KeyCode::Char('a'), ct::KeyModifiers::NONE);
+        assert_eq!(kind(&release), KeyEventKind::Press);
         release.kind = ct::KeyEventKind::Release;
-        assert_eq!(convert(release), None);
+        assert_eq!(kind(&release), KeyEventKind::Release);
+        release.kind = ct::KeyEventKind::Repeat;
+        assert_eq!(kind(&release), KeyEventKind::Repeat);
+    }
+
+    #[test]
+    fn the_keys_kitty_reports_convert() {
+        let k = |code, mods| convert(press(code, mods)).unwrap();
+        assert_eq!(
+            k(ct::KeyCode::F(35), ct::KeyModifiers::NONE).code,
+            KeyCode::F(35)
+        );
+        assert_eq!(
+            k(
+                ct::KeyCode::Media(ct::MediaKeyCode::MuteVolume),
+                ct::KeyModifiers::NONE
+            )
+            .code,
+            KeyCode::Media(MediaKey::MuteVolume)
+        );
+        assert_eq!(
+            k(
+                ct::KeyCode::Modifier(ct::ModifierKeyCode::RightControl),
+                ct::KeyModifiers::CONTROL
+            ),
+            KeyEvent::new(
+                KeyCode::Modifier(ModifierKey::RightControl),
+                Modifiers::CTRL
+            )
+        );
+        assert_eq!(
+            k(ct::KeyCode::CapsLock, ct::KeyModifiers::NONE).code,
+            KeyCode::Special(SpecialKey::CapsLock)
+        );
+        let mods = k(
+            ct::KeyCode::Char('a'),
+            ct::KeyModifiers::SUPER | ct::KeyModifiers::HYPER | ct::KeyModifiers::META,
+        )
+        .mods;
+        assert!(mods.sup && mods.hyper && mods.meta && !mods.ctrl);
+        // The keypad's keys are the same keys, marked.
+        let mut pad = press(ct::KeyCode::Char('5'), ct::KeyModifiers::NONE);
+        pad.state = ct::KeyEventState::KEYPAD;
+        let pad = convert(pad).unwrap();
+        assert_eq!(pad.code, KeyCode::Char('5'));
+        assert!(pad.keypad);
+        assert!(!k(ct::KeyCode::Char('5'), ct::KeyModifiers::NONE).keypad);
+    }
+
+    #[test]
+    fn the_outer_flags_follow_the_programs() {
+        for (program, outer) in [
+            (0, 0),
+            (1, 1),
+            (2, 3),
+            (3, 3),
+            (8, 1 | 4),
+            (9, 1 | 4),
+            (16, 1 | 4),
+            (31, 1 | 2 | 4),
+        ] {
+            assert_eq!(outer_flags(program), outer, "{program}");
+            // Never the associated text.
+            assert_eq!(outer_flags(program) & 16, 0);
+        }
     }
 
     #[test]

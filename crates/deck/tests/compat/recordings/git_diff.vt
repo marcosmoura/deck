@@ -1,0 +1,19 @@
+[1mdiff --git a/sample.rs b/sample.rs[m
+[1mindex 42cb8e3..94902cc 100644[m
+[1m--- a/sample.rs[m
+[1m+++ b/sample.rs[m
+[36m@@ -18,11 +18,11 @@[m [mimpl Inventory {[m
+ [m
+ fn main() {[m
+     let mut inventory = Inventory::default();[m
+[31m-    inventory.add("apple", 3);[m
+[31m-    inventory.add("pear", 5);[m
+[31m-    // Print the total, then every item.[m
+[32m+[m[32m    inventory.add("orange", 3);[m
+[32m+[m[32m    inventory.add("pear", 7);[m
+     println!("total: {}", inventory.total());[m
+     for (name, count) in &inventory.items {[m
+         println!("{name}: {count}");[m
+     }[m
+ }[m
+[32m+[m[32mfn extra() {}[m

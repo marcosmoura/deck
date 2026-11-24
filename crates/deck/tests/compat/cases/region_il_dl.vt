@@ -1,0 +1,3 @@
+#! size 20x10
+# IL and DL inside the region, and outside it where they do nothing.
+\e[2J\e[H\e[1;1Hrow01 abcdefgh\e[2;1Hrow02 abcdefgh\e[3;1Hrow03 abcdefgh\e[4;1Hrow04 abcdefgh\e[5;1Hrow05 abcdefgh\e[6;1Hrow06 abcdefgh\e[7;1Hrow07 abcdefgh\e[8;1Hrow08 abcdefgh\e[9;1Hrow09 abcdefgh\e[10;1Hrow10 abcdefgh\e[3;7r\e[4;1H\e[2L\e[6;1H\e[1M\e[1;1H\e[2L\e[9;1H\e[3M\e[7;3HZ

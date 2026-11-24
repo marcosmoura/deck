@@ -1,0 +1,3 @@
+#! size 80x24
+# Plain text, a tab and a carriage return.
+Hello, deck!\r\nSecond line\ttabbed\r\nover\rwrite\r\n

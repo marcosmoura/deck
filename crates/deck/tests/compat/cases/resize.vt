@@ -1,0 +1,4 @@
+#! size 80x24
+#! resize 100x30
+# Text and colour, then the window grows.
+\e[31mred\e[0m line\r\nsecond\r\n\e[10;1Hrow ten\e[44m\e[K\e[0m

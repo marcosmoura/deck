@@ -1,0 +1,3 @@
+#! size 30x6
+# ?47 switches screens without clearing; the primary screen comes back as it was.
+primary one\r\nprimary two\e[?47hALT\e[3;3Hxx\e[?47l\r\nback

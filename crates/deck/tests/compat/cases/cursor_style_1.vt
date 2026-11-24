@@ -1,0 +1,3 @@
+#! size 20x5
+# DECSCUSR 1, the cursor shown.
+x\e[1 q

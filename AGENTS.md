@@ -28,19 +28,20 @@ these commands exist in the DECK-01 worktree once that sub-spec is committed
 there, and on `main` once DECK-01 is merged. Until then, use the plain Cargo
 equivalents in [docs/workflow.md](docs/workflow.md#checks). Run them from the repository root.
 
-| Command                       | What it does                                                     |
-| ----------------------------- | ---------------------------------------------------------------- |
-| `mise install`                | Install the pinned toolchain                                     |
-| `lefthook install`            | Install the Git hooks (once per clone)                           |
-| `just check`                  | The gate: format check, Clippy with warnings denied, all tests   |
-| `just fmt`                    | Format everything: Rust with rustfmt, the rest with oxfmt        |
-| `just lint`                   | Clippy on every crate, warnings denied                           |
-| `just test`                   | All tests with cargo-nextest                                     |
-| `just test-crate <crate> [f]` | Tests of one crate, optionally filtered, e.g. `deck-core layout` |
-| `just lint-ci`                | actionlint on the workflows, shellcheck on the shell scripts     |
-| `just stress [filter]`        | Stress and soak suite, release build; slow, not in the gate      |
-| `just run [args]`             | Build and run `deck` with an isolated socket and state dir       |
-| `just install`                | Install `deck` into `$PREFIX/bin` (default `~/.local/bin`)       |
+| Command                       | What it does                                                          |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `mise install`                | Install the pinned toolchain                                          |
+| `lefthook install`            | Install the Git hooks (once per clone)                                |
+| `just check`                  | The gate: format check, Clippy with warnings denied, all tests        |
+| `just fmt`                    | Format everything: Rust with rustfmt, the rest with oxfmt             |
+| `just lint`                   | Clippy on every crate, warnings denied                                |
+| `just test`                   | All tests with cargo-nextest                                          |
+| `just test-crate <crate> [f]` | Tests of one crate, optionally filtered, e.g. `deck-core layout`      |
+| `just record-compat <name>`   | Record a program's output for the compat suite (`FORCE=1` to replace) |
+| `just lint-ci`                | actionlint on the workflows, shellcheck on the shell scripts          |
+| `just stress [filter]`        | Stress and soak suite, release build; slow, not in the gate           |
+| `just run [args]`             | Build and run `deck` with an isolated socket and state dir            |
+| `just install`                | Install `deck` into `$PREFIX/bin` (default `~/.local/bin`)            |
 
 `just check` is the gate before a commit. Plain `cargo` commands (`cargo build -p
 <crate>`, `cargo nextest run -p <crate> <filter>`, `cargo clippy -p <crate>`) are

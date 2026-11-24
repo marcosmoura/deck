@@ -1,0 +1,11 @@
+# fzf: a list and a query, with the selection moved down. The recording stops on the live UI
+# (prompt, matches, counter, pointer): fzf erases it when Enter picks an item.
+size 100x30
+setup seq 1 40 | sed 's/^/item /' > items.txt
+run sh -c "fzf --height 40% --query item < items.txt"
+wait item 10
+send 3
+sleep 300
+key Down
+sleep 500
+stop

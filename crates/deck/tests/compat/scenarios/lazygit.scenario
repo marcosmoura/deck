@@ -1,0 +1,11 @@
+# lazygit: a scratch repository with two commits, the welcome popup, then the commits view.
+size 100x30
+setup mkdir repo && cd repo && git init -q . && printf 'one\n' > a.txt && git add a.txt && git commit -q -m 'first commit' && printf 'two\n' >> a.txt && git commit -q -am 'second commit'
+run lazygit -p repo
+wait Thanks for using lazygit
+sleep 500
+key Enter
+sleep 800
+send 4
+sleep 800
+stop

@@ -1,0 +1,4 @@
+#! size 40x8
+#! resize 30x8
+# The alternate screen is cut, not reflowed, when the width shrinks; the primary one comes back.
+primary one\r\nprimary two\e[?1049h\e[2J\e[1;1H0123456789abcdefghijklmnopqrstuvwxy\e[4;1Hmiddle 0123456789\e[8;1Hbottom\e[4;24Hx

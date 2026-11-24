@@ -1,0 +1,4 @@
+#! size 40x8
+#! resize 40x6
+# The alternate screen loses rows when the height shrinks: Ghostty drops the top ones, the reference the bottom ones.
+primary one\e[?1049h\e[2J\e[1;1Htop\e[4;10Hmid\e[8;1Hbottom\e[4;13H

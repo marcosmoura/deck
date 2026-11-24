@@ -1,0 +1,3 @@
+#! size 20x5
+# CR LF versus LF only, backspace at column 0, NEL, IND at the bottom.
+one\r\ntwo\nthree\r\n\x08four\x08\x08\x08\x08\x08x\e[5;1H\x1bEnel\eDind\eEnel2

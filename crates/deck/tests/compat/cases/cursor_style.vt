@@ -1,0 +1,3 @@
+#! size 20x5
+# DECSCUSR shapes and ?25 visibility; the cursor ends hidden.
+\e[3 qa\e[?25lb\e[?25h\e[5 qc\e[?25l

@@ -1,0 +1,3 @@
+#! size 20x5
+# A shape chosen, then DECSCUSR 0: the outer terminal's default again.
+x\e[5 q\e[0 q

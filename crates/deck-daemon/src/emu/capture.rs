@@ -1,7 +1,7 @@
 //! A terminal's screen as text: `capture` and the line search of `wait --text`.
 
 use deck_core::model::TerminalId;
-use deck_core::protocol::{Captured, Color, Modes, Style};
+use deck_core::protocol::{Captured, Color, Modes, Style, Underline};
 use ghostty_vt::Error;
 use ghostty_vt::screen::{CellWide, GridRef, Screen};
 use ghostty_vt::terminal::{Point, PointCoordinate};
@@ -234,7 +234,6 @@ fn sgr(out: &mut String, style: Style) {
         (Style::BOLD, 1),
         (Style::DIM, 2),
         (Style::ITALIC, 3),
-        (Style::UNDERLINE, 4),
         (Style::REVERSE, 7),
         (Style::HIDDEN, 8),
         (Style::STRIKETHROUGH, 9),
@@ -243,8 +242,21 @@ fn sgr(out: &mut String, style: Style) {
             out.push_str(&format!(";{code}"));
         }
     }
+    match style.underline {
+        Underline::None => {}
+        Underline::Single => out.push_str(";4"),
+        Underline::Double => out.push_str(";4:2"),
+        Underline::Curly => out.push_str(";4:3"),
+        Underline::Dotted => out.push_str(";4:4"),
+        Underline::Dashed => out.push_str(";4:5"),
+    }
     sgr_color(out, style.fg, 30, 90, 38);
     sgr_color(out, style.bg, 40, 100, 48);
+    match style.underline_color {
+        Color::Default => {}
+        Color::Indexed(n) => out.push_str(&format!(";58;5;{n}")),
+        Color::Rgb(r, g, b) => out.push_str(&format!(";58;2;{r};{g};{b}")),
+    }
     out.push('m');
 }
 
@@ -321,6 +333,25 @@ mod tests {
             ["a\x1b[0;1;31mb\x1b[0;38;2;1;2;3mc\x1b[0m d\x1b[0;44m  \x1b[0m"]
         );
         assert_eq!(capture(&e, None, false, false).lines, ["abc d"]);
+    }
+
+    #[test]
+    fn ansi_round_trips_underline_kinds_and_colours() {
+        let mut e = new(40, 2, 0);
+        e.feed(
+            b"\x1b[4ma\x1b[0;4:2mb\x1b[0;4:3;58;2;255;0;0mc\x1b[0;4:4;58;5;9md\x1b[0;4:5me\x1b[0;21mf\x1b[0;4;24mg\x1b[0;4:3;58:2::1:2:3m\x1b[59mh",
+        );
+        let first = capture(&e, None, false, true).lines;
+        assert_eq!(
+            first,
+            [
+                "\x1b[0;4ma\x1b[0;4:2mb\x1b[0;4:3;58;2;255;0;0mc\x1b[0;4:4;58;5;9md\x1b[0;4:5me\x1b[0;4:2mf\x1b[0mg\x1b[0;4:3mh\x1b[0m"
+            ]
+        );
+        // Print the capture into a fresh terminal and capture it again.
+        let mut again = new(40, 2, 0);
+        again.feed(first[0].as_bytes());
+        assert_eq!(capture(&again, None, false, true).lines, first);
     }
 
     #[test]

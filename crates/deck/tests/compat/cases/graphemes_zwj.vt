@@ -1,0 +1,3 @@
+#! size 20x5
+# A ZWJ sequence is one wide cell in Ghostty; the reference draws its parts side by side.
+c\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x92\xbbd

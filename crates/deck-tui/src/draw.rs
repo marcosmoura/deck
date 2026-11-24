@@ -953,6 +953,8 @@ mod tests {
                     flags: protocol::Style::BOLD
                         | protocol::Style::REVERSE
                         | protocol::Style::ITALIC,
+                    underline: protocol::Underline::Curly,
+                    underline_color: protocol::Color::Rgb(9, 8, 7),
                 },
             }],
         };
@@ -965,6 +967,29 @@ mod tests {
             cell.modifier
                 .contains(Modifier::BOLD | Modifier::REVERSED | Modifier::ITALIC)
         );
+        assert_eq!(
+            crate::backend::kind_bits(cell.modifier),
+            protocol::Underline::Curly
+        );
+        assert_eq!(cell.underline_color, Color::Rgb(9, 8, 7));
+    }
+
+    #[test]
+    fn a_placeholder_cell_carries_no_underline() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 4, 1));
+        buf[(1, 0)]
+            .set_style(style(protocol::Style {
+                underline: protocol::Underline::Curly,
+                underline_color: protocol::Color::Rgb(1, 2, 3),
+                ..protocol::Style::default()
+            }))
+            .set_bg(Color::Blue);
+        put_placeholder(&mut buf, 0, (1, 0), 7, (0, 0));
+        let cell = &buf[(1, 0)];
+        assert_eq!(cell.underline_color, Color::Reset);
+        assert_eq!(cell.modifier, Modifier::empty());
+        assert_eq!(cell.bg, Color::Blue);
+        assert_eq!(cell.fg, Color::Rgb(0, 0, 7));
     }
 
     #[test]

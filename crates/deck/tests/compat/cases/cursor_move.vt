@@ -1,0 +1,2 @@
+# CUP, CUU/CUD/CUF/CUB, and the cursor at the end.
+\e[2J\e[5;10Hcup\e[3Aup\e[2Bdown\e[4Cright\e[6Dleft\e[H0\e[24;80Hz\e[1;1H

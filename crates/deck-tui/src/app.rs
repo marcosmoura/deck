@@ -9,7 +9,7 @@ use crate::graphics::{Images, SPINNER_FRAMES};
 use crate::placed::Piece;
 use deck_core::action::Action as Act;
 use deck_core::config::Config;
-use deck_core::keys::{KeyCode, KeyEvent, Modifiers, encode};
+use deck_core::keys::{KeyCode, KeyEvent, KeyEventKind, Modifiers, encode, encode_key};
 use deck_core::layout;
 use deck_core::model::TerminalId;
 use deck_core::mouse::{self, MouseButton, MouseEvent, MouseKind};
@@ -24,7 +24,7 @@ use crate::agent;
 use crate::context::ContextMenu;
 use crate::copy::{CopyState, Edge};
 use crate::grid::Grid;
-use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
+use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes, kind, outer_flags};
 use crate::menu::NewMenu;
 use crate::mirror::Mirror;
 use crate::modal::{Modal, PromptKind, Retry};
@@ -120,6 +120,11 @@ pub struct App {
     configured: bool,
     /// Keys and pastes for a terminal that is not there yet, sent when it is.
     queued: Vec<Queued>,
+    /// The outer terminal speaks the kitty keyboard protocol (it answered the start-up query).
+    pub outer_kitty: bool,
+    /// The keys whose press went to a terminal and whose release has not come: only their
+    /// releases are sent on, to the terminal that got the press.
+    held: Vec<(TerminalId, KeyCode)>,
     pub(crate) dirty: bool,
     /// The prompt, confirmation or help overlay that has the keyboard.
     pub modal: Option<Modal>,
@@ -208,7 +213,7 @@ struct Hit {
 /// Something the user sent to the focused terminal, encoded when it is sent.
 #[derive(Debug)]
 enum Queued {
-    Key(KeyEvent),
+    Key(KeyEvent, KeyEventKind),
     Paste(String),
 }
 
@@ -238,6 +243,8 @@ impl App {
             typeahead: keys_from_bytes(typeahead),
             configured: true,
             queued: Vec::new(),
+            outer_kitty: false,
+            held: Vec::new(),
             dirty: true,
             modal: None,
             pending: VecDeque::new(),
@@ -443,6 +450,7 @@ impl App {
         self.row_drop = None;
         self.check_viewport = true;
         self.queued.clear();
+        self.held.clear();
         self.sidebar_focus = false;
         self.selection = None;
         self.sidebar_offset = 0;
@@ -583,10 +591,16 @@ impl App {
     fn handle_event(&mut self, event: ct::Event, now: Instant) -> Vec<Out> {
         match event {
             ct::Event::Key(key) if !self.configured => {
-                self.typeahead.extend(convert(key));
+                if kind(&key) != KeyEventKind::Release {
+                    self.typeahead.extend(convert(key));
+                }
                 Vec::new()
             }
-            ct::Event::Key(key) => convert(key).map_or_else(Vec::new, |k| self.on_key(k, now)),
+            ct::Event::Key(key) => match (convert(key), kind(&key)) {
+                (None, _) => Vec::new(),
+                (Some(k), KeyEventKind::Release) => self.on_key_release(k),
+                (Some(k), kind) => self.key(k, kind, now),
+            },
             ct::Event::Paste(text) => self.on_paste(text),
             ct::Event::Resize(cols, rows) => {
                 self.size = (cols, rows);
@@ -1133,6 +1147,76 @@ impl App {
     }
 
     fn on_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Out> {
+        self.key(key, KeyEventKind::Press, now)
+    }
+
+    /// The release of a key whose press went to a terminal goes there too, for a program that
+    /// asked for it. Deck's own keys have no use for releases.
+    fn on_key_release(&mut self, key: KeyEvent) -> Vec<Out> {
+        let code = held_code(key.code);
+        let Some(at) = self.held.iter().position(|(_, held)| *held == code) else {
+            return Vec::new();
+        };
+        let (terminal, _) = self.held.remove(at);
+        if self.ready() != Some(terminal) {
+            return Vec::new();
+        }
+        self.send(&Queued::Key(key, KeyEventKind::Release))
+            .into_iter()
+            .collect()
+    }
+
+    /// Whether a key that stands alone (a modifier, a media key) can go to the terminal:
+    /// nothing else has the keyboard.
+    fn typing(&self) -> bool {
+        !(self.overlay_open()
+            || self.armed
+            || self.scroll_mode.is_some()
+            || self.sidebar_focus
+            || self.row_drag.is_some())
+    }
+
+    /// Sends a key to the focused terminal and remembers its release is due.
+    fn send_key(&mut self, key: KeyEvent, kind: KeyEventKind) -> Vec<Out> {
+        // Eight keys held at once are plenty; a stuck entry costs one stray release.
+        if let Some(terminal) = self.mirror.focused_id() {
+            let code = held_code(key.code);
+            if !self.held.contains(&(terminal, code)) {
+                if self.held.len() >= 8 {
+                    self.held.remove(0);
+                }
+                self.held.push((terminal, code));
+            }
+        }
+        self.send_or_queue(Queued::Key(key, kind))
+    }
+
+    /// The kitty keyboard flags the outer terminal should have pushed: those the focused
+    /// terminal's program needs, when the outer terminal has the protocol and no overlay takes
+    /// the keyboard (deck's own keys use the legacy form).
+    pub fn outer_keyboard(&self) -> u8 {
+        if !self.outer_kitty || self.overlay_open() {
+            return 0;
+        }
+        self.mirror
+            .focused_id()
+            .and_then(|id| self.mirror.terminal(id))
+            .map_or(0, |t| outer_flags(t.modes.kitty_flags()))
+    }
+
+    fn key(&mut self, key: KeyEvent, kind: KeyEventKind, now: Instant) -> Vec<Out> {
+        // Modifier, media and lock keys are the program's alone: they never touch the prefix
+        // or an open overlay (the Option key goes down before the prefix's space does).
+        if matches!(
+            key.code,
+            KeyCode::Modifier(_) | KeyCode::Media(_) | KeyCode::Special(_)
+        ) {
+            return if self.typing() {
+                self.send_key(key, kind)
+            } else {
+                Vec::new()
+            };
+        }
         self.dirty = true;
         // A key ends a sidebar drag, so an overlay it opens never shows one; the rest of the
         // gesture is still the drag's and goes to no program.
@@ -1188,7 +1272,7 @@ impl App {
             if self.sidebar_focus {
                 return self.sidebar_key(key);
             }
-            return self.send_or_queue(Queued::Key(key));
+            return self.send_key(key, kind);
         }
         self.armed = false;
         if self.bindings.is_prefix(&key) {
@@ -1196,7 +1280,7 @@ impl App {
             self.scroll_mode = None;
             self.bottom_expected = false;
             self.end_copy();
-            return self.send_or_queue(Queued::Key(key));
+            return self.send_key(key, kind);
         }
         if key.code == KeyCode::Esc && !key.mods.ctrl && !key.mods.alt {
             return Vec::new();
@@ -1427,7 +1511,7 @@ impl App {
         let terminal = self.ready()?;
         let modes = self.mirror.terminal(terminal)?.modes;
         let bytes = match item {
-            Queued::Key(key) => encode(key, modes),
+            Queued::Key(key, kind) => encode_key(key, *kind, modes),
             Queued::Paste(text) => {
                 let mut bytes = Vec::with_capacity(text.len() + 12);
                 let bracketed = modes.has(Modes::BRACKETED_PASTE);
@@ -1647,11 +1731,21 @@ pub(crate) fn osc52(selection: &str, text: &str) -> Out {
     Out::Clipboard(format!("\x1b]52;{selection};{b64}\x07").into_bytes())
 }
 
+/// A key as `held` remembers it: a release can report the character without the Shift the
+/// press had.
+fn held_code(code: KeyCode) -> KeyCode {
+    match code {
+        KeyCode::Char(c) => KeyCode::Char(c.to_lowercase().next().unwrap_or(c)),
+        other => other,
+    }
+}
+
 fn key_mods(mods: ct::KeyModifiers) -> Modifiers {
     Modifiers {
         ctrl: mods.contains(ct::KeyModifiers::CONTROL),
         alt: mods.contains(ct::KeyModifiers::ALT),
         shift: mods.contains(ct::KeyModifiers::SHIFT),
+        ..Modifiers::NONE
     }
 }
 

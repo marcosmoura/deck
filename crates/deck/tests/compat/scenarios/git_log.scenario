@@ -1,0 +1,7 @@
+# git log --graph --color on a scratch repository with a merge.
+size 100x30
+setup git init -q . && printf 'one\n' > a.txt && git add a.txt && git commit -q -m 'first commit'
+setup git checkout -q -b feature && printf 'two\n' > b.txt && git add b.txt && git commit -q -m 'add b on a branch'
+setup git checkout -q main && printf 'three\n' >> a.txt && git commit -q -am 'change a on main'
+setup git merge -q --no-ff feature -m 'merge feature' && git tag v1
+run git --no-pager log --graph --color=always --decorate --oneline

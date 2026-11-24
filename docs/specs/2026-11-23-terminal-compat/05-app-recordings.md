@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 05 — Recordings of real programs
@@ -36,3 +36,11 @@ Real programs' output, recorded once and committed, replayed through the differe
 
 - Recordings depend on program versions; a later re-record that changes them is fine as long as the differential compare passes.
 - The worker runs the manual checklist once and records the results in the compatibility doc, with the date.
+
+## Deviations
+
+Recorded by the lead on 24 Nov 2026.
+
+- A `stop` scenario step ends a recording while the program is still on screen: the replay compares only the final screen, and a full-screen program that quits leaves it blank. nvim, less, lazygit and fzf stop before quitting, so their quit path (leaving the alternate screen, resetting modes) is not covered by a recording.
+- htop is not installed on the machine that made the recordings, so it has none; bat was installed and is recorded.
+- The manual checklist was not run: an agent has no terminal window, agent accounts or ssh server. The compatibility doc says so; the user runs it.

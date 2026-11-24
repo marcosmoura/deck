@@ -1,0 +1,4 @@
+#! size 100x10
+#! resize 30x10
+# A long line wrapped at 100 columns wraps again at 30; short lines stay.
+0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-0123456789-0123456789-\r\nshort\r\n\e[31m0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-0123456789-0123456789-\e[0m

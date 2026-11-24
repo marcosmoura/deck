@@ -243,6 +243,34 @@ async fn keys_are_encoded_for_the_terminals_modes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn keys_for_a_program_with_kitty_flags_are_escape_codes() {
+    let daemon = TestDaemon::start().await;
+    let mut c = attach(&daemon).await;
+    let kitty = new_terminal(&mut c, &format!("printf '\\033[>1u'; {SHOW_BYTES}"), false).await;
+    screen_has(&mut c, kitty, "ready").await;
+    ok(
+        &mut c,
+        Request::SendKeys {
+            terminal: kitty,
+            keys: vec![
+                key("S-Enter"),
+                key("C-Tab"),
+                key("a"),
+                key("Up"),
+                key("Enter"),
+            ],
+        },
+    )
+    .await;
+    // Text and unmodified keys keep their legacy form; the others are escape codes.
+    assert_eq!(
+        screen_has(&mut c, kitty, "^M").await,
+        "^[[13;2u^[[9;5ua^[[A^M"
+    );
+    daemon.stop().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn ctrl_c_interrupts_a_running_command() {
     let daemon = TestDaemon::start().await;
     let mut c = attach(&daemon).await;

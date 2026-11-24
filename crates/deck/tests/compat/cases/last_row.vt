@@ -1,0 +1,3 @@
+#! size 40x6
+# Text on the last row: the floating bar is not shown, so nothing covers it.
+\e[1;1Htop\e[6;1HLAST ROW \e[7mreverse\e[0m\e[6;40H!
