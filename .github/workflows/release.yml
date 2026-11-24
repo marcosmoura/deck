@@ -97,23 +97,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: gh release download "$GITHUB_REF_NAME" --pattern '*.sha256' --dir sums
-      - name: Render the formula and write it to the tap
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAP: marcosmoura/homebrew-tap
+      - name: Render the formula
         run: |
           version="${GITHUB_REF_NAME#v}"
           sh packaging/homebrew/render.sh "$version" sums > deck.rb
-          # The current blob's sha is needed to update the file; a 404 means create it.
-          # Any other error (an expired token, say) fails the job.
-          err="$RUNNER_TEMP/gh-err"
-          if ! sha="$(gh api "repos/$TAP/contents/Formula/deck.rb" --jq .sha 2>"$err")"; then
-            grep -q 'HTTP 404' "$err" || { cat "$err" >&2; exit 1; }
-            sha=""
-          fi
-          base64 -w0 deck.rb | jq -Rs \
-            --arg message "deck $version" \
-            --arg sha "$sha" \
-            '{message: $message, content: .} + (if $sha == "" then {} else {sha: $sha} end)' |
-            gh api --method PUT "repos/$TAP/contents/Formula/deck.rb" --input - >/dev/null
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      # The tap's shared action creates or updates the file; any other project publishes the same way.
+      - name: Publish it to the tap
+        uses: marcosmoura/homebrew-tap/.github/actions/publish@main
+        with:
+          file: deck.rb
+          path: Formula/deck.rb
+          message: deck ${{ env.VERSION }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
