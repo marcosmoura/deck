@@ -107,6 +107,8 @@ The user's yes to the repo flow, the approval of a spec, or a request for a back
 | The squash merge                                                                                         | `main`            | `feat: <spec title> (DECK-NN)`         |
 | A spec discarded                                                                                         | `main`            | `docs(spec): stop <slug>`              |
 
+The release pull request that release-please opens on `main` is merged by the user, never by an agent.
+
 ## Keeping sessions cheap
 
 The cost of a session is its turns times its context.

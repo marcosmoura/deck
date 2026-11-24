@@ -37,6 +37,7 @@ equivalents in [docs/workflow.md](docs/workflow.md#checks). Run them from the re
 | `just lint`                   | Clippy on every crate, warnings denied                           |
 | `just test`                   | All tests with cargo-nextest                                     |
 | `just test-crate <crate> [f]` | Tests of one crate, optionally filtered, e.g. `deck-core layout` |
+| `just lint-ci`                | actionlint on the workflows, shellcheck on the shell scripts     |
 | `just stress [filter]`        | Stress and soak suite, release build; slow, not in the gate      |
 | `just run [args]`             | Build and run `deck` with an isolated socket and state dir       |
 | `just install`                | Install `deck` into `$PREFIX/bin` (default `~/.local/bin`)       |
@@ -122,5 +123,7 @@ you start it. In short:
   [docs/workflow.md](docs/workflow.md#commits-the-flow-may-make) for that task,
   and no others.
 - The backlog is read and edited only on `main`, in the main checkout.
+- Releases: the user merges the release pull request that release-please keeps
+  open on `main`; never bump the version or push a tag by hand.
 - Never set git identity. Never push, merge or delete a branch without the
   user's go-ahead in the current session. Never bypass hooks.

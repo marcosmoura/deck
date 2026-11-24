@@ -16,6 +16,12 @@ fmt:
 lint:
     cargo clippy --workspace --all-targets --locked -- -D warnings
 
+# Lint the GitHub workflows with actionlint and the shell scripts with shellcheck.
+lint-ci:
+    actionlint
+    shellcheck install.sh packaging/homebrew/render.sh packaging/homebrew/check.sh
+    sh packaging/homebrew/check.sh
+
 # All tests with cargo-nextest.
 test:
     cargo nextest run --workspace --locked

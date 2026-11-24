@@ -1,0 +1,59 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+      - "release-please--branches--main*"
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-24.04
+    steps:
+      # A personal access token, not GITHUB_TOKEN: pull requests and tags made with
+      # GITHUB_TOKEN trigger no workflows, so CI and release.yml would never run.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+  # On release-please's branch: refresh Cargo.lock and format CHANGELOG.md, which
+  # release-please leaves stale or unformatted. Commits through the API as the token's
+  # owner so CI runs again; a push with nothing to fix commits nothing. Never touches main.
+  # Two changed files make two commits and two CI runs; the second push cancels the first run.
+  fix-up:
+    if: startsWith(github.ref_name, 'release-please--branches--main')
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-please-fix-up
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          install_args: rust aqua:oxc-project/oxc/oxfmt
+      - name: Refresh Cargo.lock and format the changelog
+        run: |
+          cargo update --workspace
+          oxfmt CHANGELOG.md
+      - name: Commit what changed
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          for file in Cargo.lock CHANGELOG.md; do
+            if git diff --quiet -- "$file"; then
+              continue
+            fi
+            # The body goes through stdin: Cargo.lock in base64 is too long for one argument.
+            base64 -w0 "$file" | jq -Rs \
+              --arg message "chore(repo): update $file" \
+              --arg sha "$(git rev-parse "HEAD:$file")" \
+              --arg branch "$BRANCH" \
+              '{message: $message, content: ., sha: $sha, branch: $branch}' |
+              gh api --method PUT "repos/$GH_REPO/contents/$file" --input - >/dev/null
+          done

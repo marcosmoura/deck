@@ -6,7 +6,13 @@ Status: early. Today `deck` attaches to a session with one shell. Spaces, panels
 
 ## Install
 
-macOS (Apple silicon or Intel) or Linux (x86_64 or aarch64), from the latest release into `~/.local/bin`:
+On macOS (Apple silicon or Intel) or Linux (x86_64 or aarch64), with [Homebrew](https://brew.sh):
+
+```sh
+brew install marcosmoura/tap/deck
+```
+
+Or from the latest release into `~/.local/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/marcosmoura/deck/main/install.sh | sh

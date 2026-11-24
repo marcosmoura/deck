@@ -20,3 +20,6 @@ jobs:
       - uses: jdx/mise-action@v3
       - uses: Swatinem/rust-cache@v2
       - run: just check
+      - name: Lint the workflows and shell scripts
+        if: runner.os == 'Linux'
+        run: just lint-ci
