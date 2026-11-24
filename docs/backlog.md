@@ -13,7 +13,9 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue: none.
+Open tasks the user has not placed in the queue:
+
+- DECK-31 Install the agent skill with `deck skills`
 
 ## Tasks
 
@@ -48,6 +50,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-28 | Stress suite follow-ups                   | todo   | DECK-23                                                       | —                                                                            |
 | DECK-29 | Recreate the Homebrew tap                 | done   | DECK-25                                                       | —                                                                            |
 | DECK-30 | Blinking cursor shapes                    | done   | DECK-22                                                       | —                                                                            |
+| DECK-31 | Install the agent skill with deck skills  | todo   | —                                                             | —                                                                            |
 
 ### Withdrawn
 
@@ -58,6 +61,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-31
+
+**Install the agent skill with `deck skills`.** Asked on 24 Nov 2026: like `deck hooks`, a command that installs, removes and checks the skills deck ships (today only `skills/deck`), so a Homebrew install, which has no clone to link from, can install the skill.
+
+- What: `deck skills install <claude|codex|opencode>... [--print]`, `deck skills uninstall <agent>...` and `deck skills status`, in `crates/deck/src/skills.rs`. `install` writes the `SKILL.md` built into the binary (the one `deck guide` uses, front matter included) to `$CLAUDE_CONFIG_DIR/skills/deck` (default `~/.claude/skills/deck`) for Claude Code, `~/.agents/skills/deck` for Codex, and `$OPENCODE_CONFIG_DIR/skills/deck` (default `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode`) for OpenCode. It replaces a symlink (the old README's `ln -s`) or a directory that holds only a `SKILL.md` whose front matter names `deck`; anything else named `deck` there is refused with an error, no `--force`. `uninstall` removes only what `install` would replace. `status` prints one line per agent: `installed`, `not installed`, `stale` (the file differs from the binary's copy; `install` refreshes it) or `linked` (a symlink); for OpenCode without its own copy it says when it reads the Claude Code or Codex one (`~/.claude/skills`, `~/.agents/skills`).
+- Why: the README's `ln -s <repo>/skills/deck` needs a clone, and a copy goes stale after an upgrade without anyone noticing.
+- Acceptance: tests with a fake home cover install, a repeated install, `--print`, uninstall, status in each state, replacing an old symlink and refusing a foreign directory; every `deck` command in the README and the skill still parses; the README "Agents" section, the Homebrew caveats (`packaging/homebrew/deck.rb.in`) and `docs/features/control-api.md#agent-skill` show `deck skills install` instead of `ln -s`.
 
 ### DECK-30
 
