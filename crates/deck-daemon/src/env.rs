@@ -62,6 +62,11 @@ pub fn terminal_env(
     };
     set(OsStr::new("TERM"), "xterm-256color".into());
     set(OsStr::new("COLORTERM"), "truecolor".into());
+    set(OsStr::new("TERM_PROGRAM"), "deck".into());
+    set(
+        OsStr::new("TERM_PROGRAM_VERSION"),
+        env!("CARGO_PKG_VERSION").into(),
+    );
     for (k, v) in extra.iter().filter(|(k, _)| !is_deck_var(k)) {
         set(k, v.clone());
     }
@@ -143,15 +148,13 @@ mod tests {
         assert_eq!(get("DECK").as_deref(), Some("1"));
         assert_eq!(get("TERM").as_deref(), Some("xterm-256color"));
         assert_eq!(get("COLORTERM").as_deref(), Some("truecolor"));
-        for gone in [
-            "DECK_X",
-            "TMUX",
-            "TMUX_PANE",
-            "COLUMNS",
-            "LINES",
-            "TERM_PROGRAM",
-            "TERM_PROGRAM_VERSION",
-        ] {
+        // The client's own TERM_PROGRAM (iTerm 3) is replaced by deck's.
+        assert_eq!(get("TERM_PROGRAM").as_deref(), Some("deck"));
+        assert_eq!(
+            get("TERM_PROGRAM_VERSION").as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        for gone in ["DECK_X", "TMUX", "TMUX_PANE", "COLUMNS", "LINES"] {
             assert_eq!(get(gone), None, "{gone}");
         }
         // Each key once.

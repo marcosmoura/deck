@@ -13,7 +13,7 @@ A program in a panel can show an image with the kitty graphics protocol, and dec
 
 ## Claude Code and other programs that check the terminal
 
-Claude Code shows its image thumbnails (pasted images) only in a terminal that names itself `ghostty` or `kitty`, which it learns from XTVERSION (`CSI > q`) or `TERM`/`TERM_PROGRAM`. A deck panel has neither, so deck answers XTVERSION itself: at attach the client asks its outer terminal for its name (together with the colour queries, with the same timeout) and, when the client can show images, the panels of its session answer `CSI > q` with that name (`ghostty 1.2.0`, for example). It follows the client the terminals follow; with a client that shows no images, or an outer terminal that gives no name, XTVERSION stays unanswered.
+Claude Code shows its image thumbnails (pasted images) only in a terminal that names itself `ghostty` or `kitty`, which it learns from XTVERSION (`CSI > q`) or `TERM`/`TERM_PROGRAM`. A deck panel says `TERM=xterm-256color` and `TERM_PROGRAM=deck`, which Claude Code does not know, so deck answers XTVERSION itself: at attach the client asks its outer terminal for its name (together with the colour queries, with the same timeout) and, when the client can show images, the panels of its session answer `CSI > q` with that name (`ghostty 1.2.0`, for example). It follows the client the terminals follow; with a client that shows no images, or an outer terminal that gives no name, XTVERSION stays unanswered.
 
 ## What shows elsewhere
 
