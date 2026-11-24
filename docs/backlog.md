@@ -47,7 +47,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-22 | Terminal compatibility                    | ready       | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
 | DECK-23 | Daemon stats and stress tests             | done        | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
 | DECK-24 | Scrollback search and copy mode           | ready       | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
-| DECK-25 | Release automation and Homebrew           | ready       | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
+| DECK-25 | Release automation and Homebrew           | in-progress | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
 | DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
 | DECK-27 | Terminals in the sidebar                  | in-progress | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
 | DECK-28 | Stress suite follow-ups                   | todo        | DECK-23                                                       | —                                                                            |
