@@ -21,6 +21,7 @@ Open tasks the user has not placed in the queue:
 - DECK-35 Setting for program clipboard writes
 - DECK-36 Setting for kitty file mediums
 - DECK-37 Fuzz target for the emulator feed
+- DECK-38 Daemon not dumpable on Linux
 
 ## Tasks
 
@@ -62,6 +63,7 @@ Open tasks the user has not placed in the queue:
 | DECK-35 | Setting for program clipboard writes      | todo        | DECK-26                                                       | —                                                                            |
 | DECK-36 | Setting for kitty file mediums            | todo        | DECK-26                                                       | —                                                                            |
 | DECK-37 | Fuzz target for the emulator feed         | todo        | —                                                             | —                                                                            |
+| DECK-38 | Daemon not dumpable on Linux              | todo        | —                                                             | —                                                                            |
 
 ### Withdrawn
 
@@ -72,6 +74,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-38
+
+**Daemon not dumpable on Linux.** Proposed on 24 Nov 2026 by the DECK-26 privacy review (P-6, low), accepted by the user.
+
+- What: `prctl(PR_SET_DUMPABLE, 0)` in the daemon's Linux platform module, at start and after a live upgrade (it resets on `execve`, so shells and programs in deck keep their own cores). Not `RLIMIT_CORE`, which every program in deck would inherit.
+- Why: nothing sets either today; a daemon abort (allocation failure, a libghostty-vt fault) on a distribution that collects cores with systemd-coredump keeps an image holding every session's environment and scrollback for days. It also blocks same-user debuggers on the daemon, which is the trade-off.
+- Acceptance: on Linux, after start and after a live upgrade `PR_GET_DUMPABLE` is 0; `deck stats` still reports descriptors and memory; a child shell is dumpable; documented in `docs/features/privacy.md`.
 
 ### DECK-37
 
