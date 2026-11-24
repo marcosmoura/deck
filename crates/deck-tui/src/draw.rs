@@ -828,14 +828,18 @@ fn draw_editor(
     }
 }
 
-/// The outer terminal's cursor style for a terminal cursor shape.
-pub fn cursor_style(shape: CursorShape) -> ratatui::crossterm::cursor::SetCursorStyle {
+/// The outer terminal's cursor style for a terminal cursor shape and its blinking. A shape
+/// the program never chose stays the outer terminal's own, blinking or not.
+pub fn cursor_style(shape: CursorShape, blink: bool) -> ratatui::crossterm::cursor::SetCursorStyle {
     use ratatui::crossterm::cursor::SetCursorStyle;
-    match shape {
-        CursorShape::Default => SetCursorStyle::DefaultUserShape,
-        CursorShape::Block => SetCursorStyle::SteadyBlock,
-        CursorShape::Bar => SetCursorStyle::SteadyBar,
-        CursorShape::Underline => SetCursorStyle::SteadyUnderScore,
+    match (shape, blink) {
+        (CursorShape::Default, _) => SetCursorStyle::DefaultUserShape,
+        (CursorShape::Block, false) => SetCursorStyle::SteadyBlock,
+        (CursorShape::Block, true) => SetCursorStyle::BlinkingBlock,
+        (CursorShape::Bar, false) => SetCursorStyle::SteadyBar,
+        (CursorShape::Bar, true) => SetCursorStyle::BlinkingBar,
+        (CursorShape::Underline, false) => SetCursorStyle::SteadyUnderScore,
+        (CursorShape::Underline, true) => SetCursorStyle::BlinkingUnderScore,
     }
 }
 
@@ -847,6 +851,23 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
+
+    #[test]
+    fn the_outer_cursor_blinks_when_the_program_asked() {
+        use ratatui::crossterm::cursor::SetCursorStyle as S;
+        for (shape, blink, style) in [
+            (CursorShape::Block, false, S::SteadyBlock),
+            (CursorShape::Block, true, S::BlinkingBlock),
+            (CursorShape::Bar, false, S::SteadyBar),
+            (CursorShape::Bar, true, S::BlinkingBar),
+            (CursorShape::Underline, false, S::SteadyUnderScore),
+            (CursorShape::Underline, true, S::BlinkingUnderScore),
+            (CursorShape::Default, false, S::DefaultUserShape),
+            (CursorShape::Default, true, S::DefaultUserShape),
+        ] {
+            assert_eq!(cursor_style(shape, blink), style, "{shape:?} blink {blink}");
+        }
+    }
 
     fn app(size: (u16, u16), vp: Option<(u16, u16)>, title: Option<&str>) -> App {
         let mut app = App::new(&no_sidebar(), size, &[]);

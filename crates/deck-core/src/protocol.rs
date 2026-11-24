@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -605,6 +605,8 @@ pub struct Cursor {
     pub col: u16,
     pub visible: bool,
     pub shape: CursorShape,
+    /// Ghostty's cursor-blink mode (set by `DECSCUSR` 1, 3, 5 or `?12h`).
+    pub blink: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -810,6 +812,7 @@ mod tests {
                 col: 2,
                 visible: true,
                 shape: CursorShape::Bar,
+                blink: false,
             },
             modes: Modes(Modes::APPLICATION_CURSOR | Modes::ALTERNATE_SCREEN),
             display_offset: 3,

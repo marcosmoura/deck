@@ -309,8 +309,8 @@ async fn run_async(mut options: Options) -> Exit {
                     }
                     let wanted = app.cursor_shape();
                     if wanted != shape {
-                        if let Some(s) = wanted {
-                            let _ = execute!(io::stdout(), draw::cursor_style(s));
+                        if let Some((s, blink)) = wanted {
+                            let _ = execute!(io::stdout(), draw::cursor_style(s, blink));
                         }
                         shape = wanted;
                     }

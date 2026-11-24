@@ -36,24 +36,6 @@ const KNOWN: &[Known] = &[
                  on the primary screen; xterm and Ghostty switch screens (see deck_switches_screens)",
     },
     Known {
-        case: "cursor_style_1",
-        ignore: Ignore::CursorStyle,
-        reason: "deck always sets a steady cursor on the outer terminal: Frame's Cursor carries \
-                 the shape but not blinking, so carrying it needs a protocol change (DECK-30)",
-    },
-    Known {
-        case: "cursor_style_3",
-        ignore: Ignore::CursorStyle,
-        reason: "deck always sets a steady cursor on the outer terminal: Frame's Cursor carries \
-                 the shape but not blinking, so carrying it needs a protocol change (DECK-30)",
-    },
-    Known {
-        case: "cursor_style_5",
-        ignore: Ignore::CursorStyle,
-        reason: "deck always sets a steady cursor on the outer terminal: Frame's Cursor carries \
-                 the shape but not blinking, so carrying it needs a protocol change (DECK-30)",
-    },
-    Known {
         case: "dch_past_the_edge",
         ignore: Ignore::Region(0..1, 21..27),
         reason: "alacritty_terminal's DCH with a count past the end of the line also blanks cells \

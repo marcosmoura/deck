@@ -307,6 +307,7 @@ mod tests {
                 col: 0,
                 visible: true,
                 shape: CursorShape::Block,
+                blink: false,
             },
             modes: Modes::default(),
             display_offset: 0,

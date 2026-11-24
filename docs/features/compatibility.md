@@ -72,4 +72,3 @@ Deck's emulator is Ghostty's; the reference is `alacritty_terminal`. In each cas
 - Shrinking the height of the alternate screen drops its top rows; the reference drops the bottom ones. Programs redraw on the resize.
 - SGR 21 is a double underline in deck (as in xterm's ctlseqs and Ghostty); the reference reads it as bold off, the Linux console's meaning.
 - An underline colour on text that is not underlined is not drawn (it has no effect); the reference keeps it on the cell. The cases reset it with `59` before text without an underline.
-- A blinking cursor shape (`DECSCUSR` 1, 3, 5) is shown steady: the frame carries the shape but not blinking. This needs a protocol change: DECK-30.

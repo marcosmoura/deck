@@ -468,6 +468,7 @@ impl Emu {
                     CursorVisualStyle::Block => CursorShape::Block,
                     _ => CursorShape::Default,
                 },
+                blink: screen.cursor.blinking,
             },
             modes: self.modes(),
             display_offset: u32::try_from(offset).unwrap_or(0),
@@ -979,6 +980,24 @@ mod tests {
         assert_eq!((c.row, c.visible), (2, true));
         e.scroll(ScrollTo::Lines(5));
         assert!(!e.full_frame(TerminalId(1)).cursor.visible);
+    }
+
+    #[test]
+    fn the_frame_carries_whether_the_cursor_blinks() {
+        let mut e = emu(10, 4);
+        let blink = |e: &mut Emu| e.full_frame(TerminalId(1)).cursor.blink;
+        for (seq, shape, blinks) in [
+            (&b"\x1b[1 q"[..], CursorShape::Block, true),
+            (b"\x1b[2 q", CursorShape::Block, false),
+            (b"\x1b[3 q", CursorShape::Underline, true),
+            (b"\x1b[4 q", CursorShape::Underline, false),
+            (b"\x1b[5 q", CursorShape::Bar, true),
+            (b"\x1b[6 q", CursorShape::Bar, false),
+        ] {
+            e.feed(seq);
+            assert_eq!(e.full_frame(TerminalId(1)).cursor.shape, shape);
+            assert_eq!(blink(&mut e), blinks, "{seq:?}");
+        }
     }
 
     #[test]

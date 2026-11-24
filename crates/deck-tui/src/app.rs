@@ -573,10 +573,11 @@ impl App {
         self.edge_tick(now)
     }
 
-    /// The cursor shape the outer terminal should show, when a terminal's cursor is visible.
-    pub fn cursor_shape(&self) -> Option<CursorShape> {
+    /// The cursor shape, and whether it blinks, the outer terminal should show, when a
+    /// terminal's cursor is visible.
+    pub fn cursor_shape(&self) -> Option<(CursorShape, bool)> {
         let t = self.mirror.terminal(self.mirror.focused_id()?)?;
-        t.cursor.visible.then_some(t.cursor.shape)
+        t.cursor.visible.then_some((t.cursor.shape, t.cursor.blink))
     }
 
     pub fn on_event(&mut self, event: ct::Event, now: Instant) -> Vec<Out> {
