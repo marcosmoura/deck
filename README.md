@@ -21,6 +21,14 @@ Or, without Homebrew, into `~/.local/bin`:
 curl -fsSL https://raw.githubusercontent.com/marcosmoura/deck/main/install.sh | sh
 ```
 
+Shell completion (subcommands, flags, session names, ids), in your shell's start-up file:
+
+```sh
+source <(COMPLETE=zsh deck)          # ~/.zshrc
+source <(COMPLETE=bash deck)         # ~/.bashrc
+COMPLETE=fish deck | source          # ~/.config/fish/config.fish
+```
+
 After installing a newer version, run `deck upgrade`: the daemon switches to it without stopping anything.
 
 ## Use

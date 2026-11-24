@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
 use clap::{ArgGroup, Args};
+use clap_complete::ArgValueCandidates;
 use deck_core::keys::KeySpec;
 use deck_core::model::{SessionView, TerminalId};
 use deck_core::protocol::{Captured, Request, Response, WaitFor, Waited};
@@ -29,7 +30,7 @@ pub struct SendArgs {
     pub common: Common,
     /// The terminal (default: the one this command's session or panel shows; never your own
     /// without this option).
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCandidates::new(crate::completion::terminals))]
     pub terminal: Option<u64>,
     /// Press Enter after the text.
     #[arg(long)]
@@ -47,7 +48,7 @@ pub struct SendKeysArgs {
     #[command(flatten)]
     pub common: Common,
     /// The terminal (never your own without this option).
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCandidates::new(crate::completion::terminals))]
     pub terminal: Option<u64>,
     /// Keys: `Enter`, `Tab`, `Esc`, `Up`, `C-c`, `M-x`, `F5`, or a single character.
     #[arg(required = true, value_name = "KEY")]
@@ -59,7 +60,7 @@ pub struct CaptureArgs {
     #[command(flatten)]
     pub common: Common,
     /// The terminal (default: your own).
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCandidates::new(crate::completion::terminals))]
     pub terminal: Option<u64>,
     /// Print only the last N lines.
     #[arg(long, value_name = "N")]
@@ -78,7 +79,7 @@ pub struct WaitArgs {
     #[command(flatten)]
     pub common: Common,
     /// The terminal (never your own without this option).
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCandidates::new(crate::completion::terminals))]
     pub terminal: Option<u64>,
     /// Wait for the program to exit; prints its exit code.
     #[arg(long)]

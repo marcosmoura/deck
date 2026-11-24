@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, anyhow, bail};
-use clap::Args;
+use clap::{Args, ValueHint};
+use clap_complete::ArgValueCandidates;
 use deck_core::model::{
     LaunchSpec, NameSource, PanelId, PanelView, ProjectView, SessionId, SessionView, TerminalView,
 };
@@ -27,7 +28,7 @@ pub struct Common {
     pub json: bool,
     /// The session to act on (default: the one this terminal is in, else the most recently
     /// attached).
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(crate::completion::sessions))]
     pub session: Option<String>,
 }
 
@@ -47,7 +48,7 @@ pub struct NewProjectArgs {
     /// The space's name.
     pub name: String,
     /// The space's root (default: the current directory).
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::DirPath)]
     pub dir: Option<PathBuf>,
     /// Make the new space the active one.
     #[arg(long)]
@@ -59,13 +60,13 @@ pub struct NewPanelArgs {
     #[command(flatten)]
     pub common: Common,
     /// The space, by id or name (default: this terminal's).
-    #[arg(long = "space", value_name = "ID|NAME")]
+    #[arg(long = "space", value_name = "ID|NAME", add = ArgValueCandidates::new(crate::completion::spaces))]
     pub project: Option<String>,
     /// The panel's name.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
     /// The first terminal's directory (default: the space's root).
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub cwd: Option<PathBuf>,
     /// Make the new panel the active one.
     #[arg(long)]
@@ -80,10 +81,10 @@ pub struct NewTerminalArgs {
     #[command(flatten)]
     pub common: Common,
     /// The panel (default: this terminal's).
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCandidates::new(crate::completion::panels))]
     pub panel: Option<u64>,
     /// The directory (default: where the panel's focused terminal is).
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
     pub cwd: Option<PathBuf>,
     /// An environment variable for the program; repeatable.
     #[arg(long, value_name = "KEY=VALUE", value_parser = parse_env)]
@@ -104,6 +105,7 @@ pub struct IdArgs {
     #[command(flatten)]
     pub common: Common,
     /// The id of a terminal, panel or space (as `ls --json` shows).
+    #[arg(add = ArgValueCandidates::new(crate::completion::any_ids))]
     pub id: u64,
 }
 
@@ -112,7 +114,7 @@ pub struct RenamePanelArgs {
     #[command(flatten)]
     pub common: Common,
     /// The panel (default: this terminal's).
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCandidates::new(crate::completion::panels))]
     pub panel: Option<u64>,
     /// The new name; it stays until `--auto`.
     #[arg(required_unless_present = "auto", conflicts_with = "auto")]

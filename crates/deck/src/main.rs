@@ -1,6 +1,7 @@
 //! The `deck` binary: CLI, daemon start-up, control commands and wiring.
 
 mod agent_event;
+mod completion;
 mod config_cmd;
 mod control;
 mod daemon_cmd;
@@ -16,7 +17,8 @@ mod upgrade_cmd;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueHint};
+use clap_complete::ArgValueCandidates;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,6 +36,7 @@ enum Command {
     /// Attaches to a session (the most recent one, or a new `main`, without a name).
     Attach {
         /// The session to attach to; it must exist unless `-c` is given.
+        #[arg(add = ArgValueCandidates::new(completion::sessions))]
         name: Option<String>,
         /// Create the session when it does not exist.
         #[arg(short, long, requires = "name")]
@@ -44,7 +47,7 @@ enum Command {
         /// The session's name (`main`, `main-2`, ... when omitted).
         name: Option<String>,
         /// The directory of the session's first space (default: the current one).
-        #[arg(short = 'c', long = "dir", value_name = "DIR")]
+        #[arg(short = 'c', long = "dir", value_name = "DIR", value_hint = ValueHint::DirPath)]
         dir: Option<PathBuf>,
         /// Create the session without attaching; prints its name.
         #[arg(short, long)]
@@ -53,11 +56,13 @@ enum Command {
     /// Kills a session and its terminals.
     KillSession {
         /// The session to kill.
+        #[arg(add = ArgValueCandidates::new(completion::sessions))]
         name: String,
     },
     /// Renames a session.
     RenameSession {
         /// The session's current name.
+        #[arg(add = ArgValueCandidates::new(completion::sessions))]
         old: String,
         /// Its new name.
         new: String,
@@ -141,6 +146,8 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // `COMPLETE=<shell> deck ...`: a shell asking for completions; answers and exits.
+    completion::complete();
     // A hook must never fail: any parse error of `agent-event` is silent and exits 0.
     if std::env::args_os()
         .nth(1)
