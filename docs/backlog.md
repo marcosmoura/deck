@@ -42,7 +42,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-18 | Sidebar reorder and space gaps            | done        | —                                                             | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
 | DECK-19 | Images in panels                          | done        | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
 | DECK-20 | Built-in icons                            | done        | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
-| DECK-21 | Live upgrade                              | ready       | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
+| DECK-21 | Live upgrade                              | in-progress | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
 | DECK-22 | Terminal compatibility                    | ready       | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
 | DECK-23 | Daemon stats and stress tests             | done        | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
 | DECK-24 | Scrollback search and copy mode           | ready       | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
