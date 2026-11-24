@@ -757,7 +757,11 @@ impl Harness {
             .join(test);
         fs::create_dir_all(&dir).expect("capture directory");
         let path = dir.join(format!("{name}.txt"));
-        fs::write(&path, self.screen_text() + "\n").expect("capture file");
+        // Written aside then renamed: another run of the same test (a second suite in this
+        // checkout) may be reading it.
+        let tmp = dir.join(format!("{name}.txt.{}.tmp", std::process::id()));
+        fs::write(&tmp, self.screen_text() + "\n").expect("capture file");
+        fs::rename(&tmp, &path).expect("capture file");
         path
     }
 }

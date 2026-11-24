@@ -44,8 +44,13 @@ fn config_path(h: &Harness) -> std::path::PathBuf {
     clippy::unwrap_used,
     reason = "a config write failure fails the integration test"
 )]
+/// Writes the config the way editors save: a temp file renamed over it, so the daemon's poll
+/// never sees it half-written.
 fn write(h: &Harness, extra: &str) {
-    fs::write(config_path(h), contents(extra)).unwrap();
+    let path = config_path(h);
+    let tmp = path.with_extension("toml.tmp");
+    fs::write(&tmp, contents(extra)).unwrap();
+    fs::rename(&tmp, path).unwrap();
 }
 
 fn contents(extra: &str) -> String {

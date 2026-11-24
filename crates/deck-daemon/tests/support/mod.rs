@@ -303,6 +303,12 @@ impl Client {
 
     /// Connects, attaches and waits for the first frame of the terminal.
     pub async fn attach(socket: &Path, a: Attach) -> Self {
+        Self::attach_within(socket, a, TIMEOUT).await
+    }
+
+    /// [`Client::attach`], waiting up to `limit` for the first frame: an attach that gets
+    /// big images first takes longer.
+    pub async fn attach_within(socket: &Path, a: Attach, limit: Duration) -> Self {
         let mut c = Self::connect(socket).await;
         c.send(&hello(
             Role::Attach {
@@ -319,7 +325,8 @@ impl Client {
             a.colors,
         ))
         .await;
-        c.wait(|c| c.view.is_some() && !c.screens.is_empty()).await;
+        c.wait_within(limit, |c| c.view.is_some() && !c.screens.is_empty())
+            .await;
         c
     }
 
@@ -476,8 +483,13 @@ impl Client {
     }
 
     /// Reads until `done` holds for the client's state; panics after [`TIMEOUT`].
-    pub async fn wait(&mut self, mut done: impl FnMut(&Client) -> bool) {
-        let deadline = Instant::now() + TIMEOUT;
+    pub async fn wait(&mut self, done: impl FnMut(&Client) -> bool) {
+        self.wait_within(TIMEOUT, done).await;
+    }
+
+    /// [`Client::wait`] with its own limit.
+    pub async fn wait_within(&mut self, limit: Duration, mut done: impl FnMut(&Client) -> bool) {
+        let deadline = Instant::now() + limit;
         while !done(self) {
             let left = deadline
                 .checked_duration_since(Instant::now())

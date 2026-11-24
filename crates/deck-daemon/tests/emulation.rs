@@ -33,7 +33,7 @@ async fn wide_and_combining_characters_come_out_as_runs_at_the_right_columns() {
     daemon.stop().await.unwrap();
 }
 
-const READ_COLOR: &str = "stty raw -echo; printf '\\033]11;?\\007'; \
+const READ_COLOR: &str = "set +m; stty raw -echo; printf '\\033]11;?\\007'; \
     x=$(dd bs=1 count=24 2>/dev/null | tr -d '\\033\\007'); stty sane; echo \"GOT:$x\"";
 
 #[tokio::test(flavor = "multi_thread")]
@@ -77,20 +77,23 @@ async fn a_clipboard_copy_reaches_only_the_most_recently_active_client() {
         .type_line("printf '\\033]52;c;aGk=\\007'; echo COPIED")
         .await;
     newer.wait_row("COPIED").await;
-    let copies: Vec<_> = newer
-        .log
-        .iter()
-        .filter_map(|m| match m {
-            ServerMsg::Clipboard { selection, text } => Some((selection.as_str(), text.as_str())),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(copies, [("c", "hi")]);
+    let copies = |c: &Client| -> Vec<(String, String)> {
+        c.log
+            .iter()
+            .filter_map(|m| match m {
+                ServerMsg::Clipboard { selection, text } => Some((selection.clone(), text.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    // The frame that shows `COPIED` can come before the copy.
+    newer.wait(|c| !copies(c).is_empty()).await;
+    assert_eq!(copies(&newer), [("c".to_string(), "hi".to_string())]);
 
     // A read request gets no answer: nothing arrives on the program's input.
     newer
         .type_line(
-            "printf '\\033]52;c;?\\007'; stty -icanon min 0 time 5; \
+            "set +m; printf '\\033]52;c;?\\007'; stty -icanon min 0 time 5; \
              n=$(dd bs=1 count=1 2>/dev/null | wc -c); stty sane; echo N=$((n))",
         )
         .await;
@@ -143,7 +146,7 @@ async fn synchronized_output_holds_the_frame_until_its_timeout_on_the_daemons_cl
 }
 
 /// Asks XTVERSION and reads the answer (19 bytes for `ghostty 1.2.0`), waiting at most 1 s.
-const READ_VERSION: &str = "stty raw -echo min 0 time 10; printf '\\033[>q'; \
+const READ_VERSION: &str = "set +m; stty raw -echo min 0 time 10; printf '\\033[>q'; \
     x=$(dd bs=1 count=19 2>/dev/null | tr -d '\\033'); stty sane; echo \"N=${#x}:$x\"";
 
 #[tokio::test(flavor = "multi_thread")]

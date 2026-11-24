@@ -44,12 +44,12 @@ fn make_executable(path: &Path, mode: u32) {
 fn fake(dir: &Path, name: &str) -> PathBuf {
     let path = dir.join(name);
     let rec = dir.join(format!("{name}.rec"));
-    // Shell built-ins only: the fake's `PATH` is the test's. One write, so a reader never
-    // sees half of it.
+    // Shell built-ins and absolute paths only: the fake's `PATH` is the test's. Written
+    // aside then renamed, so a reader never sees half of it.
     fs::write(
         &path,
         format!(
-            "#!/bin/sh\nout=\"$(pwd -P)\n$DECK_PANEL_ID\"\nfor a; do out=\"$out\n$a\"; done\necho \"$out\" > '{rec}'\nread line\n",
+            "#!/bin/sh\nout=\"$(pwd -P)\n$DECK_PANEL_ID\"\nfor a; do out=\"$out\n$a\"; done\necho \"$out\" > '{rec}.tmp'\n/bin/mv '{rec}.tmp' '{rec}'\nread line\n",
             rec = rec.display()
         ),
     )

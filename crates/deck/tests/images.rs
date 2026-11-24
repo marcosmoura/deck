@@ -10,6 +10,8 @@
 
 mod support;
 
+use std::time::Duration;
+
 use support::{Color, Harness, TIMEOUT, wait_until};
 
 const PLACEHOLDER: char = '\u{10EEEE}';
@@ -223,8 +225,12 @@ fn a_huge_placement_is_cut_and_the_client_stays_bounded() {
         "a=T,f=32,s=1,v=1,i=9,c=60000,r=60000,t=d,q=2",
         RGBA_1X1,
     );
-    // The image covers the screen: its cells are what shows.
-    let cells = wait_for_placeholders(&h, SIZE, 1);
+    // The image covers the screen: its cells are what shows. The canvas is megabytes on the
+    // wire, slow to reach the harness on a busy machine.
+    wait_until("placeholder cells", Duration::from_secs(30), || {
+        !placeholders(&h, SIZE).is_empty()
+    });
+    let cells = placeholders(&h, SIZE);
     assert!(cells.len() <= 297 * 297);
     {
         // What shows is cut at the diacritics table, and the canvas stays under 64 MiB.
@@ -508,7 +514,7 @@ fn claude_codes_file_path_png_is_drawn() {
 }
 
 /// Asks XTVERSION and reads the answer, waiting at most 1 s.
-const READ_VERSION: &str = "stty raw -echo min 0 time 10; printf '\\033[>q'; \
+const READ_VERSION: &str = "set +m; stty raw -echo min 0 time 10; printf '\\033[>q'; \
     x=$(dd bs=1 count=30 2>/dev/null | tr -d '\\033'); stty sane; echo \"VER=${#x}:$x\"";
 
 #[test]

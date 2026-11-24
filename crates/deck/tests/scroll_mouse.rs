@@ -192,7 +192,7 @@ fn start_reader(h: &mut Harness, setup: &str, count: usize) {
     h.send_keys(&format!(
         "set +m; {setup}; stty raw -echo; printf 'REA%s\\r\\n' DY; \
          x=$(dd bs=1 count={count} 2>/dev/null | od -An -tx1 -v | tr -d ' \\n'); \
-         stty sane; printf 'GOT:%s\\r\\n' \"$x\"; sleep 30\r"
+         stty sane; printf 'GOT:%s\\r\\n' \"$x\"; read _\r"
     ));
     h.wait_for_text("READY", TIMEOUT);
 }
@@ -205,8 +205,9 @@ fn the_wheel_on_the_alternate_screen_sends_cursor_keys_until_1007_is_off() {
     wheel(&mut h, true);
     h.wait_for_text("GOT:1b4f411b4f411b4f41", TIMEOUT);
     h.capture("alt-scroll");
-    // Ctrl+C ends the sleep; a fresh program with `?1007` turned off.
-    h.send_bytes(&[3]);
+    // Enter ends the reader's `read` (a built-in: a Ctrl+C could reach a forked `sleep`
+    // before it is ready for it); a fresh program with `?1007` turned off.
+    h.send_keys("\r");
     // Back on the main screen before the next reader, or its `READY` could be the first
     // reader's, and the wheel would still go to that program as cursor keys.
     h.send_keys("printf '\\033[?1049l'; echo BA''CK\r");

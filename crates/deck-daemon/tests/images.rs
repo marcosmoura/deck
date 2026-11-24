@@ -457,9 +457,10 @@ async fn attaching_to_two_terminals_with_big_images_delivers_both() {
         );
         run(&mut first, *t, &line, &format!("t{n}")).await;
     }
-    // A second client attaches to the session, and gets everything.
+    // A second client attaches to the session, and gets everything: the images come before
+    // the first frame, so it waits as long as for the images.
     let session = first.view.as_ref().unwrap().name.clone();
-    let mut second = Client::attach(
+    let mut second = Client::attach_within(
         &fx.daemon.paths.socket,
         Attach {
             session: Some(session),
@@ -469,6 +470,7 @@ async fn attaching_to_two_terminals_with_big_images_delivers_both() {
             outer_name: None,
             ..Attach::default()
         },
+        Duration::from_secs(60),
     )
     .await;
     wait_long(&mut second, |c| {

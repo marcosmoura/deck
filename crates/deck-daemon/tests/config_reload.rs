@@ -73,11 +73,10 @@ async fn a_written_file_reaches_every_attached_client_with_a_notice() {
     let daemon = watching("").await;
     let mut a = Client::attach(&daemon.paths.socket, Attach::default()).await;
     let mut b = Client::attach(&daemon.paths.socket, Attach::default()).await;
-    fs::write(
-        daemon.config_file(),
+    save(
+        &daemon.config_file(),
         text("sidebar_width = 33\n[theme]\naccent = \"red\"\n"),
-    )
-    .unwrap();
+    );
     for client in [&mut a, &mut b] {
         client.wait(|c| c.has_notice("config reloaded")).await;
         let [config] = client.configs()[..] else {
@@ -189,11 +188,10 @@ async fn notices_wait_for_the_next_client_the_last_twenty_are_kept_and_repeats_c
     // is attached.
     let daemon = watching("colour = 1\n").await;
     for i in 0..22 {
-        fs::write(
-            daemon.config_file(),
+        save(
+            &daemon.config_file(),
             text(&format!("colour{i} = 1\nscrollback_lines = {}\n", 100 + i)),
-        )
-        .unwrap();
+        );
         tokio::time::sleep(POLL * 4).await;
     }
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
@@ -228,7 +226,7 @@ async fn a_reload_moves_no_pty_to_a_client_that_was_not_active() {
     b.type_line("stty size").await;
     b.wait_row("24 91").await;
 
-    fs::write(daemon.config_file(), text("sidebar_width = 40\n")).unwrap();
+    save(&daemon.config_file(), text("sidebar_width = 40\n"));
     for client in [&mut a, &mut b] {
         client.wait(|c| !c.configs().is_empty()).await;
     }

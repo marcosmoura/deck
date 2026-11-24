@@ -379,10 +379,15 @@ fn without_a_daemon_or_a_session_the_commands_say_so() {
     // A daemon with no session.
     ok(&home, &["new", "tmp", "-d"]);
     ok(&home, &["kill-session", "tmp"]);
-    // The daemon leaves with its last session, so it may already be gone.
+    // The daemon leaves with its last session, so it may already be gone, or be going.
     let text = error_of(&home, &["new-terminal"]);
     assert!(
-        text == "no session" || text == "no deck daemon running",
+        [
+            "no session",
+            "no deck daemon running",
+            "deck daemon stopped"
+        ]
+        .contains(&text.as_str()),
         "{text}"
     );
     let _ = deck(&home, &["kill-server"]);
