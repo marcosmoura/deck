@@ -16,7 +16,9 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue: none.
+Open tasks the user has not placed in the queue:
+
+- DECK-30 Blinking cursor shapes
 
 ## Tasks
 
@@ -50,6 +52,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-27 | Terminals in the sidebar                  | done        | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
 | DECK-28 | Stress suite follow-ups                   | todo        | DECK-23                                                       | —                                                                            |
 | DECK-29 | Recreate the Homebrew tap                 | done        | DECK-25                                                       | —                                                                            |
+| DECK-30 | Blinking cursor shapes                    | todo        | DECK-22                                                       | —                                                                            |
 
 ### Withdrawn
 
@@ -60,6 +63,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-30
+
+**Blinking cursor shapes.** Found on 24 Nov 2026 by [DECK-22](specs/2026-11-23-terminal-compat/00-overview.md)'s compat suite: a program's blinking cursor shape (`DECSCUSR` 1, 3, 5) shows steady inside deck.
+
+- What: the daemon's emulator (`emu.rs`) already gets `blinking` from Ghostty and drops it. Carry it in a `blink` field on the protocol's `Cursor` (a protocol bump), and have `deck-tui`'s `draw.rs::cursor_style` choose the `Blinking*` variants.
+- Why: editors and shells that ask for a blinking cursor get a steady one.
+- Acceptance: the compat cases `cursor_style_1`, `cursor_style_3` and `cursor_style_5` pass, and their known-difference entries are removed; a unit test of the client's cursor-style mapping; `docs/features/compatibility.md` no longer lists the difference.
 
 ### DECK-29
 
