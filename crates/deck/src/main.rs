@@ -7,6 +7,7 @@ mod daemon_cmd;
 mod guide;
 mod hooks;
 mod platform;
+mod skills;
 mod stats_cmd;
 mod terminal_io;
 mod tree;
@@ -112,6 +113,12 @@ enum Command {
         #[command(subcommand)]
         command: hooks::HooksCommand,
     },
+    /// Installs, removes and checks the skill that teaches Claude Code, Codex and OpenCode to
+    /// drive deck.
+    Skills {
+        #[command(subcommand)]
+        command: skills::SkillsCommand,
+    },
     /// Reports an agent's hook event from inside deck; used by the hooks, never prints.
     #[command(name = "agent-event", hide = true)]
     AgentEvent(agent_event::AgentEventArgs),
@@ -179,6 +186,7 @@ fn main() -> ExitCode {
         Some(Command::Upgrade) => upgrade_cmd::run(),
         Some(Command::Config { command }) => config_cmd::run(command),
         Some(Command::Hooks { command }) => hooks::run(command),
+        Some(Command::Skills { command }) => skills::run(command),
         Some(Command::AgentEvent(args)) => Ok(agent_event::run(&args)),
         Some(Command::Probe { session }) => control::probe(session),
     };

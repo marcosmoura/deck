@@ -3,7 +3,7 @@
 use std::process::ExitCode;
 
 /// The whole skill file, front matter included.
-const SKILL: &str = include_str!("../../../skills/deck/SKILL.md");
+pub(crate) const SKILL: &str = include_str!("../../../skills/deck/SKILL.md");
 
 /// The skill without its front matter.
 fn body() -> &'static str {

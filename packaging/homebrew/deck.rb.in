@@ -34,9 +34,14 @@ class Deck < Formula
       To see what Claude Code, Codex and OpenCode are doing in the sidebar, run once:
         deck hooks install claude codex opencode
 
+      To teach them to drive deck (open terminals, read and wait for them), run once:
+        deck skills install claude codex opencode
+
       After upgrading deck, hand a running daemon over to the new version, keeping what
       runs in it:
         deck upgrade
+      and refresh the skill:
+        deck skills install claude codex opencode
     EOS
   end
 

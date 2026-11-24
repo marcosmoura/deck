@@ -13,9 +13,7 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue:
-
-- DECK-31 Install the agent skill with `deck skills`
+Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
@@ -50,7 +48,7 @@ Open tasks the user has not placed in the queue:
 | DECK-28 | Stress suite follow-ups                   | todo   | DECK-23                                                       | —                                                                            |
 | DECK-29 | Recreate the Homebrew tap                 | done   | DECK-25                                                       | —                                                                            |
 | DECK-30 | Blinking cursor shapes                    | done   | DECK-22                                                       | —                                                                            |
-| DECK-31 | Install the agent skill with deck skills  | todo   | —                                                             | —                                                                            |
+| DECK-31 | Install the agent skill with deck skills  | done   | —                                                             | —                                                                            |
 
 ### Withdrawn
 

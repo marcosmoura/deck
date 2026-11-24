@@ -126,4 +126,15 @@ The socket lives in the user's own runtime directory, so any process of that use
 
 ## Agent skill
 
-`skills/deck/SKILL.md` teaches an agent these commands; the [README](../../README.md#agents) says how to link it. `deck guide` prints the same text without its front matter, needs no daemon and exits 0.
+`skills/deck/SKILL.md` teaches an agent these commands. It is built into the binary: `deck guide` prints it without its front matter, needs no daemon and exits 0, and `deck skills` installs it.
+
+| Command                            | Does                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| `deck skills install <agent>...`   | Writes the skill; `--print` shows what would be written and writes nothing. Safe to repeat. |
+| `deck skills uninstall <agent>...` | Removes only deck's skill.                                                                  |
+| `deck skills status`               | One line per agent: `installed`, `not installed`, `stale` or `linked to <path>`.            |
+
+- **Where**: Claude Code `$CLAUDE_CONFIG_DIR/skills/deck` (default `~/.claude/skills/deck`); Codex `~/.agents/skills/deck`; OpenCode `$OPENCODE_CONFIG_DIR/skills/deck` (default `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode`). The directory holds one file, `SKILL.md`, written through a temp file renamed into place.
+- **Whose it is**: deck's skill is a directory holding only a `SKILL.md` whose front matter says `name: deck`, or a symlink to one (the `ln -s` install of earlier READMEs) or to nothing. `install` replaces such a symlink with a copy, keeping its target; `uninstall` removes the link alone. Any other `deck` there is the user's: both commands refuse it, with an error, and `status` says it is not deck's skill.
+- **`stale`**: deck's copy differs from the one built into the running `deck`, as after an upgrade; `install` refreshes it.
+- **OpenCode** also reads `~/.claude/skills` and `~/.agents/skills`: without its own copy, `status` says `not installed (OpenCode reads the copy in ~/.claude/skills)` when one is there.

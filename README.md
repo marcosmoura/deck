@@ -56,12 +56,13 @@ deck hooks install claude codex opencode
 
 This edits the agents' config files (keeping a backup); `deck hooks uninstall` undoes it. See [agents](docs/features/agents.md#hooks).
 
-To let an agent drive deck, link the [deck skill](skills/deck/SKILL.md), or have it read `deck guide`:
+To let an agent drive deck, install the [deck skill](skills/deck/SKILL.md), or have it read `deck guide`:
 
 ```sh
-ln -s <repo>/skills/deck ~/.claude/skills/deck    # Claude Code and OpenCode
-ln -s <repo>/skills/deck ~/.agents/skills/deck    # Codex
+deck skills install claude codex opencode
 ```
+
+Run it again after upgrading deck (`deck skills status` says when the copy is stale); `deck skills uninstall` removes it.
 
 The commands it uses are in the [control API](docs/features/control-api.md). Note that any program running as your user can reach deck's socket, so anything inside deck can type into your other terminals.
 
