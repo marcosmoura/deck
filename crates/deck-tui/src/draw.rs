@@ -380,7 +380,11 @@ fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
         draw_terminal(buf, inner, term);
         draw_images(buf, inner, app, view.id);
         draw_selection(buf, inner, app, view.id);
-        if let Some(c) = term.map(|t| t.cursor).filter(|c| focused && c.visible)
+        // Scroll mode draws its own cursor.
+        let scrolling = app.scroll_mode == Some(view.id);
+        if let Some(c) = term
+            .map(|t| t.cursor)
+            .filter(|c| focused && c.visible && !scrolling)
             && c.col < inner.width
             && c.row < inner.height
         {
@@ -623,32 +627,74 @@ fn draw_program_placeholders(
     }
 }
 
-/// The text selected in terminal `id`, in the selection colours over its lines in `area`.
+/// The text selected in terminal `id`, in the selection colours over its lines in `area`, and
+/// the copy cursor.
 fn draw_selection(buf: &mut Buffer, area: Rect, app: &App, id: TerminalId) {
     if area.is_empty() {
         return;
     }
-    let Some(sel) = app.text_sel.as_ref().filter(|s| s.terminal == id) else {
-        return;
-    };
     let Some(term) = app.mirror.terminal(id) else {
         return;
     };
-    let Some((from, to)) = sel.range(&term.lines, term.size.0) else {
-        return;
-    };
-    let style = selection(&app.theme, Style::new());
-    for row in from.1..=to.1.min(area.height - 1) {
-        let start = if row == from.1 { from.0 } else { 0 };
-        let end = if row == to.1 { to.0 } else { u16::MAX };
-        for col in start..=end.min(area.width - 1) {
-            // An image cell keeps showing the image, without the highlight.
-            if let Some(cell) = buf.cell_mut((area.x + col, area.y + row))
+    let selected = app
+        .text_sel
+        .as_ref()
+        .filter(|s| s.terminal == id)
+        .and_then(|s| s.range());
+    // The search's matches go under the selection, whose colours win.
+    for hit in crate::search::visible(app, id) {
+        let (fg, bg) = if hit.current {
+            (app.theme.search_current_fg, app.theme.search_current_bg)
+        } else {
+            (app.theme.search_match_fg, app.theme.search_match_bg)
+        };
+        let at = term.top_row + u64::from(hit.row);
+        for col in hit.from..=hit.to.min(area.width.saturating_sub(1)) {
+            let chosen = selected.is_some_and(|(from, to)| {
+                (at, col) >= (from.row, from.col) && (at, col) <= (to.row, to.col)
+            });
+            if hit.row >= area.height || chosen {
+                continue;
+            }
+            if let Some(cell) = buf.cell_mut((area.x + col, area.y + hit.row))
                 && !cell.symbol().starts_with(PLACEHOLDER)
             {
-                cell.set_style(style);
+                cell.modifier.remove(Modifier::REVERSED);
+                cell.set_fg(color(fg)).set_bg(color(bg));
+                if hit.current {
+                    cell.modifier.insert(Modifier::BOLD);
+                }
             }
         }
+    }
+    if let Some((from, to)) = selected {
+        let style = selection(&app.theme, Style::new());
+        let rows = area.height.min(term.size.1);
+        for row in 0..rows {
+            let at = term.top_row + u64::from(row);
+            if at < from.row || at > to.row {
+                continue;
+            }
+            let start = if at == from.row { from.col } else { 0 };
+            let end = if at == to.row { to.col } else { u16::MAX };
+            for col in start..=end.min(area.width - 1) {
+                // An image cell keeps showing the image, without the highlight.
+                if let Some(cell) = buf.cell_mut((area.x + col, area.y + row))
+                    && !cell.symbol().starts_with(PLACEHOLDER)
+                {
+                    cell.set_style(style);
+                }
+            }
+        }
+    }
+    // Not reversed: the accent must show inside a selection drawn reversed.
+    if let Some((row, col)) = crate::copy::cursor_cell(app, id)
+        && row < area.height
+        && col < area.width
+        && let Some(cell) = buf.cell_mut((area.x + col, area.y + row))
+    {
+        cell.modifier.remove(Modifier::REVERSED);
+        cell.set_bg(color(app.theme.accent));
     }
 }
 
@@ -880,6 +926,7 @@ mod tests {
             style: protocol::Style::default(),
         };
         let l = Line {
+            wrapped: false,
             runs: vec![run(0, "日本"), run(5, "🙂"), run(8, "e\u{301}x")],
         };
         put(&mut a, (20, 6), vec![(0, l)]);
@@ -896,6 +943,7 @@ mod tests {
     fn colours_and_attributes_are_kept() {
         let mut a = app((20, 6), Some((20, 6)), None);
         let l = Line {
+            wrapped: false,
             runs: vec![Run {
                 col: 0,
                 text: "red".into(),
@@ -944,6 +992,7 @@ mod tests {
     fn a_wide_character_cut_by_the_crop_is_blanked() {
         let mut a = app((20, 6), Some((30, 5)), None);
         let l = Line {
+            wrapped: false,
             runs: vec![Run {
                 col: 19,
                 text: "日".into(),

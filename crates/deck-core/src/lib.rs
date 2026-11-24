@@ -15,6 +15,7 @@ pub mod naming;
 pub mod osc7;
 pub mod paths;
 pub mod protocol;
+pub mod search;
 pub mod state;
 pub mod theme;
 pub mod wire;

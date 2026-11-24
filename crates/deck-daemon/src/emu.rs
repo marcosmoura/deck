@@ -23,6 +23,7 @@ use ghostty_vt::{Error, Event, Terminal, TerminalOptions};
 mod capture;
 pub(crate) mod files;
 mod graphics;
+mod rows;
 
 pub use graphics::ImagePixels;
 
@@ -99,6 +100,8 @@ struct Glyph {
     style: Style,
     /// The second half of a wide character, or the filler before one at the end of a line.
     spacer: bool,
+    /// The first half of a wide character.
+    wide: bool,
 }
 
 impl Glyph {
@@ -124,6 +127,8 @@ pub struct Emu {
     cell: Option<CellPx>,
     /// What `images_changed` compared last, and what the graphics code keeps between calls.
     graphics: graphics::State,
+    /// The ids of the rows (see `rows.rs`).
+    ids: rows::RowIds,
 }
 
 impl fmt::Debug for Emu {
@@ -176,8 +181,10 @@ impl Emu {
         let rgb = |(r, g, b): (u8, u8, u8)| RgbColor { r, g, b };
         term.set_default_fg_color(Some(rgb(colors.0)))?;
         term.set_default_bg_color(Some(rgb(colors.1)))?;
+        let ids = rows::RowIds::new(&term, cols)?;
         Ok(Self {
             term,
+            ids,
             render: RenderState::new()?,
             rows: RowIterator::new()?,
             cells: CellIterator::new()?,
@@ -239,6 +246,7 @@ impl Emu {
         if let Err(e) = self.term.resize(cols, rows, width, height) {
             tracing::warn!("cannot resize the emulator: {e}");
         }
+        self.sync_ids();
     }
 
     /// The cell size in pixels the emulator was given, `None` while unknown.
@@ -250,6 +258,7 @@ impl Emu {
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<EmuEvent> {
         self.term.vt_write(bytes);
         self.keep_view_within_history();
+        self.sync_ids();
         let raised: Vec<Event> = self.term.events().collect();
         let cell_known = self.cell.is_some();
         let named = self.xtversion.is_some();
@@ -318,6 +327,7 @@ impl Emu {
             ScrollTo::Pages(n) => now.saturating_add(i64::from(n).saturating_mul(rows)),
             ScrollTo::Top => history,
             ScrollTo::Bottom => 0,
+            ScrollTo::Row(id) => self.offset_to_show(id, now),
         };
         self.set_display_offset(usize::try_from(target.clamp(0, history)).unwrap_or(0));
     }
@@ -462,6 +472,11 @@ impl Emu {
             modes: self.modes(),
             display_offset: u32::try_from(offset).unwrap_or(0),
             history: u32::try_from(self.history()).unwrap_or(0),
+            top_row: self
+                .ids
+                .top()
+                .saturating_sub(u64::try_from(offset).unwrap_or(0)),
+            numbering: self.ids.numbering(),
             lines: screen.lines,
             full: screen.full,
             images,
@@ -560,7 +575,11 @@ fn read_rows(
             };
             glyphs.push(glyph(raw, style, text));
         }
-        lines.push(line(row, &glyphs));
+        let wrapped = iteration
+            .raw_row()
+            .and_then(|r| r.is_wrapped())
+            .unwrap_or(false);
+        lines.push(line(row, &glyphs, wrapped));
     }
     Ok(lines)
 }
@@ -570,12 +589,13 @@ fn glyph(raw: Cell, style: Option<GStyle>, text: String) -> Glyph {
         text,
         style: style_of(raw, style),
         spacer: matches!(raw.wide(), Ok(CellWide::SpacerTail | CellWide::SpacerHead)),
+        wide: matches!(raw.wide(), Ok(CellWide::Wide)),
     }
 }
 
 /// A row as runs: a run per style, placed at the column of its first cell, without the
 /// spacers of wide characters and the trailing blanks.
-fn line(row: u16, glyphs: &[Glyph]) -> (u16, FrameLine) {
+fn line(row: u16, glyphs: &[Glyph], wrapped: bool) -> (u16, FrameLine) {
     let end = glyphs
         .iter()
         .rposition(|g| !g.is_blank())
@@ -599,7 +619,7 @@ fn line(row: u16, glyphs: &[Glyph]) -> (u16, FrameLine) {
             &glyph.text
         });
     }
-    (row, FrameLine { runs })
+    (row, FrameLine { runs, wrapped })
 }
 
 fn modes_of(term: &Terminal) -> Modes {

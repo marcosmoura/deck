@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use deck_core::model::TerminalId;
-use deck_core::protocol::{ClientMsg, Modes, ServerMsg};
+use deck_core::protocol::{ClientMsg, Modes, Pos, ServerMsg};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event as ct;
@@ -85,8 +85,9 @@ fn a_drag_selects_and_the_release_copies() {
     assert!(!a.flash_error);
     // The selection stays drawn after the copy.
     let sel = a.text_sel.as_ref().unwrap();
+    let cell = |p: Pos| (p.col, p.row);
     assert_eq!(
-        (sel.anchor, sel.head, sel.dragging),
+        (cell(sel.anchor), cell(sel.head), sel.dragging),
         ((6, 0), (5, 1), false)
     );
 }
@@ -161,7 +162,8 @@ fn a_drag_after_a_double_click_extends_by_words() {
 fn a_drag_past_the_screen_is_clamped_to_it() {
     let mut a = app(0, &["abc"]);
     select(&mut a, (1, 0), (79, 23), false);
-    assert_eq!(a.text_sel.as_ref().unwrap().head, (77, 20));
+    let head = a.text_sel.as_ref().unwrap().head;
+    assert_eq!((head.col, head.row), (77, 20));
 }
 
 #[test]

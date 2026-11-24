@@ -15,6 +15,9 @@ mod context;
 #[cfg(test)]
 mod context_tests;
 mod convert;
+mod copy;
+#[cfg(test)]
+mod copy_tests;
 mod diacritics;
 #[cfg(test)]
 mod dialog_tests;
@@ -45,6 +48,9 @@ mod resize_tests;
 mod restore;
 #[cfg(test)]
 mod restore_tests;
+mod search;
+#[cfg(test)]
+mod search_tests;
 mod select;
 #[cfg(test)]
 mod select_tests;
@@ -279,7 +285,7 @@ async fn run_async(mut options: Options) -> Exit {
             },
             () = sleep_until(wake.unwrap_or_else(Instant::now).into()), if wake.is_some() => {
                 let now = Instant::now();
-                app.tick(now);
+                let outs = app.tick(now);
                 if app.take_dirty() {
                     last_draw = now;
                     if let Err(e) = app.draw_frame(&mut terminal) {
@@ -302,7 +308,7 @@ async fn run_async(mut options: Options) -> Exit {
                     }
                     drawn_once = true;
                 }
-                continue;
+                outs
             },
             found = recv_font(&mut font_rx), if font_rx.is_some() => {
                 font_rx = None;

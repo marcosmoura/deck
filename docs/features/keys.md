@@ -24,15 +24,17 @@ On macOS:
 
 No row of the window is reserved. A one-row floating bar shows over the last row of the panel area, centered, only while one of these holds, with the first that applies picking the badge:
 
-| State                                        | Badge         | Then                                                                         |
-| -------------------------------------------- | ------------- | ---------------------------------------------------------------------------- |
-| Dragging the sidebar separator               | `SIDEBAR <w>` | nothing                                                                      |
-| Dragging a space or panel row                | `MOVE`        | `esc cancel`                                                                 |
-| The prefix is armed                          | `PREFIX`      | `esc cancel  ? help` (`?` is the first key of `help`; left out when unbound) |
-| A resize repeat or a terminal border drag    | `RESIZE`      | the repeat: `H J K L resize  = reset`; a drag: nothing                       |
-| Scroll mode                                  | `SCROLL`      | `[offset/history]` when scrolled back, then `q exit  g top  G bottom`        |
-| Sidebar focus                                | `SIDEBAR`     | the sidebar hints                                                            |
-| A message (a flash or a daemon notice) alone | none          | the text, in its level colour                                                |
+| State                                        | Badge         | Then                                                                             |
+| -------------------------------------------- | ------------- | -------------------------------------------------------------------------------- |
+| Dragging the sidebar separator               | `SIDEBAR <w>` | nothing                                                                          |
+| Dragging a space or panel row                | `MOVE`        | `esc cancel`                                                                     |
+| The prefix is armed                          | `PREFIX`      | `esc cancel  ? help` (`?` is the first key of `help`; left out when unbound)     |
+| A resize repeat or a terminal border drag    | `RESIZE`      | the repeat: `H J K L resize  = reset`; a drag: nothing                           |
+| Scroll mode                                  | `SCROLL`      | `[offset/history]` when scrolled back, then `q exit  v select  / search  y copy` |
+| Scroll mode with a selection                 | `SELECT`      | the selection's size (`3 lines`), then `y copy  o other end  Esc clear`          |
+| The search prompt is open (`/` or `?`)       | none          | the query and its cursor, in place of everything else                            |
+| Sidebar focus                                | `SIDEBAR`     | the sidebar hints                                                                |
+| A message (a flash or a daemon notice) alone | none          | the text, in its level colour                                                    |
 
 A message replaces the hints and keeps the badge. The badge is the `warning` role reversed, each hint is its key in bold and its label `muted`, on `status_bg`; hints that do not fit are cut with `…`. The bar is not drawn under a dialog, in a window too small for deck, or, apart from a message, over the help overlay, the session picker, the New menu or the restore dialog. It covers the terminal's cells while it shows; the cursor is hidden under it, and a press on it reaches no program.
 
@@ -77,38 +79,71 @@ A key you set replaces the same key on any other action's default keys, with a w
 
 ## Help overlay
 
-`Option+Space ?` lists every binding. When the window is too short to show all of them, `Up` / `k`, `Down` / `j`, `PageUp`, `PageDown`, `Home` and `End` scroll the list, and the bottom border says how many lines are hidden (`↓ 1 more · esc close`, and `↑ n more` once scrolled). `Esc`, `q` and `?` close it. These keys are fixed; they are not under `[keys]`.
+`Option+Space ?` lists every binding, and the keys of scroll mode in the Terminal group. When the window is too short to show all of them, `Up` / `k`, `Down` / `j`, `PageUp`, `PageDown`, `Home` and `End` scroll the list, and the bottom border says how many lines are hidden (`↓ 1 more · esc close`, and `↑ n more` once scrolled). `Esc`, `q` and `?` close it. These keys are fixed; they are not under `[keys]`.
 
 ## Restore dialog
 
 `Option+Space R` (or `R` in sidebar focus, or the `Resume` button) opens the [restore dialog](agents.md#the-restore-dialog). Its keys are fixed, and the prefix key is ordinary text there:
 
-| Keys                                  | What they do                                                                                                                    |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `Left` / `Right`, `Tab` / `Shift+Tab` | Move between the columns (the arrows skip empty columns; `Tab` visits every column, empty or failed ones too, and wraps around) |
-| `Up` / `Down`, `Ctrl+p` / `Ctrl+n`    | Move between the rows                                                                                                           |
-| `PageUp` / `PageDown`, `Home` / `End` | Move by a page, to the first or the last row                                                                                    |
-| Printable keys, `Backspace`, `Ctrl+u` | Edit the filter, which applies to all three columns; `Ctrl+u` clears it                                                         |
-| `Enter`                               | Resume the selected session in a new panel                                                                                      |
-| `Esc`                                 | Clear the filter; with an empty filter, close the dialog                                                                        |
+| Keys                                            | What they do                                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Left` / `Right`, `Tab` / `Shift+Tab`           | Move between the columns (the arrows skip empty columns; `Tab` visits every column, empty or failed ones too, and wraps around) |
+| `Up` / `Down`, `Ctrl+p` / `Ctrl+n`              | Move between the rows                                                                                                           |
+| `PageUp` / `PageDown`, `Home` / `End`           | Move by a page, to the first or the last row                                                                                    |
+| Printable keys, `Backspace`, `Ctrl+u`, `Ctrl+w` | Edit the filter, which applies to all three columns; `Ctrl+u` clears it, `Ctrl+w` deletes the word before the cursor            |
+| `Enter`                                         | Resume the selected session in a new panel                                                                                      |
+| `Esc`                                           | Clear the filter; with an empty filter, close the dialog                                                                        |
 
 ## Scroll mode
 
-`Option+Space [` scrolls back through the focused terminal's history. The floating bar shows a `SCROLL` badge with the hints `q exit  g top  G bottom`, and `[offset/history]` follows the badge: how many lines the terminal is scrolled back out of how many it holds.
+`Option+Space [` scrolls back through the focused terminal's history. The floating bar shows a `SCROLL` badge with the hints `q exit  v select  / search  y copy`, and `[offset/history]` follows the badge: how many lines the terminal is scrolled back out of how many it holds.
 
-| Keys                                       | What they do                          |
-| ------------------------------------------ | ------------------------------------- |
-| `Up` / `k`, `Down` / `j`                   | One line up or down                   |
-| `PageUp` / `Ctrl+b`, `PageDown` / `Ctrl+f` | One page up or down                   |
-| `Ctrl+u`, `Ctrl+d`                         | Half a page up or down                |
-| `g` / `Home`, `G` / `End`                  | The top of the history, the bottom    |
-| `q`, `Esc`                                 | Leave scroll mode, back at the bottom |
+A **copy cursor** (a cell in the theme's `accent` colour) starts on the terminal's own cursor and moves with the vi keys below. When it moves past the top or bottom of the screen, the view scrolls by the rows it crossed.
 
-- No key reaches the terminal in scroll mode, and pastes are dropped. Other keys do nothing. Reaching the bottom does not leave the mode.
+| Keys                                       | What they do                                                                      |
+| ------------------------------------------ | --------------------------------------------------------------------------------- |
+| `h` `j` `k` `l`, the arrows                | Move the cursor; `k` and `j` scroll one line at the top and bottom edge           |
+| `w` `b` `e`                                | Next word, previous word, end of the word (a word is what a double-click selects) |
+| `0` `^` `$`                                | Start of the line, first non-blank, last non-blank                                |
+| `H` `M` `L`                                | Top, middle and bottom of the screen                                              |
+| `g` / `Home`, `G` / `End`                  | The top of the history, the bottom                                                |
+| `PageUp` / `Ctrl+b`, `PageDown` / `Ctrl+f` | One page up or down, the cursor staying on its screen row                         |
+| `Ctrl+u`, `Ctrl+d`                         | Half a page up or down, the cursor staying on its screen row                      |
+| `q`                                        | Leave scroll mode, back at the bottom                                             |
+| `Esc`                                      | Clear the selection; else clear the search highlights; else leave scroll mode     |
+
+### Copy
+
+| Keys         | What they do                                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `v`, `V`     | Start a selection of characters or of whole lines at the cursor; the same key again clears it, the other switches the kind |
+| `o`          | Move the cursor to the other end of the selection                                                                          |
+| `y`, `Enter` | Copy the selection to your clipboard (OSC 52) and clear it; `y` without a selection copies the cursor's line               |
+
+A selection can span any number of screens: it is kept by row, not by screen position, and the floating bar flashes `Copied 31 lines`. Each row's trailing blanks are dropped and rows are joined with newlines, except where a row continues on the next one because the program's line wrapped. The text is cut at 8 MiB (`Copied the first 8 MiB`).
+
+### Search
+
+| Keys    | What they do                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------- |
+| `/`     | Search down, toward newer rows: opens the query prompt in the floating bar (`/error█`)              |
+| `?`     | Search up, toward older rows (`?error█`)                                                            |
+| `Enter` | Search from the copy cursor; an empty query repeats the last one, in the direction of the key typed |
+| `Esc`   | Close the prompt without searching; scroll mode stays                                               |
+| `n`     | The next match in the direction of the last search                                                  |
+| `N`     | The next match in the other direction                                                               |
+
+The prompt edits like deck's other prompts (`Backspace`, `Delete`, `Left`, `Right`, `Home`, `End`, `Ctrl+u` for the whole text, `Ctrl+w` for the word before the cursor; a paste goes into it) and takes every key, the prefix included. The query is plain text, searched in the terminal's whole history and screen, a row at a time: a match does not span two rows, soft-wrapped ones included. The search is smart case: a query in lower case ignores case, one with a capital letter matches exactly. The first match after the copy cursor (before it, for `?` and `N` after `?`) is found; the copy cursor moves to its start and the view scrolls to it, unless it is on screen already. Past the last match the search wraps around, and the bar flashes `Search wrapped`; when there is no match it flashes `Not found: <query>`. `v` after a search selects from the match's start, and a selection started before a search extends to the match, so `v`, `e`, `y` after a search copies the matched word.
+
+While a search is active, every occurrence on screen is drawn with the `search_match_fg` and `search_match_bg` roles (default black on yellow) and the match the last search found with `search_current_fg` and `search_current_bg` (default black on bright yellow, bold); a selection's colours win over both ([config](config.md#search-colours)). The highlights stay until scroll mode ends, or `Esc` clears them when no selection is on.
+
+- No key reaches the terminal in scroll mode, and pastes are dropped, except into the search prompt. Other keys do nothing. Reaching the bottom does not leave the mode.
+- `w`, `b` and `e` stop at the edge of the screen: from the last word on screen they move the cursor to the next row's first cell and scroll, and the next press continues from there.
+- `k`, `j` and the arrows used to scroll at once; they now move the cursor and scroll at the edge. `Ctrl+u`, `Ctrl+d`, `Ctrl+b`, `Ctrl+f`, `PageUp` and `PageDown` still scroll at once.
 - The prefix works in scroll mode: its bindings run, and `detach` leaves scroll mode first. Pressing the prefix twice sends it to the terminal and leaves scroll mode.
 - Scroll mode ends when the focused terminal changes, and when another client types into the terminal or scrolls it back to the bottom.
 - New output keeps the view where it is and the history count in the indicator grows.
-- Typing into a scrolled-back terminal returns it to the bottom first. All clients of a session share a terminal's scroll position.
+- Typing into a scrolled-back terminal returns it to the bottom first. All clients of a session share a terminal's scroll position; when another client scrolls, your cursor keeps its row and is shown on the nearest edge row of the view while that row is off screen. The cursor and any selection are dropped when the terminal's rows are renumbered (a resize that reflows the text, the alternate screen, a reset).
 
 ## Mouse and focus
 
@@ -122,11 +157,11 @@ A click in an unfocused terminal focuses it and is not sent to the program ([lay
 
 ## Selecting and copying
 
-Drag with the left button in the focused terminal to select text; releasing copies it to your clipboard (through OSC 52, as a program's copy does), and the floating bar says how much was copied (`Copied 12 characters`). A double-click selects a word and copies it, a triple-click the whole line; dragging after either extends the selection by words or by lines. The selection stays inside its terminal, even when the pointer moves into another one or out of the panel, and covers only the rows on screen (scroll back with the wheel first to copy older lines). Each row's trailing blanks are dropped and rows are joined with newlines.
+Drag with the left button in the focused terminal to select text; releasing copies it to your clipboard (through OSC 52, as a program's copy does), and the floating bar says how much was copied (`Copied 12 characters`). A double-click selects a word and copies it, a triple-click the whole line; dragging after either extends the selection by words or by lines. The selection stays inside its terminal, even when the pointer moves into another one or out of the panel, and can be scrolled: it follows its rows when the view moves, and in scroll mode a drag past the top or bottom of the screen (or onto its first or last row, where the terminal touches the window's edge) scrolls the view one line every 50 ms and extends the selection. Each row's trailing blanks are dropped and rows are joined with newlines.
 
 - When the program asked for mouse reporting (nvim, OpenCode, Claude Code), the mouse is the program's; hold `Option` (Alt) while pressing to select in deck instead. Your terminal's own selection (usually `Shift`-drag) still works as before.
-- In scroll mode a press always selects.
-- The selection is drawn in the theme's selection colours and clears at the next press, or when the program redraws a selected row, the terminal is resized or it scrolls.
+- In scroll mode a press always selects, and `y`, `o` and `Esc` work on a mouse selection as on a keyboard one. After a mouse selection in scroll mode, cursor motions move its end. A selection with rows off screen is copied through the daemon, with the same text as from the screen.
+- The selection is drawn in the theme's selection colours and clears at the next press, or when the program redraws a selected row, the terminal is resized or its rows are renumbered.
 
 ## Configuration
 

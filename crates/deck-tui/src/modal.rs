@@ -127,6 +127,18 @@ impl Editor {
                 self.chars.clear();
                 self.cursor = 0;
             }
+            KeyCode::Char('w') if ctrl && !alt => {
+                // The word before the cursor, and the blanks between it and the cursor.
+                let mut from = self.cursor;
+                while from > 0 && self.chars.get(from - 1) == Some(&' ') {
+                    from -= 1;
+                }
+                while from > 0 && self.chars.get(from - 1).is_some_and(|c| *c != ' ') {
+                    from -= 1;
+                }
+                self.chars.drain(from..self.cursor);
+                self.cursor = from;
+            }
             KeyCode::Char(c) if !ctrl && !alt => self.insert_str(c.encode_utf8(&mut [0; 4])),
             KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Right => self.cursor = (self.cursor + 1).min(self.chars.len()),

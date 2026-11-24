@@ -8,7 +8,7 @@ use crate::config::Warning;
 use crate::protocol::Color;
 
 /// The colour roles, in the order of [`Theme::colors`].
-pub const ROLES: [&str; 16] = [
+pub const ROLES: [&str; 20] = [
     "accent",
     "muted",
     "ok",
@@ -25,6 +25,10 @@ pub const ROLES: [&str; 16] = [
     "selection_bg",
     "overlay_bg",
     "hover",
+    "search_match_fg",
+    "search_match_bg",
+    "search_current_fg",
+    "search_current_bg",
 ];
 
 const ANSI_NAMES: [&str; 16] = [
@@ -148,11 +152,15 @@ pub struct Theme {
     pub selection_bg: Color,
     pub overlay_bg: Color,
     pub hover: Color,
+    pub search_match_fg: Color,
+    pub search_match_bg: Color,
+    pub search_current_fg: Color,
+    pub search_current_bg: Color,
     pub border_style: BorderStyle,
 }
 
 /// The default of each role, in the order of [`ROLES`].
-const DEFAULTS: [ThemeColor; 16] = [
+const DEFAULTS: [ThemeColor; 20] = [
     ThemeColor::Indexed(4),
     ThemeColor::Indexed(8),
     ThemeColor::Indexed(2),
@@ -169,11 +177,15 @@ const DEFAULTS: [ThemeColor; 16] = [
     ThemeColor::Default,
     ThemeColor::Default,
     ThemeColor::Indexed(8),
+    ThemeColor::Indexed(0),
+    ThemeColor::Indexed(3),
+    ThemeColor::Indexed(0),
+    ThemeColor::Indexed(11),
 ];
 
 /// Follows role references until a colour; a loop is an error naming the keys in it.
-fn resolve(raw: &[ThemeColor; 16]) -> Result<[Color; 16], ThemeError> {
-    let mut out = [Color::Default; 16];
+fn resolve(raw: &[ThemeColor; 20]) -> Result<[Color; 20], ThemeError> {
+    let mut out = [Color::Default; 20];
     let roles = ROLES.iter().copied().zip(raw.iter().copied());
     for ((start, mut current), slot) in roles.clone().zip(&mut out) {
         let mut chain = vec![start];
@@ -206,7 +218,7 @@ fn resolve(raw: &[ThemeColor; 16]) -> Result<[Color; 16], ThemeError> {
 }
 
 impl Theme {
-    fn from_parts(c: [Color; 16], border_style: BorderStyle) -> Self {
+    fn from_parts(c: [Color; 20], border_style: BorderStyle) -> Self {
         let [
             accent,
             muted,
@@ -224,6 +236,10 @@ impl Theme {
             selection_bg,
             overlay_bg,
             hover,
+            search_match_fg,
+            search_match_bg,
+            search_current_fg,
+            search_current_bg,
         ] = c;
         Self {
             accent,
@@ -242,6 +258,10 @@ impl Theme {
             selection_bg,
             overlay_bg,
             hover,
+            search_match_fg,
+            search_match_bg,
+            search_current_fg,
+            search_current_bg,
             border_style,
         }
     }
@@ -345,6 +365,21 @@ mod tests {
             let t = parse(&format!("accent = \"{name}\"")).unwrap();
             assert_eq!(t.accent, Color::Indexed(u8::try_from(i).unwrap()), "{name}");
         }
+    }
+
+    #[test]
+    fn search_roles_default_to_black_on_yellow_and_take_a_role() {
+        let t = parse("").unwrap();
+        assert_eq!(
+            (t.search_match_fg, t.search_match_bg),
+            (Color::Indexed(0), Color::Indexed(3))
+        );
+        assert_eq!(
+            (t.search_current_fg, t.search_current_bg),
+            (Color::Indexed(0), Color::Indexed(11))
+        );
+        let t = parse("accent = 5\nsearch_match_bg = \"accent\"").unwrap();
+        assert_eq!(t.search_match_bg, Color::Indexed(5));
     }
 
     #[test]

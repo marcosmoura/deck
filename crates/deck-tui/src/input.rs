@@ -82,6 +82,26 @@ impl Action {
     }
 }
 
+/// The help lines of the keys typed in scroll mode, after the `scroll` binding's keys.
+const SCROLL_MODE_HELP: &[(&str, &str)] = &[
+    ("h j k l", "Scroll mode: move the copy cursor"),
+    ("w b e 0 ^ $", "Scroll mode: move by word and in the line"),
+    (
+        "H M L g G",
+        "Scroll mode: top, middle, bottom of the screen, of the history",
+    ),
+    ("C-u C-d C-b C-f", "Scroll mode: half and whole pages"),
+    (
+        "v V o y Enter",
+        "Scroll mode: select, select lines, other end, copy",
+    ),
+    (
+        "/ ? n N",
+        "Scroll mode: search down, up, next, the other way",
+    ),
+    ("q Esc", "Scroll mode: clear the selection, then leave"),
+];
+
 /// One line of the help overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelpRow {
@@ -241,6 +261,17 @@ impl Bindings {
                 keys,
                 text,
             });
+        }
+        // The keys of scroll mode are fixed; they follow the `scroll` binding, and none
+        // are listed while it is unbound.
+        if let Some(enter) = self.key_label(Action::Scroll) {
+            for (keys, text) in SCROLL_MODE_HELP {
+                rows.push(HelpRow {
+                    group: HelpGroup::Terminal,
+                    keys: format!("{enter} {keys}"),
+                    text: (*text).to_string(),
+                });
+            }
         }
         rows
     }
@@ -461,7 +492,10 @@ mod tests {
         assert!(rows.iter().any(|r| r.keys == format!("{p} 1-9")));
         assert!(rows.iter().all(|r| !r.text.is_empty()));
         assert!(!rows.iter().any(|r| r.keys.ends_with(" 2")));
-        assert_eq!(rows.len(), DEFAULT_BINDINGS.len() - 14);
+        assert_eq!(
+            rows.len(),
+            DEFAULT_BINDINGS.len() - 14 + SCROLL_MODE_HELP.len()
+        );
         // An unbound action stays listed as unbound.
         let config = Config::parse("[keys]\ndetach = []").unwrap().config;
         let rows = Bindings::from_config(&config).help_rows();

@@ -14,7 +14,7 @@ use deck_core::layout;
 use deck_core::model::TerminalId;
 use deck_core::mouse::{self, MouseButton, MouseEvent, MouseKind};
 use deck_core::protocol::{
-    ByeReason, CellPx, ClientMsg, CursorShape, Modes, NoticeLevel, ScrollTo, ServerMsg,
+    ByeReason, CellPx, ClientMsg, CursorShape, Modes, NoticeLevel, Pos, ScrollTo, ServerMsg,
 };
 use deck_core::theme::Theme;
 use ratatui::crossterm::event as ct;
@@ -22,6 +22,7 @@ use ratatui::crossterm::event as ct;
 use crate::Exit;
 use crate::agent;
 use crate::context::ContextMenu;
+use crate::copy::{CopyState, Edge};
 use crate::grid::Grid;
 use crate::input::{Action, Bindings, convert, event_label, keys_from_bytes};
 use crate::menu::NewMenu;
@@ -106,6 +107,12 @@ pub struct App {
     /// A scroll of ours is on its way that brings the terminal to the bottom, which must
     /// not end scroll mode.
     bottom_expected: bool,
+    /// The copy cursor of scroll mode.
+    pub(crate) copy: Option<CopyState>,
+    /// A selection drag that is past the screen's top or bottom and scrolls the view.
+    pub(crate) edge: Option<Edge>,
+    /// The search of scroll mode: its prompt, last query and highlights.
+    pub(crate) search: crate::search::SearchState,
     /// Typed ahead while the colours were queried, or before the daemon's config arrived;
     /// replayed by [`App::start`].
     typeahead: Vec<KeyEvent>,
@@ -225,6 +232,9 @@ impl App {
             notices: VecDeque::new(),
             scroll_mode: None,
             bottom_expected: false,
+            copy: None,
+            edge: None,
+            search: crate::search::SearchState::default(),
             typeahead: keys_from_bytes(typeahead),
             configured: true,
             queued: Vec::new(),
@@ -423,6 +433,7 @@ impl App {
         self.armed = false;
         self.scroll_mode = None;
         self.bottom_expected = false;
+        self.end_copy();
         self.swallow_release = false;
         self.resize_until = None;
         self.drag = None;
@@ -479,7 +490,8 @@ impl App {
     /// The next moment `tick` has something to do: a flash ends, the resize repeat does or
     /// the spinner moves.
     pub fn wake_deadline(&self) -> Option<Instant> {
-        [self.flash_deadline(), self.resize_until, self.spin_at]
+        let edge = self.edge.as_ref().map(|e| e.next);
+        [self.flash_deadline(), self.resize_until, self.spin_at, edge]
             .into_iter()
             .flatten()
             .min()
@@ -529,7 +541,7 @@ impl App {
     }
 
     /// Moves the spinner and drops an expired flash message.
-    pub fn tick(&mut self, now: Instant) {
+    pub fn tick(&mut self, now: Instant) -> Vec<Out> {
         if self.spin_at.is_some_and(|at| now >= at) {
             self.spin = self.spin.wrapping_add(1);
             self.spin_frame = self.frame_at(now);
@@ -550,6 +562,7 @@ impl App {
                 self.show_notice(level, text, now);
             }
         }
+        self.edge_tick(now)
     }
 
     /// The cursor shape the outer terminal should show, when a terminal's cursor is visible.
@@ -854,13 +867,22 @@ impl App {
             2 => Unit::Word,
             _ => Unit::Line,
         };
-        self.text_sel = Some(TextSel {
-            terminal,
-            anchor: cell,
-            head: cell,
+        let Some(term) = self.mirror.terminal(terminal) else {
+            return;
+        };
+        let at = Pos {
+            row: term.top_row + u64::from(cell.1),
+            col: cell.0,
+        };
+        let cols = select::grow(
             unit,
-            dragging: true,
-        });
+            term.lines.get(usize::from(cell.1)),
+            term.size.0,
+            cell.0,
+        );
+        let mut sel = TextSel::new(terminal, at, unit, cols);
+        sel.dragging = true;
+        self.text_sel = Some(sel);
         self.dirty = true;
     }
 
@@ -871,37 +893,70 @@ impl App {
         let terminal = sel.terminal;
         match event.kind {
             ct::MouseEventKind::Drag(ct::MouseButton::Left) => {
-                let head = self.clamped_cell(terminal, event.column, event.row);
-                if let (Some(head), Some(sel)) = (head, self.text_sel.as_mut())
-                    && sel.head != head
+                if self.scroll_mode == Some(terminal)
+                    && let Some(up) = self.edge_dir(terminal, event.row)
                 {
-                    sel.head = head;
-                    self.dirty = true;
+                    let col = self
+                        .clamped_cell(terminal, event.column, event.row)
+                        .map_or(0, |(col, _)| col);
+                    return Some(self.edge_drag(terminal, up, col, now));
+                }
+                self.edge = None;
+                let head = self.clamped_cell(terminal, event.column, event.row);
+                if let (Some((col, row)), Some(term)) = (head, self.mirror.terminal(terminal)) {
+                    let head = Pos {
+                        row: term.top_row + u64::from(row),
+                        col,
+                    };
+                    let unit = self.text_sel.as_ref().map(|s| s.unit)?;
+                    let cols =
+                        select::grow(unit, term.lines.get(usize::from(row)), term.size.0, col);
+                    if let Some(sel) = self.text_sel.as_mut()
+                        && sel.head != head
+                    {
+                        sel.set_head(head, cols);
+                        self.dirty = true;
+                    }
                 }
                 Some(Vec::new())
             }
             ct::MouseEventKind::Up(_) => {
+                self.edge = None;
                 // The release is ours even when nothing ends up selected.
                 let mut sel = self.text_sel.take()?;
                 sel.dragging = false;
                 self.dirty = true;
-                let text = self.mirror.terminal(terminal).and_then(|term| {
-                    let (from, to) = sel.range(&term.lines, term.size.0)?;
-                    Some(select::text(&term.lines, term.size.0, from, to))
-                });
-                let Some(text) = text else {
-                    return Some(Vec::new());
-                };
-                self.text_sel = Some(sel);
-                if text.is_empty() {
+                if sel.range().is_none() {
                     return Some(Vec::new());
                 }
-                let n = text.chars().count();
-                let unit = if n == 1 { "character" } else { "characters" };
-                self.set_flash(format!("Copied {n} {unit}"), now, false);
-                Some(vec![osc52("c", &text)])
+                if self.scroll_mode == Some(terminal)
+                    && let Some(copy) = self.copy.as_mut()
+                {
+                    copy.cursor = sel.head;
+                }
+                let outs = self.copy_mouse_selection(&sel, now);
+                self.text_sel = Some(sel);
+                Some(outs)
             }
             _ => None,
+        }
+    }
+
+    /// Whether the pointer's window row is on or above the first row of the screen of
+    /// `terminal` (`true`), or on or below its last row (`false`).
+    fn edge_dir(&self, terminal: TerminalId, row: u16) -> Option<bool> {
+        let grid = Grid::of(self)?;
+        let i = grid.ids.iter().position(|t| *t == terminal)?;
+        let inner = grid.inner(i);
+        // A screen row at the window's edge counts as the edge; one with a border row
+        // beyond it only past it.
+        let last = inner.y + inner.height;
+        if row < inner.y || (row == inner.y && inner.y == 0) {
+            Some(true)
+        } else if row >= last || (row + 1 == last && last >= self.size.1) {
+            Some(false)
+        } else {
+            None
         }
     }
 
@@ -1006,19 +1061,48 @@ impl App {
         })]
     }
 
-    /// A scroll request; remembers when it is meant to land on the live screen.
-    fn scroll(&mut self, terminal: TerminalId, to: ScrollTo) -> Out {
-        let (offset, rows) = self.mirror.terminal(terminal).map_or((0, 1), |t| {
-            (i64::from(t.display_offset), i64::from(t.size.1))
-        });
-        let reaches_bottom = match to {
-            ScrollTo::Bottom => true,
-            ScrollTo::Lines(n) => n < 0 && offset <= -i64::from(n),
-            ScrollTo::Pages(n) => n < 0 && offset <= -i64::from(n) * rows,
-            ScrollTo::Top => false,
+    /// A scroll request; remembers when it is meant to land on the live screen, and where
+    /// the copy cursor's view will be.
+    pub(crate) fn scroll(&mut self, terminal: TerminalId, to: ScrollTo) -> Out {
+        let Some(t) = self.mirror.terminal(terminal) else {
+            return Out::Send(ClientMsg::Scroll { terminal, to });
         };
-        if self.scroll_mode.is_some() && reaches_bottom {
+        let mirror_top = i64::try_from(t.top_row).unwrap_or(i64::MAX);
+        let live_top = mirror_top + i64::from(t.display_offset);
+        let rows = i64::from(t.size.1);
+        let oldest = (live_top - i64::from(t.history)).max(0);
+        let expected = self
+            .copy
+            .as_ref()
+            .filter(|c| c.terminal == terminal)
+            .and_then(|c| c.expected_top)
+            .map_or(mirror_top, |top| i64::try_from(top).unwrap_or(i64::MAX));
+        let new_top = match to {
+            ScrollTo::Bottom => live_top,
+            ScrollTo::Top => oldest,
+            ScrollTo::Lines(n) => expected - i64::from(n),
+            ScrollTo::Pages(n) => expected - i64::from(n) * rows,
+            ScrollTo::Row(row) => {
+                let row = i64::try_from(row).unwrap_or(i64::MAX);
+                if (expected..expected + rows).contains(&row) {
+                    expected
+                } else {
+                    row - rows / 2
+                }
+            }
+        }
+        .clamp(oldest, live_top.max(oldest));
+        let toward_top = match to {
+            ScrollTo::Top => true,
+            ScrollTo::Lines(n) => n > 0,
+            ScrollTo::Pages(n) => n > 0,
+            ScrollTo::Bottom | ScrollTo::Row(_) => false,
+        };
+        if self.scroll_mode.is_some() && !toward_top && new_top >= live_top {
             self.bottom_expected = true;
+        }
+        if let Some(copy) = self.copy.as_mut().filter(|c| c.terminal == terminal) {
+            copy.expected_top = Some(u64::try_from(new_top).unwrap_or(0));
         }
         Out::Send(ClientMsg::Scroll { terminal, to })
     }
@@ -1026,6 +1110,7 @@ impl App {
     /// Leaves scroll mode and returns the terminal to the bottom.
     pub(crate) fn leave_scroll(&mut self) -> Vec<Out> {
         self.bottom_expected = false;
+        self.end_copy();
         match self.scroll_mode.take() {
             Some(terminal) => vec![Out::Send(ClientMsg::Scroll {
                 terminal,
@@ -1033,39 +1118,6 @@ impl App {
             })],
             None => Vec::new(),
         }
-    }
-
-    /// A key typed in scroll mode: it scrolls, or is dropped; it never reaches the terminal.
-    fn scroll_key(&mut self, terminal: TerminalId, key: KeyEvent) -> Vec<Out> {
-        let (ctrl, alt) = (key.mods.ctrl, key.mods.alt);
-        if alt {
-            return Vec::new();
-        }
-        let rows = self
-            .mirror
-            .terminal(terminal)
-            .map_or(1, |t| i32::from(t.size.1));
-        let half = (rows / 2).max(1);
-        let to = match key.code {
-            KeyCode::Up => ScrollTo::Lines(1),
-            KeyCode::Char('k') if !ctrl => ScrollTo::Lines(1),
-            KeyCode::Down => ScrollTo::Lines(-1),
-            KeyCode::Char('j') if !ctrl => ScrollTo::Lines(-1),
-            KeyCode::PageUp => ScrollTo::Pages(1),
-            KeyCode::Char('b') if ctrl => ScrollTo::Pages(1),
-            KeyCode::PageDown => ScrollTo::Pages(-1),
-            KeyCode::Char('f') if ctrl => ScrollTo::Pages(-1),
-            KeyCode::Char('u') if ctrl => ScrollTo::Lines(half),
-            KeyCode::Char('d') if ctrl => ScrollTo::Lines(-half),
-            KeyCode::Home => ScrollTo::Top,
-            KeyCode::Char('g') if !ctrl => ScrollTo::Top,
-            KeyCode::End => ScrollTo::Bottom,
-            KeyCode::Char('G') if !ctrl => ScrollTo::Bottom,
-            KeyCode::Esc => return self.leave_scroll(),
-            KeyCode::Char('q') if !ctrl => return self.leave_scroll(),
-            _ => return Vec::new(),
-        };
-        vec![self.scroll(terminal, to)]
     }
 
     /// Ends scroll mode when its terminal is no longer the focused one.
@@ -1076,6 +1128,7 @@ impl App {
         {
             self.scroll_mode = None;
             self.bottom_expected = false;
+            self.end_copy();
         }
     }
 
@@ -1107,6 +1160,13 @@ impl App {
         if self.restore.is_some() {
             return self.restore_key(key, now);
         }
+        if !self.armed
+            && let Some(terminal) = self.scroll_mode
+            && self.search.prompt.is_some()
+        {
+            // The query prompt takes every key, the prefix included.
+            return self.search_prompt_key(terminal, key);
+        }
         if !self.armed {
             if let Some(until) = self.resize_until.take() {
                 // The resize keys act without the prefix for a while; any other key ends it.
@@ -1135,6 +1195,7 @@ impl App {
             // The key goes to the terminal, which returns to the bottom.
             self.scroll_mode = None;
             self.bottom_expected = false;
+            self.end_copy();
             return self.send_or_queue(Queued::Key(key));
         }
         if key.code == KeyCode::Esc && !key.mods.ctrl && !key.mods.alt {
@@ -1181,7 +1242,7 @@ impl App {
             }
             Action::Scroll => {
                 if self.scroll_mode.is_none() {
-                    self.scroll_mode = self.ready();
+                    self.enter_scroll();
                 }
                 Vec::new()
             }
@@ -1325,6 +1386,10 @@ impl App {
         if self.menu.is_some() || self.context.is_some() {
             return Vec::new();
         }
+        if self.scroll_mode.is_some() && self.search.prompt.is_some() {
+            self.search_paste(&text);
+            return Vec::new();
+        }
         // Scroll mode and the sidebar keep keys and pastes from the terminal.
         if self.scroll_mode.is_some() || self.sidebar_focus {
             return Vec::new();
@@ -1340,7 +1405,7 @@ impl App {
     }
 
     /// The focused terminal, once its screen has arrived.
-    fn ready(&self) -> Option<TerminalId> {
+    pub(crate) fn ready(&self) -> Option<TerminalId> {
         let id = self.mirror.focused_id()?;
         self.mirror.terminal(id).map(|_| id)
     }
@@ -1399,8 +1464,9 @@ impl App {
             return;
         }
         if frame.display_offset > 0 {
-            // Still scrolled back: whatever was in flight did not bring it to the bottom.
-            self.bottom_expected = false;
+            // Still scrolled back: whatever was in flight did not bring it to the bottom,
+            // unless more of our scrolls are on their way to it.
+            self.bottom_expected &= self.scrolls_in_flight(frame);
             return;
         }
         let was_back = self
@@ -1411,6 +1477,7 @@ impl App {
             self.bottom_expected = false;
         } else if was_back {
             self.scroll_mode = None;
+            self.end_copy();
         }
     }
 
@@ -1548,16 +1615,18 @@ impl App {
             ServerMsg::Frame(frame) => {
                 if let Some(sel) = &self.text_sel
                     && let Some(term) = self.mirror.terminal(sel.terminal)
-                    && sel.stale(&frame, term.size, term.display_offset, &term.lines)
+                    && sel.stale(&frame, term)
                 {
                     // The rest of a drag cut short is nobody's, not the program's.
                     if sel.dragging {
                         self.swallow_release = true;
                     }
                     self.text_sel = None;
+                    self.edge = None;
                     self.dirty = true;
                 }
                 self.follow_scroll(&frame);
+                self.copy_follows(&frame);
                 self.mirror.apply_frame(frame);
                 self.flush()
             }
@@ -1573,7 +1642,7 @@ impl App {
 }
 
 /// The OSC 52 sequence that puts `text` on the outer terminal's clipboard `selection`.
-fn osc52(selection: &str, text: &str) -> Out {
+pub(crate) fn osc52(selection: &str, text: &str) -> Out {
     let b64 = deck_core::base64::encode(text.as_bytes());
     Out::Clipboard(format!("\x1b]52;{selection};{b64}\x07").into_bytes())
 }
@@ -1865,11 +1934,15 @@ mod tests {
     fn scroll_mode_keys_scroll_and_none_reach_the_terminal() {
         let mut a = in_scroll_mode();
         let now = Instant::now();
+        // The cursor sits on the top row of a screen whose history is 100 rows, with the ids
+        // starting at 1000: the vi keys that scroll at once.
+        let mut f = frame(true, (78, 21), vec![]);
+        f.top_row = 1000;
+        f.history = 100;
+        f.display_offset = 50;
+        f.cursor.row = 0;
+        a.on_server(ServerMsg::Frame(f));
         let cases = [
-            (pressed(ct::KeyCode::Up), ScrollTo::Lines(1)),
-            (ch('k'), ScrollTo::Lines(1)),
-            (pressed(ct::KeyCode::Down), ScrollTo::Lines(-1)),
-            (ch('j'), ScrollTo::Lines(-1)),
             (pressed(ct::KeyCode::PageUp), ScrollTo::Pages(1)),
             (ctrl('b'), ScrollTo::Pages(1)),
             (pressed(ct::KeyCode::PageDown), ScrollTo::Pages(-1)),
@@ -1877,13 +1950,13 @@ mod tests {
             // The screen has 21 rows.
             (ctrl('u'), ScrollTo::Lines(10)),
             (ctrl('d'), ScrollTo::Lines(-10)),
-            (ch('g'), ScrollTo::Top),
-            (pressed(ct::KeyCode::Home), ScrollTo::Top),
+            (ch('g'), ScrollTo::Row(1050 - 100)),
+            (pressed(ct::KeyCode::Home), ScrollTo::Row(1050 - 100)),
             (
                 key(ct::KeyCode::Char('G'), ct::KeyModifiers::SHIFT),
-                ScrollTo::Bottom,
+                ScrollTo::Row(1050 + 20),
             ),
-            (pressed(ct::KeyCode::End), ScrollTo::Bottom),
+            (pressed(ct::KeyCode::End), ScrollTo::Row(1050 + 20)),
         ];
         for (event, to) in cases {
             assert_eq!(
@@ -1921,13 +1994,13 @@ mod tests {
         show(&mut a, 0, 5, 100);
         assert_eq!(
             a.on_event(key(ct::KeyCode::Char('G'), ct::KeyModifiers::SHIFT), now),
-            [scroll_msg(ScrollTo::Bottom)]
+            [scroll_msg(ScrollTo::Row(25))]
         );
         show(&mut a, 0, 0, 100);
         assert_eq!(a.scroll_mode, Some(TerminalId(4)));
-        // Scrolling down one line from line 1 lands on the bottom too.
+        // Scrolling down half a screen from line 1 lands on the bottom too.
         show(&mut a, 0, 1, 100);
-        a.on_event(ch('j'), now);
+        a.on_event(ctrl('d'), now);
         show(&mut a, 0, 0, 100);
         assert_eq!(a.scroll_mode, Some(TerminalId(4)));
         // More output while scrolled keeps the mode.

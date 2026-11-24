@@ -113,7 +113,7 @@ The dragged width belongs to this client: it is kept across `toggle_sidebar` and
 
 ## Prompts
 
-Rename and new-space questions are a centered dialog, a rounded box over everything else with the label as its title (`Rename panel`, `Directory`, `Space name`), a one-line editor and `⏎ save  esc cancel` at the bottom (at least 40 columns, 5 rows; the editor never widens it): `Left`, `Right`, `Home`, `End`, `Backspace`, `Delete`, `Ctrl+u` to clear, `Enter` to save, `Esc` to cancel. Pasted text is inserted with its newlines dropped. The prefix key is ordinary there and inserts nothing.
+Rename and new-space questions are a centered dialog, a rounded box over everything else with the label as its title (`Rename panel`, `Directory`, `Space name`), a one-line editor and `⏎ save  esc cancel` at the bottom (at least 40 columns, 5 rows; the editor never widens it): `Left`, `Right`, `Home`, `End`, `Backspace`, `Delete`, `Ctrl+u` to clear, `Ctrl+w` to delete the word before the cursor, `Enter` to save, `Esc` to cancel. Pasted text is inserted with its newlines dropped. The prefix key is ordinary there and inserts nothing.
 
 When the daemon refuses a name or a directory (empty, too long, a duplicate space, not a directory), the reason shows in red for 4 seconds on the dialog's bottom row (a long one widens the dialog up to the window width minus 2, then is cut with `…`) and the prompt reopens with what you typed (for a directory that does not exist, the `Directory` prompt). When the panel or space a prompt or confirmation is about is closed meanwhile, by another client or because its process exited, the dialog closes with `panel "<name>" was closed` (or `space ...`).
 

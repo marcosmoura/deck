@@ -26,6 +26,15 @@ pub enum Req {
     Create(Option<Retry>),
     Rename(Retry),
     Kill,
+    /// The text of a selection to copy.
+    Copy(crate::copy::Copied),
+    /// A search from the copy cursor, for the query it asked.
+    Search {
+        terminal: deck_core::model::TerminalId,
+        query: String,
+        /// The search generation it was asked in.
+        epoch: u32,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -199,6 +208,32 @@ impl App {
         }
         let req = self.requests.pop_front();
         match (req, response) {
+            (Some(Req::Copy(how)), Response::Text { text, truncated }) => {
+                self.copied(how, &text, truncated, now)
+            }
+            (
+                Some(Req::Search {
+                    terminal, epoch, ..
+                }),
+                Response::Found {
+                    start,
+                    end,
+                    wrapped,
+                },
+            ) => self.search_found(terminal, epoch, (start, end), wrapped, now),
+            (
+                Some(Req::Search {
+                    terminal,
+                    query,
+                    epoch,
+                }),
+                Response::NotFound,
+            ) => self.search_missing(terminal, epoch, &query, now),
+            (Some(Req::Search { epoch, .. }), Response::Error(text)) => {
+                self.search_failed(epoch);
+                self.set_flash(text, now, true);
+                Vec::new()
+            }
             (_, Response::Sessions(list)) => {
                 let Some(picker) = &mut self.picker else {
                     return Vec::new();

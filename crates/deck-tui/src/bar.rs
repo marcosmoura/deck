@@ -15,7 +15,18 @@ use crate::modal::Modal;
 use crate::sidebar::SIDEBAR_HINTS;
 
 /// The hints while scroll mode is on, as key and label pairs.
-pub const SCROLL_HINTS: &[(&str, &str)] = &[("q", "exit"), ("g", "top"), ("G", "bottom")];
+pub const SCROLL_HINTS: &[(&str, &str)] = &[
+    ("q", "exit"),
+    ("v", "select"),
+    ("/", "search"),
+    ("y", "copy"),
+];
+
+/// The hints while a selection is on in scroll mode.
+pub const SELECT_HINTS: &[(&str, &str)] = &[("y", "copy"), ("o", "other end"), ("Esc", "clear")];
+
+/// The least columns of the search prompt, so it does not jump while typing.
+const SEARCH_WIDTH: u16 = 30;
 
 /// The bar as it is on screen: its cells and the text in each.
 pub(crate) struct Bar {
@@ -82,7 +93,16 @@ impl App {
                 ..Mode::default()
             });
         }
-        if self.scroll_mode.is_some() {
+        if let Some(terminal) = self.scroll_mode {
+            if let Some(sel) = self.text_sel.as_ref().filter(|s| s.terminal == terminal) {
+                let (first, last) = sel.rows();
+                let n = last - first + 1;
+                return Some(Mode {
+                    badge: " SELECT ".into(),
+                    indicator: Some(format!("{n} {}", if n == 1 { "line" } else { "lines" })),
+                    hints: pairs(SELECT_HINTS),
+                });
+            }
             let indicator = self
                 .mirror
                 .focused_id()
@@ -110,6 +130,9 @@ impl App {
         if too_small(self.size) || matches!(self.modal, Some(Modal::Prompt(_) | Modal::Confirm(_)))
         {
             return None;
+        }
+        if let Some(bar) = self.prompt_bar() {
+            return Some(bar);
         }
         let theme = &self.theme;
         let mode = if self.overlay_open() {
@@ -174,6 +197,54 @@ impl App {
         let mut segments = head;
         segments.extend(cut(tail, tail_room));
         segments.push(pad);
+        let w: u16 = segments.iter().map(|(t, _)| width(t)).sum();
+        let w = w.min(room);
+        let rect = Rect::new(side + (room - w) / 2, self.size.1 - 1, w, 1);
+        Some(Bar { rect, segments })
+    }
+
+    /// The bar while the search prompt is open: `/` or `?`, the query and its cursor.
+    fn prompt_bar(&self) -> Option<Bar> {
+        let prompt = self.search.prompt.as_ref()?;
+        if self.scroll_mode.is_none() || self.overlay_open() {
+            return None;
+        }
+        let side = self.sidebar_cols();
+        let room = self.size.0.saturating_sub(side);
+        // Two pads, the sign and the cursor.
+        if room < 5 || self.size.1 == 0 {
+            return None;
+        }
+        let theme = &self.theme;
+        let base = Style::new()
+            .fg(color(theme.status_fg))
+            .bg(color(theme.status_bg));
+        let (before, after) = prompt.editor.split();
+        let sign = if prompt.up { "?" } else { "/" };
+        let inner = room - 2;
+        // The text keeps the cursor in sight: the start is cut when it does not fit.
+        let mut before: Vec<char> = before.chars().collect();
+        while width(&before.iter().collect::<String>()) + 2 > inner && !before.is_empty() {
+            before.remove(0);
+        }
+        let before: String = before.into_iter().collect();
+        let mut rest = after.chars();
+        let (cursor, cursor_style) = match rest.next() {
+            Some(c) => (c.to_string(), base.add_modifier(Modifier::REVERSED)),
+            None => ("█".to_string(), base.fg(color(theme.accent))),
+        };
+        let left = inner.saturating_sub(1 + width(&before) + width(&cursor));
+        let tail = truncate(rest.as_str(), left);
+        let used = 1 + width(&before) + width(&cursor) + width(&tail);
+        let fill = SEARCH_WIDTH.min(inner).saturating_sub(used);
+        let segments = vec![
+            (" ".to_string(), base),
+            (sign.to_string(), base.add_modifier(Modifier::BOLD)),
+            (before, base),
+            (cursor, cursor_style),
+            (tail, base),
+            (" ".repeat(usize::from(fill) + 1), base),
+        ];
         let w: u16 = segments.iter().map(|(t, _)| width(t)).sum();
         let w = w.min(room);
         let rect = Rect::new(side + (room - w) / 2, self.size.1 - 1, w, 1);

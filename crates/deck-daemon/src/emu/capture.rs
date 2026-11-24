@@ -3,7 +3,7 @@
 use deck_core::model::TerminalId;
 use deck_core::protocol::{Captured, Color, Modes, Style};
 use ghostty_vt::Error;
-use ghostty_vt::screen::Screen;
+use ghostty_vt::screen::{CellWide, GridRef, Screen};
 use ghostty_vt::terminal::{Point, PointCoordinate};
 
 use super::{Emu, Glyph, glyph, modes_of};
@@ -19,45 +19,53 @@ impl Emu {
         modes_of(&self.term)
     }
 
-    /// One cell of the grid, `line` rows from the top of the live screen (negative lines are
-    /// the history).
-    fn glyph_at(&self, col: u16, line: i32) -> Glyph {
-        let point = if line >= 0 {
+    /// The point of a cell, `line` rows from the top of the live screen (negative lines are
+    /// the history); `history` is the emulator's `scrollback_rows`, read once by the caller.
+    fn point_at(col: u16, line: i32, history: usize) -> Point {
+        if line >= 0 {
             Point::Active(PointCoordinate {
                 x: col,
                 y: u32::try_from(line).unwrap_or(0),
             })
         } else {
-            let history = self.term.scrollback_rows().unwrap_or(0);
             let y = i64::try_from(history).unwrap_or(0) + i64::from(line);
             Point::History(PointCoordinate {
                 x: col,
                 y: u32::try_from(y).unwrap_or(0),
             })
-        };
-        let read = || -> Result<Glyph, Error> {
-            let at = self.term.grid_ref(point)?;
-            let raw = at.cell()?;
-            let mut text = String::new();
-            if raw.has_text().unwrap_or(false) {
-                let mut buf = vec!['\0'; 8];
-                let len = match at.graphemes(&mut buf) {
-                    Err(Error::OutOfSpace { required }) => {
-                        buf = vec!['\0'; required];
-                        at.graphemes(&mut buf)?
-                    }
-                    other => other?,
-                };
-                text.extend(buf.iter().take(len));
-            }
-            let style = if raw.has_styling().unwrap_or(false) {
-                at.style().ok()
-            } else {
-                None
-            };
-            Ok(glyph(raw, style, text))
-        };
-        read().unwrap_or_default()
+        }
+    }
+
+    /// One cell of the grid, `line` rows from the top of the live screen (negative lines are
+    /// the history).
+    fn glyph_at(&self, col: u16, line: i32) -> Glyph {
+        let history = self.term.scrollback_rows().unwrap_or(0);
+        self.term
+            .grid_ref(Self::point_at(col, line, history))
+            .and_then(|at| read_glyph(&at, true))
+            .unwrap_or_default()
+    }
+
+    /// Every cell of a row (without styles), `line` as in [`Self::glyph_at`], and whether the
+    /// row is soft-wrapped (continues on the next one). `libghostty-vt` 0.9.0 reads one cell
+    /// per lookup, so this is one lookup per column; `history` is read once by the caller.
+    pub(super) fn row_glyphs(&self, line: i32, history: usize) -> (Vec<Glyph>, bool) {
+        let cols = self.size().0;
+        let wrapped = self
+            .term
+            .grid_ref(Self::point_at(0, line, history))
+            .and_then(|at| at.row())
+            .and_then(|row| row.is_wrapped())
+            .unwrap_or(false);
+        let glyphs = (0..cols)
+            .map(|col| {
+                self.term
+                    .grid_ref(Self::point_at(col, line, history))
+                    .and_then(|at| read_glyph(&at, false))
+                    .unwrap_or_default()
+            })
+            .collect();
+        (glyphs, wrapped)
     }
 
     /// One row of the grid as text; negative lines are the history. A wide character is
@@ -182,6 +190,41 @@ impl Emu {
             lines: taken,
         }
     }
+}
+
+/// The cell a grid reference points at; with `styled` also its style (a search needs only
+/// the text).
+fn read_glyph(at: &GridRef<'_>, styled: bool) -> Result<Glyph, Error> {
+    let raw = at.cell()?;
+    let mut text = String::new();
+    if raw.has_text().unwrap_or(false) {
+        let mut buf = ['\0'; 8];
+        let len = match at.graphemes(&mut buf) {
+            Err(Error::OutOfSpace { required }) => {
+                let mut big = vec!['\0'; required];
+                let len = at.graphemes(&mut big)?;
+                text.extend(big.iter().take(len));
+                0
+            }
+            other => other?,
+        };
+        text.extend(buf.iter().take(len));
+    }
+    if !styled {
+        let wide = raw.wide();
+        return Ok(Glyph {
+            text,
+            style: Style::default(),
+            spacer: matches!(wide, Ok(CellWide::SpacerTail | CellWide::SpacerHead)),
+            wide: matches!(wide, Ok(CellWide::Wide)),
+        });
+    }
+    let style = if raw.has_styling().unwrap_or(false) {
+        at.style().ok()
+    } else {
+        None
+    };
+    Ok(glyph(raw, style, text))
 }
 
 /// The SGR sequence that sets exactly `style`.

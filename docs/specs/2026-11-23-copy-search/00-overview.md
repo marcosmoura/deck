@@ -33,7 +33,7 @@ Asked by the user on 23 Nov 2026, as part of making deck a daily driver. Reverse
 - **Positions are stable row ids.** Every `Frame` carries `top_row: u64`, the id of its first row, and `numbering`, a generation that changes when ids stop meaning the same rows (reflow, alternate screen, reset). Ids grow by one per row and a row keeps its id while it stays in the history, so a position survives scrolling and new output. A row dropped from a full history takes its id with it. The daemon follows rows with `libghostty-vt`'s tracked grid references ([01](01-protocol.md)).
 - **Copy mode lives inside scroll mode.** Entering scroll mode puts a copy cursor on the terminal's cursor cell. Moving it past the top or bottom of the screen scrolls the view by the rows crossed. `Esc` clears a selection, then a search's highlights, then leaves scroll mode; `q` leaves at once. The scroll position stays shared by the session's clients; [02](02-copy-mode.md) says how a copy cursor behaves when another client moves the view.
 - **Keys are vi's**, matching scroll mode's `j`/`k`/`g`/`G`: `h j k l`, `w b e`, `0 $ ^`, `H M L`, `g G`, `C-u C-d C-b C-f`, `v` (characters), `V` (lines), `o` (other end), `y` or `Enter` (copy and leave the selection), `/` (search down, toward newer), `?` (search up, toward older), `n` (same direction), `N` (other direction). A search wraps around and says `search wrapped` in the bar.
-- **Copied text** follows the mouse selection's rules: each row's trailing blanks dropped, rows joined with `\n`; but rows that were soft-wrapped are joined without a newline. Capped at 8 MiB, like `capture`.
+- **Copied text** follows the mouse selection's rules: rows joined with `\n` and each row's trailing blanks dropped; but a soft-wrapped row keeps its trailing blanks and is joined to the next without a newline. Capped at 8 MiB, like `capture`.
 - **Colours**: two new theme roles, `search_match_bg`/`search_match_fg` (default yellow on black) and `search_current_bg`/`search_current_fg` (default bright yellow on black, bold), documented in `default.toml`.
 - **Protocol**: one bump for the whole spec, in [01](01-protocol.md), covering the theme roles too.
 
@@ -41,9 +41,9 @@ Asked by the user on 23 Nov 2026, as part of making deck a daily driver. Reverse
 
 | Sub-spec              | Type       | Crate                  | Summary                                                                                             | Depends | Status |
 | --------------------- | ---------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-protocol.md)  | foundation | deck-core, deck-daemon | `Frame.top_row`, `ScrollTo::Row`, `Request::Search`, `Request::Text`, daemon tests                  | DECK-19 | todo   |
-| [02](02-copy-mode.md) | shippable  | deck-tui               | Copy cursor, vi motions, `v`/`V`/`o`/`y`, selections by row id (keyboard and mouse), edge scrolling | 01      | todo   |
-| [03](03-search.md)    | shippable  | deck-tui, deck-core    | `/` and `?` prompt, `n`/`N`, highlights, theme roles, docs                                          | 02      | todo   |
+| [01](01-protocol.md)  | foundation | deck-core, deck-daemon | `Frame.top_row`, `ScrollTo::Row`, `Request::Search`, `Request::Text`, daemon tests                  | DECK-19 | done   |
+| [02](02-copy-mode.md) | shippable  | deck-tui               | Copy cursor, vi motions, `v`/`V`/`o`/`y`, selections by row id (keyboard and mouse), edge scrolling | 01      | done   |
+| [03](03-search.md)    | shippable  | deck-tui, deck-core    | `/` and `?` prompt, `n`/`N`, highlights, theme roles, docs                                          | 02      | done   |
 
 ## Affected docs
 

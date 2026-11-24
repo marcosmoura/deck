@@ -76,7 +76,7 @@ fn scroll_mode_pages_back_returns_to_the_bottom_and_leaves() {
     );
     assert!(status(&h).contains(" SCROLL "), "{}", status(&h));
     assert!(
-        status(&h).contains("q exit  g top  G bottom"),
+        status(&h).contains("q exit  v select  / search  y copy"),
         "{}",
         status(&h)
     );

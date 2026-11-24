@@ -6,7 +6,7 @@ use deck_core::keys;
 use deck_core::model::TerminalId;
 use deck_core::protocol::{Modes, Request, Response};
 
-use super::Shared;
+use super::{ClientId, Shared};
 use crate::terminal::TermHandle;
 
 const PASTE_START: &[u8] = b"\x1b[200~";
@@ -30,6 +30,59 @@ impl Shared {
             .iter()
             .find_map(|s| s.terminals.get(&id).cloned())
             .ok_or_else(|| format!("no terminal {id}"))
+    }
+
+    /// The terminal `id` for a client: an attached one reaches the terminals of its own
+    /// session only, a control client those of any session.
+    fn terminal_of_client(&self, cid: ClientId, id: TerminalId) -> Result<Arc<TermHandle>, String> {
+        let own = self.st().clients.get(&cid).and_then(|c| c.session);
+        match own {
+            None => self.terminal_handle(id),
+            Some(sid) => self
+                .st()
+                .session(sid)
+                .and_then(|s| s.terminals.get(&id).cloned())
+                .ok_or_else(|| format!("no terminal {id}")),
+        }
+    }
+
+    /// Answers `Search` and `Text`, on the terminal's emulator thread.
+    pub fn history_request(&self, cid: ClientId, request: Request) -> Response {
+        let result = match request {
+            Request::Search {
+                terminal,
+                query,
+                from,
+                up,
+            } => self.terminal_of_client(cid, terminal).and_then(|h| {
+                h.with_emu(move |e| e.search(&query, from, up))
+                    .ok_or_else(|| format!("no terminal {terminal}"))
+                    .map(|found| {
+                        found.map_or(Response::NotFound, |(start, end, wrapped)| {
+                            Response::Found {
+                                start,
+                                end,
+                                wrapped,
+                            }
+                        })
+                    })
+            }),
+            Request::Text {
+                terminal,
+                from,
+                to,
+                lines,
+            } => self.terminal_of_client(cid, terminal).and_then(|h| {
+                h.with_emu(move |e| e.text(from, to, lines))
+                    .ok_or_else(|| format!("no terminal {terminal}"))
+                    .and_then(|text| {
+                        text.map(|(text, truncated)| Response::Text { text, truncated })
+                            .ok_or_else(|| "the selection is no longer in the history".to_string())
+                    })
+            }),
+            _ => Err("not a history request".to_string()),
+        };
+        result.unwrap_or_else(Response::Error)
     }
 
     /// The terminal `id`, when its program still runs.

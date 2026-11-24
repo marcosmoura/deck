@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -70,6 +70,16 @@ pub enum ScrollTo {
     Pages(i32),
     Top,
     Bottom,
+    /// Makes the row with this id visible: no scroll when it already is, else in the middle
+    /// of the screen (clamped to the history's ends). A row no longer held scrolls to the top.
+    Row(u64),
+}
+
+/// A cell of a terminal's history or screen: a row id (see `Frame::top_row`) and a column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pos {
+    pub row: u64,
+    pub col: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +267,23 @@ pub enum Request {
     },
     /// What the daemon uses and what it holds; answered by `Response::Stats`.
     Stats,
+    /// The next occurrence of `query` strictly after `from` (`up`: before), in reading order
+    /// over the history and the screen, wrapping around once. Smart case. Answered by
+    /// `Response::Found` or `Response::NotFound`.
+    Search {
+        terminal: TerminalId,
+        query: String,
+        from: Pos,
+        up: bool,
+    },
+    /// The text between two positions (inclusive, either order; `lines`: whole rows);
+    /// answered by `Response::Text`.
+    Text {
+        terminal: TerminalId,
+        from: Pos,
+        to: Pos,
+        lines: bool,
+    },
 }
 
 /// What a `Request::Wait` waits for.
@@ -426,6 +453,18 @@ pub enum Response {
     },
     /// The answer to `Request::Stats`.
     Stats(Stats),
+    /// A search match; `end` is inclusive and `wrapped` says the search went around.
+    Found {
+        start: Pos,
+        end: Pos,
+        wrapped: bool,
+    },
+    NotFound,
+    /// The answer to `Request::Text`; `truncated` when the size cap cut it.
+    Text {
+        text: String,
+        truncated: bool,
+    },
 }
 
 /// The daemon's own figures, from `Request::Stats`. A figure the daemon could not read is
@@ -488,6 +527,12 @@ pub struct Frame {
     pub modes: Modes,
     pub display_offset: u32,
     pub history: u32,
+    /// The id of the frame's first row. Ids grow by one per row and a row keeps its id while
+    /// the history holds it.
+    pub top_row: u64,
+    /// A generation that only grows; it changes when ids stop meaning the same rows (reflow,
+    /// alternate screen switch, full reset). A client drops its positions when it changes.
+    pub numbering: u32,
     pub lines: Vec<(u16, Line)>,
     pub full: bool,
     /// The terminal's image placements, always the complete list; empty for a client that did
@@ -498,6 +543,8 @@ pub struct Frame {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
     pub runs: Vec<Run>,
+    /// The row continues on the next one (soft wrap).
+    pub wrapped: bool,
 }
 
 /// Text starting at emulator column `col`. A wide character spans two columns and its
@@ -737,9 +784,12 @@ mod tests {
             modes: Modes(Modes::APPLICATION_CURSOR | Modes::ALTERNATE_SCREEN),
             display_offset: 3,
             history: 500,
+            top_row: 1_000_000_000_000,
+            numbering: 3,
             lines: vec![(
                 0,
                 Line {
+                    wrapped: true,
                     runs: vec![
                         Run {
                             col: 0,
@@ -987,6 +1037,18 @@ mod tests {
                 limit: 50,
             }),
             ClientMsg::Request(Request::Stats),
+            ClientMsg::Request(Request::Search {
+                terminal: TerminalId(4),
+                query: "日本".into(),
+                from: Pos { row: 5_000, col: 3 },
+                up: true,
+            }),
+            ClientMsg::Request(Request::Text {
+                terminal: TerminalId(4),
+                from: Pos { row: 9, col: 0 },
+                to: Pos { row: 2, col: 79 },
+                lines: false,
+            }),
             ClientMsg::Action(Action::KillSession),
             ClientMsg::Action(Action::NewPanelWith {
                 project: crate::model::ProjectId(2),
@@ -1006,6 +1068,10 @@ mod tests {
             },
             ClientMsg::Scroll {
                 terminal: TerminalId(3),
+                to: ScrollTo::Row(1 << 40),
+            },
+            ClientMsg::Scroll {
+                terminal: TerminalId(9),
                 to: ScrollTo::Top,
             },
             ClientMsg::Scroll {
@@ -1145,6 +1211,16 @@ mod tests {
                     bytes_read: 50_432_000,
                 }],
             })),
+            ServerMsg::Response(Response::Found {
+                start: Pos { row: 10, col: 2 },
+                end: Pos { row: 10, col: 5 },
+                wrapped: true,
+            }),
+            ServerMsg::Response(Response::NotFound),
+            ServerMsg::Response(Response::Text {
+                text: "a\nb".into(),
+                truncated: false,
+            }),
             ServerMsg::ActionResult(Err(ActionError::InvalidSessionId)),
         ]
     }

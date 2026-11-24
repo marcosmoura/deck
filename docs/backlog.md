@@ -10,9 +10,8 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 6. DECK-21 Live upgrade
 7. DECK-22 Terminal compatibility
-8. DECK-24 Scrollback search and copy mode
-9. DECK-26 Security, privacy and performance reviews
-10. DECK-28 Stress suite follow-ups
+8. DECK-26 Security, privacy and performance reviews
+9. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
@@ -46,7 +45,7 @@ Open tasks the user has not placed in the queue:
 | DECK-21 | Live upgrade                              | in-progress | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
 | DECK-22 | Terminal compatibility                    | in-progress | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
 | DECK-23 | Daemon stats and stress tests             | done        | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
-| DECK-24 | Scrollback search and copy mode           | in-progress | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
+| DECK-24 | Scrollback search and copy mode           | done        | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
 | DECK-25 | Release automation and Homebrew           | done        | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
 | DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
 | DECK-27 | Terminals in the sidebar                  | done        | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |

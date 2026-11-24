@@ -311,6 +311,8 @@ mod tests {
             modes: Modes::default(),
             display_offset: 0,
             history: 0,
+            top_row: 0,
+            numbering: 0,
             lines: vec![],
             full: false,
             images: vec![],

@@ -196,3 +196,25 @@ fn check_without_a_file_uses_the_defaults() {
     );
     assert!(!home.daemon_running());
 }
+
+#[test]
+fn default_lists_the_search_roles_and_check_accepts_them() {
+    let home = Home::new();
+    let printed = stdout(&home.run_deck(&["config", "default"]));
+    let roles = [
+        "search_match_fg",
+        "search_match_bg",
+        "search_current_fg",
+        "search_current_bg",
+    ];
+    for role in roles {
+        assert!(printed.contains(&format!("\n{role} = ")), "{role}");
+    }
+    write_config(
+        &home,
+        "[theme]\nsearch_match_fg = \"#000000\"\nsearch_match_bg = \"accent\"\n\
+         search_current_fg = 0\nsearch_current_bg = \"bright-red\"\n",
+    );
+    let check = home.run_deck(&["config", "check"]);
+    assert!(check.status.success(), "{}", stdout(&check));
+}

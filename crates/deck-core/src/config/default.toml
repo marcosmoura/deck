@@ -84,6 +84,10 @@ selection_fg = "default" # selected row text
 selection_bg = "default" # selected row background
 overlay_bg = "default" # help and picker background
 hover = "bright-black" # row under the mouse pointer
+search_match_fg = "black" # search matches on screen: text
+search_match_bg = "yellow" # search matches on screen: background
+search_current_fg = "black" # the current search match (drawn bold): text
+search_current_bg = "bright-yellow" # the current search match: background
 # Border shape: rounded, plain, thick or double.
 border_style = "rounded"
 

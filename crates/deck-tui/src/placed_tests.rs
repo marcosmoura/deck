@@ -578,6 +578,7 @@ fn a_virtual_placement_sends_the_images_own_pixels_with_the_programs_size() {
 /// A mirror row of `runs`: each is its column, text and foreground.
 fn row_of(runs: &[(u16, String, deck_core::protocol::Color)]) -> deck_core::protocol::Line {
     deck_core::protocol::Line {
+        wrapped: false,
         runs: runs
             .iter()
             .map(|(col, text, fg)| deck_core::protocol::Run {
@@ -848,6 +849,7 @@ fn the_cells_keep_the_background_underneath() {
     f.lines = vec![(
         0,
         deck_core::protocol::Line {
+            wrapped: false,
             runs: vec![deck_core::protocol::Run {
                 col: 0,
                 text: "xyz".into(),

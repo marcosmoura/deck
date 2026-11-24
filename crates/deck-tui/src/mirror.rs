@@ -18,11 +18,19 @@ pub struct TermMirror {
     pub modes: Modes,
     pub display_offset: u32,
     pub history: u32,
+    /// The id of the first row shown (see `Frame::top_row`) and the generation of the ids.
+    pub top_row: u64,
+    pub numbering: u32,
     /// The image placements that touch the viewport, from the last frame.
     pub images: Vec<Placement>,
 }
 
 impl TermMirror {
+    #[cfg(test)]
+    pub(crate) fn default_for_test(size: (u16, u16)) -> Self {
+        Self::blank(size)
+    }
+
     fn blank(size: (u16, u16)) -> Self {
         Self {
             size,
@@ -36,6 +44,8 @@ impl TermMirror {
             modes: Modes::default(),
             display_offset: 0,
             history: 0,
+            top_row: 0,
+            numbering: 0,
             images: Vec::new(),
         }
     }
@@ -50,6 +60,8 @@ impl TermMirror {
         self.modes = frame.modes;
         self.display_offset = frame.display_offset;
         self.history = frame.history;
+        self.top_row = frame.top_row;
+        self.numbering = frame.numbering;
         self.images = frame.images;
         for (row, line) in frame.lines {
             if let Some(slot) = self.lines.get_mut(usize::from(row)) {
@@ -170,6 +182,7 @@ pub(crate) mod tests {
 
     pub fn line(text: &str) -> Line {
         Line {
+            wrapped: false,
             runs: vec![Run {
                 col: 0,
                 text: text.into(),
@@ -191,6 +204,8 @@ pub(crate) mod tests {
             modes: Modes(Modes::BRACKETED_PASTE),
             display_offset: 0,
             history: 3,
+            top_row: 0,
+            numbering: 0,
             lines,
             full,
             images: Vec::new(),

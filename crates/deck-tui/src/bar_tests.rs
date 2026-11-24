@@ -107,7 +107,7 @@ fn each_state_has_its_badge_and_hints_and_the_precedence_holds() {
     // Scroll mode over the repeat.
     a.scroll_mode = Some(TerminalId(31));
     assert!(
-        text(&a).contains(" SCROLL  q exit  g top  G bottom "),
+        text(&a).contains(" SCROLL  q exit  v select  / search  y copy "),
         "{}",
         text(&a)
     );
@@ -140,7 +140,7 @@ fn a_scrolled_back_terminal_shows_its_offset_in_warning() {
     a.scroll_mode = Some(TerminalId(31));
     let (_, buf, rows) = render(&a);
     assert!(
-        rows[LAST].contains(" SCROLL  [120/4096]  q exit  g top  G bottom "),
+        rows[LAST].contains(" SCROLL  [120/4096]  q exit  v select  / search  y copy "),
         "{}",
         rows[LAST]
     );
@@ -238,7 +238,7 @@ fn cutting_keeps_the_ellipsis_in_the_last_cell() {
     // The room ends where a segment does: the last cell gives way.
     assert_eq!(text(cut(segments.clone(), 3)), "ab…");
     assert_eq!(text(cut(segments.clone(), 0)), "");
-    assert_eq!(SCROLL_HINTS.len(), 3);
+    assert_eq!(SCROLL_HINTS.len(), 4);
 }
 
 #[test]
@@ -358,7 +358,7 @@ fn a_selection_in_progress_continues_across_the_bar() {
     let rect = a.bar().unwrap().rect;
     a.on_event(mouse(ct::MouseEventKind::Drag(LEFT), rect.x + 3, 23), now);
     let sel = a.text_sel.as_ref().unwrap();
-    assert_eq!(sel.head, (rect.x + 3, 23));
+    assert_eq!((sel.head.col, sel.head.row), (rect.x + 3, 23));
 }
 
 #[test]
