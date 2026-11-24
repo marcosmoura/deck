@@ -122,7 +122,7 @@ A click in an unfocused terminal focuses it and is not sent to the program ([lay
 
 ## Selecting and copying
 
-Drag with the left button in the focused terminal to select text; releasing copies it to your clipboard (through OSC 52, as a program's copy does). A double-click selects a word and copies it, a triple-click the whole line; dragging after either extends the selection by words or by lines. The selection stays inside its terminal, even when the pointer moves into another one or out of the panel, and covers only the rows on screen (scroll back with the wheel first to copy older lines). Each row's trailing blanks are dropped and rows are joined with newlines.
+Drag with the left button in the focused terminal to select text; releasing copies it to your clipboard (through OSC 52, as a program's copy does), and the floating bar says how much was copied (`Copied 12 characters`). A double-click selects a word and copies it, a triple-click the whole line; dragging after either extends the selection by words or by lines. The selection stays inside its terminal, even when the pointer moves into another one or out of the panel, and covers only the rows on screen (scroll back with the wheel first to copy older lines). Each row's trailing blanks are dropped and rows are joined with newlines.
 
 - When the program asked for mouse reporting (nvim, OpenCode, Claude Code), the mouse is the program's; hold `Option` (Alt) while pressing to select in deck instead. Your terminal's own selection (usually `Shift`-drag) still works as before.
 - In scroll mode a press always selects.

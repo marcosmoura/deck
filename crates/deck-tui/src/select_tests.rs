@@ -80,6 +80,9 @@ fn a_drag_selects_and_the_release_copies() {
     let mut a = app(0, &["hello world", "second line"]);
     let outs = select(&mut a, (6, 0), (5, 1), false);
     assert_eq!(outs, [copied("world\nsecond")]);
+    // The floating bar says what was copied.
+    assert_eq!(a.flash.as_ref().unwrap().0, "Copied 12 characters");
+    assert!(!a.flash_error);
     // The selection stays drawn after the copy.
     let sel = a.text_sel.as_ref().unwrap();
     assert_eq!(

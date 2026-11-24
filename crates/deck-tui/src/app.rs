@@ -636,7 +636,7 @@ impl App {
         }
         self.pointer = Some((event.column, event.row));
         let released = matches!(event.kind, ct::MouseEventKind::Up(_));
-        if let Some(outs) = self.select_mouse(event) {
+        if let Some(outs) = self.select_mouse(event, now) {
             return outs;
         }
         // Any other press ends the selection.
@@ -866,7 +866,7 @@ impl App {
 
     /// The drag and release of a selection, ours wherever the pointer goes; the release
     /// copies the text. `None` when no selection is being dragged.
-    fn select_mouse(&mut self, event: ct::MouseEvent) -> Option<Vec<Out>> {
+    fn select_mouse(&mut self, event: ct::MouseEvent, now: Instant) -> Option<Vec<Out>> {
         let sel = self.text_sel.as_ref().filter(|s| s.dragging)?;
         let terminal = sel.terminal;
         match event.kind {
@@ -893,11 +893,13 @@ impl App {
                     return Some(Vec::new());
                 };
                 self.text_sel = Some(sel);
-                Some(if text.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![osc52("c", &text)]
-                })
+                if text.is_empty() {
+                    return Some(Vec::new());
+                }
+                let n = text.chars().count();
+                let unit = if n == 1 { "character" } else { "characters" };
+                self.set_flash(format!("Copied {n} {unit}"), now, false);
+                Some(vec![osc52("c", &text)])
             }
             _ => None,
         }
