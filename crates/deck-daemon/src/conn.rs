@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use deck_core::protocol::{
-    ByeReason, ClientMsg, FrameReader, Request, Response, Role, ServerMsg, decode_payload, encode,
-    hello_version,
+    ByeReason, CellPx, ClientMsg, FrameReader, Request, Response, Role, ServerMsg, decode_payload,
+    encode, hello_version,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -134,6 +134,9 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
         create,
         cols,
         rows,
+        cell,
+        images,
+        outer_name,
     } = role
     {
         let request = AttachRequest {
@@ -141,6 +144,9 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
             create,
             cols,
             rows,
+            cell: known_cell(cell),
+            images,
+            outer_name: outer_name.filter(|n| valid_name(n)),
             cwd: cwd.clone(),
             env: env.clone(),
         };
@@ -175,6 +181,16 @@ pub async fn handle(shared: Arc<Shared>, stream: UnixStream, uid: u32) {
     if !writer_done {
         writer.abort();
     }
+}
+
+/// The outer terminal's name as the TUI sends it: printable text of a fitting length.
+fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().count() <= 64 && !name.chars().any(char::is_control)
+}
+
+/// A cell size with a zero side is no size: the client does not know it.
+fn known_cell(cell: Option<CellPx>) -> Option<CellPx> {
+    cell.filter(|c| c.width > 0 && c.height > 0)
 }
 
 /// What a connection's `Hello` said about the client's environment, and the client's pid.
@@ -214,8 +230,12 @@ async fn dispatch(
     payload: &[u8],
 ) -> bool {
     match decode_payload::<ClientMsg>(payload) {
-        Ok(ClientMsg::Viewport { cols, rows }) => shared.viewport(cid, cols, rows),
-        Ok(ClientMsg::ReloadViewport { cols, rows }) => shared.reload_viewport(cid, cols, rows),
+        Ok(ClientMsg::Viewport { cols, rows, cell }) => {
+            shared.viewport(cid, cols, rows, known_cell(cell))
+        }
+        Ok(ClientMsg::ReloadViewport { cols, rows, cell }) => {
+            shared.reload_viewport(cid, cols, rows, known_cell(cell));
+        }
         Ok(ClientMsg::Input { terminal, bytes }) => shared.input(cid, terminal, bytes),
         Ok(ClientMsg::Scroll { terminal, to }) => shared.scroll(cid, terminal, to),
         Ok(ClientMsg::Focus(focused)) => shared.focus(cid, focused),
@@ -339,6 +359,7 @@ async fn write_loop(
                 }
             }
             Next::Resync => shared.resync(cid),
+            Next::Owed => shared.send_owed(cid),
             Next::Done => break,
         }
     }

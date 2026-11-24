@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - Cargo.lock
+      - .mise.toml
+      - .github/workflows/release.yml
 
 permissions:
   contents: read
@@ -25,8 +31,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: jdx/mise-action@v3
         with:
-          install_args: rust
+          install_args: rust zig
       - name: Check the tag matches the workspace version
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           version="$(cargo pkgid -p deck | sed 's/.*[#@]//')"
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
@@ -37,6 +44,7 @@ jobs:
       - name: Build
         run: cargo build --release --locked -p deck --target ${{ matrix.target }}
       - name: Package
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           name="deck-$VERSION-${{ matrix.target }}"
           mkdir -p "dist/$name"
@@ -44,13 +52,15 @@ jobs:
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           cd dist
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
         with:
           name: deck-${{ matrix.target }}
           path: dist/*.tar.gz*
 
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write

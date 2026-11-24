@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 use deck_core::action::{Action, ActionError, NameKind, default_project_name, validate_name};
 use deck_core::config::Config;
 use deck_core::layout::Ratios;
@@ -19,15 +18,16 @@ use deck_core::model::{
 };
 use deck_core::naming;
 use deck_core::protocol::{
-    ByeReason, Frame, NoticeLevel, OuterColors, ScrollTo, ServerMsg, SessionSummary,
+    ByeReason, CellPx, Frame, NoticeLevel, OuterColors, ScrollTo, ServerMsg, SessionSummary,
 };
 use tokio::runtime::Handle;
 use tokio::sync::{Notify, watch};
 
 use crate::clock::{Clock, Fire, Poke, Throttle};
 use crate::config_file::Notice;
-use crate::emu::{EmuEvent, clamp_size, default_palette};
+use crate::emu::{Emu, EmuEvent, clamp_size};
 use crate::env::{self, Env, TerminalIds};
+use crate::images::{self, Fetcher, Shot, Tracker};
 use crate::lock;
 use crate::queue::Queue;
 use crate::startup::DaemonPaths;
@@ -49,7 +49,7 @@ pub type ClientId = u64;
 const TITLE_VIEW_INTERVAL: Duration = Duration::from_millis(100);
 /// A terminal that fails within this long of starting is reported as a start failure.
 const QUICK_EXIT: Duration = Duration::from_secs(1);
-const FALLBACK_COLORS: OuterColors = OuterColors {
+pub(crate) const FALLBACK_COLORS: OuterColors = OuterColors {
     fg: (192, 192, 192),
     bg: (0, 0, 0),
 };
@@ -121,6 +121,12 @@ pub struct AttachRequest {
     /// The size of the client's outer window.
     pub cols: u16,
     pub rows: u16,
+    /// The client's cell size in pixels, when known.
+    pub cell: Option<CellPx>,
+    /// The client can show images.
+    pub images: bool,
+    /// The outer terminal's name, which programs' XTVERSION queries are answered with.
+    pub outer_name: Option<String>,
     pub cwd: PathBuf,
     pub env: Env,
 }
@@ -132,6 +138,8 @@ struct SessionRt {
     terminals: HashMap<TerminalId, Arc<TermHandle>>,
     /// The panel area the terminals are sized for.
     viewport: Option<(u16, u16)>,
+    /// The cell size in pixels the terminals are sized with, of the client they follow.
+    cell: Option<CellPx>,
     title_throttle: Throttle,
     /// When a client last attached; the highest tick is the most recently attached.
     last_attach: u64,
@@ -209,7 +217,12 @@ struct Client {
     queue: Arc<Queue>,
     session: Option<SessionId>,
     viewport: Option<(u16, u16)>,
+    cell: Option<CellPx>,
     colors: Option<OuterColors>,
+    /// The outer terminal's name, for XTVERSION answers.
+    outer_name: Option<String>,
+    /// The images the client was sent.
+    images: Tracker,
     /// Higher is more recent.
     active: u64,
     /// The outer terminal has focus; a client that never reported counts as focused.
@@ -361,29 +374,94 @@ impl State {
         }
     }
 
-    fn full_frames(&self, sid: SessionId) -> Vec<Frame> {
+    /// The session's terminals by id, for reading their emulators later.
+    fn handles(&self, sid: SessionId) -> HashMap<TerminalId, Arc<TermHandle>> {
+        self.session(sid)
+            .map(|s| s.terminals.clone())
+            .unwrap_or_default()
+    }
+
+    /// The ids of the images of a terminal that some client of the session was sent.
+    fn sent_ids(&self, sid: SessionId, terminal: TerminalId) -> Vec<u32> {
+        let mut ids: Vec<u32> = self
+            .clients_of(sid)
+            .flat_map(|(_, c)| c.images.ids_of(terminal))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    /// What `frame` makes of the emulator, read together with the storage state the clients'
+    /// image tracking needs. `None` when `frame` gives none or the terminal was released.
+    fn shot(
+        &self,
+        sid: SessionId,
+        handle: &TermHandle,
+        frame: impl FnOnce(&mut Emu) -> Option<Frame> + Send + 'static,
+    ) -> Option<Shot> {
+        let ids = self.sent_ids(sid, handle.id);
+        handle
+            .with_emu(move |e| frame(e).map(|f| Shot::new(e, f, &ids)))
+            .flatten()
+    }
+
+    /// The active panel's terminals in full, in terminal order; with `only`, just those.
+    fn full_shots(&self, sid: SessionId, only: Option<&[TerminalId]>) -> Vec<Shot> {
         let Some(sess) = self.session(sid) else {
             return Vec::new();
         };
-        let mut frames: Vec<Frame> = sess
+        let mut shots: Vec<Shot> = sess
             .active_terminals()
             .iter()
-            .filter_map(|t| t.with_emu(|e| e.full_frame(t.id)))
+            .filter(|t| only.is_none_or(|o| o.contains(&t.id)))
+            .filter_map(|t| {
+                let id = t.id;
+                self.shot(sid, t, move |e| Some(e.full_frame(id)))
+            })
             .collect();
-        frames.sort_by_key(|f| f.terminal);
-        frames
+        shots.sort_by_key(|s| s.frame.terminal);
+        shots
     }
 
-    /// Full frames of the given terminals of the active panel.
-    fn full_frames_of(&self, sid: SessionId, only: &[TerminalId]) -> Vec<Frame> {
-        let mut frames = self.full_frames(sid);
-        frames.retain(|f| only.contains(&f.terminal));
-        frames
+    /// Queues a frame for the clients of a session (just `only`, when given), with the image
+    /// pieces and `ImageGone` messages that belong to it. Returns the clients that miss a
+    /// placement because `fetch` has not copied its pixels yet.
+    fn push_shot(
+        &mut self,
+        sid: SessionId,
+        only: Option<ClientId>,
+        shot: &Shot,
+        fetch: &mut Fetcher,
+    ) -> Vec<ClientId> {
+        let mut pending = Vec::new();
+        for (cid, c) in &mut self.clients {
+            if c.session != Some(sid) || only.is_some_and(|o| o != *cid) {
+                continue;
+            }
+            if images::deliver(&c.queue, &mut c.images, shot, fetch) {
+                pending.push(*cid);
+            }
+        }
+        pending
     }
 
-    fn push_frame(&self, sid: SessionId, frame: &Frame) {
-        for (_, c) in self.clients_of(sid) {
-            c.queue.push_frame(frame.clone());
+    /// [`State::push_shot`] to every client, copying image pixels now (under the state lock).
+    fn push_live(&mut self, sid: SessionId, shots: &[Shot]) {
+        let mut fetch = Fetcher::live(self.handles(sid));
+        for shot in shots {
+            self.push_shot(sid, None, shot, &mut fetch);
+        }
+    }
+
+    /// The terminal ended: its clients drop its images without being told.
+    fn forget_images(&mut self, sid: SessionId, terminal: TerminalId) {
+        for (_, c) in self
+            .clients
+            .iter_mut()
+            .filter(|(_, c)| c.session == Some(sid))
+        {
+            c.images.forget_terminal(terminal);
         }
     }
 }
@@ -461,6 +539,12 @@ pub struct Shared {
     pub version: u32,
     pub handle: Handle,
     state: Mutex<State>,
+    /// The colours of the client each session follows, for the reader threads (which must
+    /// not take the state lock for every chunk of output); see `publish_colors`.
+    session_colors: Mutex<HashMap<SessionId, OuterColors>>,
+    /// The name XTVERSION is answered with, per session: the followed client's, when it can
+    /// show images and gave one; see `publish_colors`.
+    session_names: Mutex<HashMap<SessionId, String>>,
     shutdown_tx: watch::Sender<bool>,
     /// Counts up whenever something a pending `wait` may care about changed.
     changes: watch::Sender<u64>,
@@ -523,6 +607,8 @@ impl Shared {
             version,
             handle: Handle::current(),
             state: Mutex::new(State::default()),
+            session_colors: Mutex::new(HashMap::new()),
+            session_names: Mutex::new(HashMap::new()),
             shutdown_tx,
             changes: watch::channel(0).0,
             waiters,
@@ -623,7 +709,10 @@ impl Shared {
                 queue: Arc::clone(&queue),
                 session: None,
                 viewport: None,
+                cell: None,
                 colors,
+                outer_name: None,
+                images: Tracker::default(),
                 active,
                 focused: true,
             },
@@ -631,10 +720,34 @@ impl Shared {
         Some((id, queue))
     }
 
+    /// Records the colours of the client `sid` follows (the most recently active), for the
+    /// emulators' colour answers.
+    fn publish_colors(&self, st: &State, sid: SessionId) {
+        let active = st.active_client(sid);
+        let colors = active.and_then(|c| c.colors);
+        let name = active
+            .filter(|c| c.images.enabled)
+            .and_then(|c| c.outer_name.clone());
+        let mut map = lock(&self.session_colors);
+        match colors {
+            Some(colors) => map.insert(sid, colors),
+            None => map.remove(&sid),
+        };
+        let mut names = lock(&self.session_names);
+        match name {
+            Some(name) => names.insert(sid, name),
+            None => names.remove(&sid),
+        };
+    }
+
     /// Removes a client; its session and processes keep running.
     pub fn remove_client(&self, id: ClientId) {
-        if let Some(client) = self.st().clients.remove(&id) {
+        let mut st = self.st();
+        if let Some(client) = st.clients.remove(&id) {
             client.queue.close();
+            if let Some(sid) = client.session {
+                self.publish_colors(&st, sid);
+            }
         }
     }
 
@@ -674,7 +787,7 @@ impl Shared {
                     parts.discard();
                     return Err("the daemon is shutting down".into());
                 }
-                let sid = self.add_session(&mut st, new, parts, a, viewport);
+                let sid = self.add_session(&mut st, new, parts, a, viewport)?;
                 (sid, st)
             }
         };
@@ -692,6 +805,9 @@ impl Shared {
         // the viewport and the `Welcome` both come from this one read.
         let config = self.config();
         client.session = Some(sid);
+        client.cell = a.cell;
+        client.images.enabled = a.images;
+        client.outer_name = a.outer_name.clone();
         client.viewport = Some(panel_area(
             (a.cols, a.rows),
             config.sidebar_width,
@@ -699,6 +815,7 @@ impl Shared {
         ));
         client.active = active;
         let queue = Arc::clone(&client.queue);
+        self.publish_colors(&st, sid);
 
         queue.push_msg(ServerMsg::Welcome {
             session: sid,
@@ -711,8 +828,10 @@ impl Shared {
         if let Some(sess) = st.session(sid) {
             queue.push_view(st.view_of(sess));
         }
-        for frame in st.full_frames(sid) {
-            queue.push_frame(frame);
+        let shots = st.full_shots(sid, None);
+        let mut fetch = Fetcher::live(st.handles(sid));
+        for shot in &shots {
+            st.push_shot(sid, Some(cid), shot, &mut fetch);
         }
         // The attach size is a viewport claim, like a `Viewport` message.
         self.follow_viewport(&mut st, cid);
@@ -767,6 +886,7 @@ impl Shared {
             None,
             &a.cwd,
             single_size(viewport),
+            a.cell,
             Place {
                 session: sid,
                 panel,
@@ -791,6 +911,7 @@ impl Shared {
         launch: Option<&LaunchSpec>,
         cwd: &Path,
         inner: (u16, u16),
+        cell: Option<CellPx>,
         at: Place,
     ) -> SpawnRequest {
         let config = self.config();
@@ -817,6 +938,7 @@ impl Shared {
             ),
             cols: inner.0,
             rows: inner.1,
+            cell,
         }
     }
 
@@ -828,7 +950,7 @@ impl Shared {
         parts: terminal::Parts,
         a: &AttachRequest,
         viewport: (u16, u16),
-    ) -> SessionId {
+    ) -> Result<SessionId, String> {
         let NewSession {
             sid,
             pid,
@@ -837,7 +959,7 @@ impl Shared {
             name,
             req,
         } = new;
-        let handle = terminal::start(self, tid, sid, &req, parts);
+        let handle = terminal::start(self, tid, sid, &req, parts)?;
 
         let mut model = Session {
             id: sid,
@@ -865,13 +987,14 @@ impl Shared {
             env: a.env.clone(),
             terminals: HashMap::from([(tid, handle)]),
             viewport: Some(viewport),
+            cell: a.cell,
             title_throttle: Throttle::new(TITLE_VIEW_INTERVAL),
             last_attach: 0,
             startup: Some(tid),
             unseen: HashSet::new(),
         });
         self.mark_dirty(st);
-        sid
+        Ok(sid)
     }
 
     // Requests.
@@ -921,6 +1044,7 @@ impl Shared {
         if let Some(c) = st.clients.get_mut(&cid) {
             c.active = tick;
         }
+        self.publish_colors(&st, sid);
         self.follow_viewport(&mut st, cid);
         // Focus reports are not typing.
         if !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O") {
@@ -931,44 +1055,52 @@ impl Shared {
         let active = st.session(sid).is_some_and(|s| s.is_active(id));
         if active
             && !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O")
-            && let Some(frame) = handle
-                .with_emu(|e| e.scroll_to_bottom().then(|| e.full_frame(id)))
-                .flatten()
+            && let Some(shot) = st.shot(sid, &handle, move |e| {
+                e.scroll_to_bottom().then(|| e.full_frame(id))
+            })
         {
-            st.push_frame(sid, &frame);
+            st.push_live(sid, &[shot]);
         }
         handle.write(bytes);
     }
 
     /// Scrolls a terminal of the client's session and sends its screen in full.
     pub fn scroll(&self, cid: ClientId, terminal: TerminalId, to: ScrollTo) {
-        let st = self.st();
+        let mut st = self.st();
         let Some(sid) = st.clients.get(&cid).and_then(|c| c.session) else {
             return;
         };
-        let Some(handle) = st.session(sid).and_then(|s| s.terminals.get(&terminal)) else {
+        let Some(handle) = st
+            .session(sid)
+            .and_then(|s| s.terminals.get(&terminal))
+            .cloned()
+        else {
             tracing::debug!(%terminal, "scroll of a terminal outside the client's session ignored");
             return;
         };
-        let frame = handle.with_emu(|e| {
+        let shot = st.shot(sid, &handle, move |e| {
             e.scroll(to);
-            e.full_frame(terminal)
+            Some(e.full_frame(terminal))
         });
-        if let Some(frame) = frame
+        if let Some(shot) = shot
             && st.session(sid).is_some_and(|s| s.is_active(terminal))
         {
-            st.push_frame(sid, &frame);
+            st.push_live(sid, &[shot]);
         }
     }
 
-    pub fn viewport(&self, cid: ClientId, cols: u16, rows: u16) {
+    pub fn viewport(&self, cid: ClientId, cols: u16, rows: u16, cell: Option<CellPx>) {
         let mut st = self.st();
         let tick = st.touch();
         let Some(client) = st.clients.get_mut(&cid) else {
             return;
         };
         client.viewport = Some((cols, rows));
+        client.cell = cell;
         client.active = tick;
+        if let Some(sid) = client.session {
+            self.publish_colors(&st, sid);
+        }
         self.follow_viewport(&mut st, cid);
     }
 
@@ -990,12 +1122,13 @@ impl Shared {
 
     /// A viewport change that came from a config reload: the client's size is recorded, and
     /// the terminals follow it only when that client is the one that was active last.
-    pub fn reload_viewport(&self, cid: ClientId, cols: u16, rows: u16) {
+    pub fn reload_viewport(&self, cid: ClientId, cols: u16, rows: u16, cell: Option<CellPx>) {
         let mut st = self.st();
         let Some(client) = st.clients.get_mut(&cid) else {
             return;
         };
         client.viewport = Some((cols, rows));
+        client.cell = cell;
         let Some(sid) = client.session else {
             return;
         };
@@ -1019,17 +1152,18 @@ impl Shared {
         let Some(sess) = st.session(sid) else {
             return;
         };
-        if sess.viewport == Some(vp) {
+        let cell = client.cell;
+        if sess.viewport == Some(vp) && sess.cell == cell {
             return;
         }
         if let Some(sess) = st.session_mut(sid) {
             sess.viewport = Some(vp);
+            sess.cell = cell;
         }
         let changed = self.apply_sizes(st, sid);
         st.push_view(sid);
-        for frame in st.full_frames_of(sid, &changed) {
-            st.push_frame(sid, &frame);
-        }
+        let shots = st.full_shots(sid, Some(&changed));
+        st.push_live(sid, &shots);
     }
 
     /// Sizes the active panel's PTYs and emulators from its layout in the session's
@@ -1042,6 +1176,7 @@ impl Shared {
             return Vec::new();
         };
         let (cols, rows) = sess.viewport.unwrap_or(DEFAULT_VIEWPORT);
+        let cell = sess.cell;
         let n = panel.terminals.len();
         let rects = layout::panel_rects(Rect::new(0, 0, cols, rows), n, &panel.ratios);
         let mut changed = Vec::new();
@@ -1052,8 +1187,11 @@ impl Shared {
                 continue;
             };
             // The PTY too: its size can differ from the emulator's.
-            if handle.with_emu(|e| e.size()) != Some(size) || handle.pty_size() != Some(size) {
-                handle.resize_pty(size.0, size.1);
+            let pty = Some((size, terminal::pixels_of(size.0, size.1, cell)));
+            if handle.with_emu(|e| (e.size(), e.cell())) != Some((size, cell))
+                || handle.pty_size() != pty
+            {
+                handle.resize_pty(size.0, size.1, cell);
                 handle.recheck_pty(&self.handle);
                 changed.push(term.id);
             }
@@ -1063,18 +1201,60 @@ impl Shared {
 
     /// After the writer dropped frames: the current view and every screen in full.
     pub fn resync(&self, cid: ClientId) {
-        let st = self.st();
-        let Some(client) = st.clients.get(&cid) else {
+        let mut st = self.st();
+        let Some(client) = st.clients.get_mut(&cid) else {
             return;
         };
         let Some(sid) = client.session else {
             return;
         };
-        if let Some(sess) = st.session(sid) {
+        // The full frames below owe the client again what they hold back.
+        client.images.owed.clear();
+        if let Some(sess) = st.session(sid)
+            && let Some(client) = st.clients.get(&cid)
+        {
             client.queue.push_view(st.view_of(sess));
         }
-        for frame in st.full_frames(sid) {
-            client.queue.push_frame(frame);
+        let shots = st.full_shots(sid, None);
+        let mut fetch = Fetcher::live(st.handles(sid));
+        for shot in &shots {
+            st.push_shot(sid, Some(cid), shot, &mut fetch);
+        }
+    }
+
+    /// After the pieces of the images a client was sent drained: the frames it was owed
+    /// because an image did not fit.
+    pub fn send_owed(&self, cid: ClientId) {
+        let mut st = self.st();
+        let Some(client) = st.clients.get_mut(&cid) else {
+            return;
+        };
+        let Some(sid) = client.session else {
+            return;
+        };
+        let owed: Vec<TerminalId> = std::mem::take(&mut client.images.owed)
+            .into_iter()
+            .collect();
+        if owed.is_empty() {
+            return;
+        }
+        // New pixels are copied with the state lock released, as `pump` does.
+        let mut fetch = Fetcher::deferred(st.handles(sid));
+        let mut missing = false;
+        for shot in &st.full_shots(sid, Some(&owed)) {
+            missing |= !st.push_shot(sid, Some(cid), shot, &mut fetch).is_empty();
+        }
+        if !missing {
+            return;
+        }
+        drop(st);
+        fetch.copy_wanted();
+        let mut st = self.st();
+        if st.clients.get(&cid).and_then(|c| c.session) != Some(sid) {
+            return;
+        }
+        for shot in &st.full_shots(sid, Some(&owed)) {
+            st.push_shot(sid, Some(cid), shot, &mut fetch);
         }
     }
 
@@ -1082,7 +1262,21 @@ impl Shared {
 
     /// Program output: into the emulator, then whatever the emulator asks for.
     pub fn output(self: &Arc<Self>, h: &Arc<TermHandle>, bytes: &[u8]) {
-        let events = h.with_emu(|e| e.feed(bytes)).unwrap_or_default();
+        let bytes = bytes.to_vec();
+        // The emulator answers colour queries itself, with the colours of the client the
+        // session follows.
+        let colors = lock(&self.session_colors)
+            .get(&h.session)
+            .copied()
+            .unwrap_or(FALLBACK_COLORS);
+        let name = lock(&self.session_names).get(&h.session).cloned();
+        let events = h
+            .with_emu(move |e| {
+                e.set_colors(colors.fg, colors.bg);
+                e.set_xtversion(name.as_deref());
+                e.feed(&bytes)
+            })
+            .unwrap_or_default();
         h.dirty.notify_one();
         self.bump();
         for event in events {
@@ -1094,31 +1288,6 @@ impl Shared {
         match event {
             EmuEvent::Title(title) => self.title(h, title),
             EmuEvent::Reply(text) => h.write(text.into_bytes()),
-            EmuEvent::Color {
-                index,
-                palette,
-                format,
-            } => {
-                let colors = self
-                    .st()
-                    .active_client(h.session)
-                    .and_then(|c| c.colors)
-                    .unwrap_or(FALLBACK_COLORS);
-                let rgb = if index == NamedColor::Background as usize {
-                    colors.bg
-                } else if index < 256 {
-                    let Rgb { r, g, b } = palette.unwrap_or_else(|| default_palette(index));
-                    (r, g, b)
-                } else {
-                    colors.fg
-                };
-                let rgb = Rgb {
-                    r: rgb.0,
-                    g: rgb.1,
-                    b: rgb.2,
-                };
-                h.write(format(rgb).into_bytes());
-            }
             EmuEvent::ClipboardStore { selection, text } => {
                 let st = self.st();
                 if let Some(client) = st.active_client(h.session) {
@@ -1127,9 +1296,6 @@ impl Shared {
                         text,
                     });
                 }
-            }
-            EmuEvent::ClipboardLoad => {
-                tracing::warn!(terminal = %h.id, "denied an OSC 52 clipboard read");
             }
         }
     }
@@ -1190,17 +1356,53 @@ impl Shared {
         }
     }
 
-    /// Turns the emulator's news into a frame for the session's clients.
-    pub fn pump(&self, h: &Arc<TermHandle>) {
-        let st = self.st();
-        let streamed = st.session(h.session).is_some_and(|s| s.is_active(h.id));
-        if !streamed || st.clients_of(h.session).next().is_none() {
+    /// Turns the emulator's news into a frame for the session's clients. Returns how long
+    /// until the pass that follows the timeout of a synchronized output the program holds.
+    pub fn pump(&self, h: &Arc<TermHandle>) -> Option<Duration> {
+        let mut st = self.st();
+        let sid = h.session;
+        let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id));
+        if !streamed || st.clients_of(sid).next().is_none() {
             h.with_emu(|e| e.reset_damage());
-            return;
+            return None;
         }
-        if let Some(frame) = h.with_emu(|e| e.damage_frame(h.id)) {
-            st.push_frame(h.session, &frame);
+        let now = self.clock.now();
+        let ids = st.sent_ids(sid, h.id);
+        let (shot, hold) = h.with_emu({
+            let id = h.id;
+            move |e| {
+                let shot = e
+                    .damage_frame(id, now)
+                    .map(|frame| Shot::new(e, frame, &ids));
+                (shot, e.hold_remaining(now))
+            }
+        })?;
+        let Some(shot) = shot else {
+            return hold;
+        };
+        // A new image is not copied under the state lock: the frame goes out without its
+        // placement, and a full frame with the pixels ahead of it follows.
+        let mut fetch = Fetcher::deferred(HashMap::from([(h.id, Arc::clone(h))]));
+        let missing = st.push_shot(sid, None, &shot, &mut fetch);
+        if missing.is_empty() {
+            return hold;
         }
+        drop(st);
+        fetch.copy_wanted();
+        let mut st = self.st();
+        // The lock was released: the panel may have changed. An image placed in that window
+        // is not lost: the next damage frame lists it, because the placements the emulator
+        // compares in `images_state` changed, and runs this again.
+        if !st.session(sid).is_some_and(|s| s.is_active(h.id)) {
+            return hold;
+        }
+        let id = h.id;
+        if let Some(shot) = st.shot(sid, h, move |e| Some(e.full_frame(id))) {
+            for cid in missing {
+                st.push_shot(sid, Some(cid), &shot, &mut fetch);
+            }
+        }
+        hold
     }
 
     /// A terminal's process exited and its output was read.
@@ -1228,14 +1430,21 @@ impl Shared {
         h.close();
         // Closed by an action, or its session was killed: already out of the model.
         if !in_model {
+            st.forget_images(sid, h.id);
             h.release();
             return;
         }
         // The last output reaches the clients before the terminal goes.
         let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id));
-        if streamed && let Some(frame) = h.with_emu(|e| e.damage_frame(h.id)) {
-            st.push_frame(sid, &frame);
+        if streamed
+            && let Some(shot) = st.shot(sid, h, {
+                let id = h.id;
+                move |e| Some(e.last_frame(id))
+            })
+        {
+            st.push_live(sid, &[shot]);
         }
+        st.forget_images(sid, h.id);
         // Whatever a background job still prints from here on is discarded.
         h.release();
 
@@ -1307,8 +1516,13 @@ impl Shared {
     fn keep_exited(self: &Arc<Self>, st: &mut State, h: &Arc<TermHandle>, status: i32) {
         let sid = h.session;
         let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id));
-        if streamed && let Some(frame) = h.with_emu(|e| e.damage_frame(h.id)) {
-            st.push_frame(sid, &frame);
+        if streamed
+            && let Some(shot) = st.shot(sid, h, {
+                let id = h.id;
+                move |e| Some(e.last_frame(id))
+            })
+        {
+            st.push_live(sid, &[shot]);
         }
         h.stop_input();
         st.restored.remove(&h.id);
@@ -1336,14 +1550,12 @@ impl Shared {
         let moved = sess.model.active_panel() != before;
         let changed = self.apply_sizes(st, sid);
         st.push_view(sid);
-        let frames = if moved {
-            st.full_frames(sid)
+        let shots = if moved {
+            st.full_shots(sid, None)
         } else {
-            st.full_frames_of(sid, &changed)
+            st.full_shots(sid, Some(&changed))
         };
-        for frame in frames {
-            st.push_frame(sid, &frame);
-        }
+        st.push_live(sid, &shots);
     }
 
     /// [`Shared::settle`] after a change of a panel's terminals or of their focus: the panel
@@ -1392,6 +1604,8 @@ impl Shared {
             client.session = None;
         }
         st.sessions.retain(|s| s.model.id != sid);
+        lock(&self.session_colors).remove(&sid);
+        lock(&self.session_names).remove(&sid);
         self.mark_dirty(st);
         self.bump();
     }
@@ -1656,6 +1870,7 @@ impl Shared {
                 return Err(ActionError::ShuttingDown);
             }
             let sess = st.session(sid).ok_or(ActionError::NotAttached)?;
+            let cell = sess.cell;
             let (existing, root) = match &target {
                 PanelTarget::Project { project, .. } => {
                     let p = sess
@@ -1684,6 +1899,7 @@ impl Shared {
                 launch.as_ref(),
                 &cwd,
                 single_size(viewport),
+                cell,
                 Place {
                     session: sid,
                     panel: panel_id,
@@ -1725,7 +1941,7 @@ impl Shared {
             parts.discard();
             return Err(e);
         }
-        let handle = terminal::start(self, tid, sid, &req, parts);
+        let handle = terminal::start(self, tid, sid, &req, parts).map_err(ActionError::Spawn)?;
         let Some(sess) = st.session_mut(sid) else {
             return Err(ActionError::NotAttached);
         };
@@ -1816,6 +2032,7 @@ impl Shared {
                 return Err(ActionError::ShuttingDown);
             }
             let sess = st.session(sid).ok_or(ActionError::NotAttached)?;
+            let cell = sess.cell;
             let panel_id = panel
                 .or_else(|| sess.model.active_panel())
                 .ok_or(ActionError::NoActivePanel)?;
@@ -1850,6 +2067,7 @@ impl Shared {
                 launch.as_ref(),
                 &root,
                 size,
+                cell,
                 Place {
                     session: sid,
                     panel: panel_id,
@@ -1892,7 +2110,7 @@ impl Shared {
             parts.discard();
             return Err(e);
         }
-        let handle = terminal::start(self, tid, sid, &req, parts);
+        let handle = terminal::start(self, tid, sid, &req, parts).map_err(ActionError::Spawn)?;
         let Some(sess) = st.session_mut(sid) else {
             return Err(ActionError::NotAttached);
         };
@@ -1907,9 +2125,8 @@ impl Shared {
             }
         }
         self.settle_named(&mut st, sid, before, Some(panel_id));
-        for frame in st.full_frames_of(sid, &[tid]) {
-            st.push_frame(sid, &frame);
-        }
+        let shots = st.full_shots(sid, Some(&[tid]));
+        st.push_live(sid, &shots);
         Ok(tid)
     }
 
@@ -1981,6 +2198,9 @@ impl Shared {
             create: true,
             cols: DEFAULT_VIEWPORT.0,
             rows: DEFAULT_VIEWPORT.1,
+            cell: None,
+            images: false,
+            outer_name: None,
             cwd,
             env,
         };
@@ -2013,7 +2233,9 @@ impl Shared {
             return Err(ActionError::ShuttingDown);
         }
         let name = new.name.clone();
-        let sid = self.add_session(&mut st, new, parts, &a, DEFAULT_VIEWPORT);
+        let sid = self
+            .add_session(&mut st, new, parts, &a, DEFAULT_VIEWPORT)
+            .map_err(ActionError::Spawn)?;
         Ok((sid, name))
     }
 

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use deck_core::model::{
     PanelId, PanelView, ProjectId, ProjectView, SessionView, TerminalId, TerminalView,
 };
-use deck_core::protocol::{Cursor, CursorShape, Frame, Line, Modes};
+use deck_core::protocol::{Cursor, CursorShape, Frame, Line, Modes, Placement};
 
 /// One terminal's screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,8 @@ pub struct TermMirror {
     pub modes: Modes,
     pub display_offset: u32,
     pub history: u32,
+    /// The image placements that touch the viewport, from the last frame.
+    pub images: Vec<Placement>,
 }
 
 impl TermMirror {
@@ -34,6 +36,7 @@ impl TermMirror {
             modes: Modes::default(),
             display_offset: 0,
             history: 0,
+            images: Vec::new(),
         }
     }
 
@@ -47,6 +50,7 @@ impl TermMirror {
         self.modes = frame.modes;
         self.display_offset = frame.display_offset;
         self.history = frame.history;
+        self.images = frame.images;
         for (row, line) in frame.lines {
             if let Some(slot) = self.lines.get_mut(usize::from(row)) {
                 *slot = line;
@@ -189,6 +193,7 @@ pub(crate) mod tests {
             history: 3,
             lines,
             full,
+            images: Vec::new(),
         }
     }
 

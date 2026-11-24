@@ -380,6 +380,9 @@ pub fn probe(session: Option<String>) -> anyhow::Result<ExitCode> {
         create: true,
         cols: PROBE_SIZE.0,
         rows: PROBE_SIZE.1,
+        cell: None,
+        images: false,
+        outer_name: None,
     })?;
     let (mut welcomed, mut name) = (false, None);
     while !(welcomed && name.is_some()) {

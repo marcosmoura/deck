@@ -332,7 +332,12 @@ async fn after_focus_panel_only_the_new_panels_full_frames_follow() {
     new_panel(&mut c, &main).await;
     let second = c.active_terminal();
     assert_ne!(first, second);
-    c.send(&ClientMsg::Viewport { cols: 60, rows: 18 }).await;
+    c.send(&ClientMsg::Viewport {
+        cols: 60,
+        rows: 18,
+        cell: None,
+    })
+    .await;
     c.wait(|c| c.view.as_ref().and_then(|v| v.layout_viewport) == Some((60, 18)))
         .await;
     c.type_line("echo ON2").await;
@@ -707,6 +712,9 @@ async fn relative_directories_and_bad_attach_names_are_refused() {
             create: true,
             cols: 80,
             rows: 24,
+            cell: None,
+            images: false,
+            outer_name: None,
         },
         std::env::temp_dir(),
         support::hello_env(),

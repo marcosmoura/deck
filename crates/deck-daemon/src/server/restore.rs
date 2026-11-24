@@ -167,6 +167,7 @@ impl Shared {
                 env: session_env.clone(),
                 terminals: HashMap::new(),
                 viewport: None,
+                cell: None,
                 title_throttle: Throttle::new(TITLE_VIEW_INTERVAL),
                 last_attach: ticks.get(&saved.id).copied().unwrap_or(0),
                 startup: None,
@@ -255,6 +256,7 @@ impl Shared {
             Some(&spec),
             dir,
             single_size(DEFAULT_VIEWPORT),
+            None,
             Place {
                 session: launch.session,
                 panel: launch.panel,
@@ -298,9 +300,11 @@ impl Shared {
             }
             return;
         }
-        match opened {
-            Ok((parts, req)) => {
-                let handle = terminal::start(self, tid, sid, &req, parts);
+        let started = opened.and_then(|(parts, req)| {
+            terminal::start(self, tid, sid, &req, parts).map(|handle| (handle, req))
+        });
+        match started {
+            Ok((handle, req)) => {
                 st.restored.insert(tid);
                 let Some(sess) = st.session_mut(sid) else {
                     return;
@@ -313,9 +317,8 @@ impl Shared {
                 // A saved name may be of a program that is not running any more.
                 let renamed = panel_of_terminal(&mut sess.model, tid).map(|p| p.id);
                 self.settle_named(&mut st, sid, before, renamed);
-                for frame in st.full_frames_of(sid, &[tid]) {
-                    st.push_frame(sid, &frame);
-                }
+                let shots = st.full_shots(sid, Some(&[tid]));
+                st.push_live(sid, &shots);
             }
             Err(reason) => {
                 let Some(sess) = st.session_mut(sid) else {

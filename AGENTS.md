@@ -15,8 +15,9 @@ Start at [docs/index.md](docs/index.md), then read only the docs your task needs
 - One Cargo workspace at the root, one binary (`deck`). The crates, their
   boundaries, the protocol and the approved dependencies are in
   [docs/architecture.md](docs/architecture.md).
-- Toolchain: mise pins Rust (with rustfmt and Clippy), `just`, cargo-nextest,
-  Lefthook and oxfmt (`.mise.toml`). oxfmt formats what rustfmt does not:
+- Toolchain: mise pins Rust (with rustfmt and Clippy), Zig 0.17.1 (builds
+  `ghostty-vt` on Linux), `just`, cargo-nextest, Lefthook and oxfmt (`.mise.toml`).
+  oxfmt formats what rustfmt does not:
   Markdown, TOML, JSON and YAML. `just` is the command surface.
 - Platforms: macOS and Linux. Unix PTYs and Unix sockets only; no Windows code.
 

@@ -3,6 +3,7 @@
 use deck_core::model::TerminalId;
 use deck_core::protocol::{Frame, Line};
 
+use crate::diacritics::{DIACRITICS, PLACEHOLDER};
 use crate::draw::width;
 
 /// How far two presses on the same cell may be apart to count as a double or triple click.
@@ -92,7 +93,21 @@ pub(crate) fn cells(line: Option<&Line>, cols: u16) -> Vec<Cell> {
     for run in &line.runs {
         let mut col = usize::from(run.col);
         let mut last: Option<usize> = None;
+        let mut marks = false;
         for c in run.text.chars() {
+            // A program's image placeholder (and its diacritics) is never copied: a space.
+            if c == PLACEHOLDER || (marks && DIACRITICS.binary_search(&c).is_ok()) {
+                if c == PLACEHOLDER {
+                    marks = true;
+                    if let Some(slot) = out.get_mut(col) {
+                        *slot = Cell::Text(" ".into());
+                        last = None;
+                        col += 1;
+                    }
+                }
+                continue;
+            }
+            marks = false;
             let mut buf = [0; 4];
             let w = usize::from(width(c.encode_utf8(&mut buf)));
             if w == 0 {
@@ -200,6 +215,10 @@ mod tests {
         }
     }
 
+    fn text_of(lines: &[Line]) -> String {
+        text(lines, 10, (0, 0), (9, 0))
+    }
+
     fn sel(anchor: (u16, u16), head: (u16, u16), unit: Unit) -> TextSel {
         TextSel {
             terminal: TerminalId(4),
@@ -208,6 +227,15 @@ mod tests {
             unit,
             dragging: false,
         }
+    }
+
+    #[test]
+    fn program_placeholders_are_copied_as_spaces() {
+        let p = crate::diacritics::PLACEHOLDER;
+        let text = format!("a{p}\u{0305}\u{030D}{p}b\u{0305}");
+        let lines = vec![line(&text)];
+        // The mark after `b` is a real combining mark of `b`.
+        assert_eq!(text_of(&lines), "a  b\u{0305}");
     }
 
     #[test]

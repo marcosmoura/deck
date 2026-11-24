@@ -3,7 +3,10 @@
 
 use deck_core::config::HelpGroup;
 use deck_core::model::{TerminalId, TerminalView};
-use deck_core::protocol::{CursorShape, NoticeLevel};
+use std::borrow::Cow;
+use std::collections::HashMap;
+
+use deck_core::protocol::{CursorShape, ImageScreen, Modes, NoticeLevel, Placement, PlacementKind};
 use deck_core::theme::{BorderStyle, Theme};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
@@ -15,6 +18,9 @@ use ratatui::widgets::{Block, BorderType, Clear, Widget};
 use crate::agent;
 use crate::app::{App, too_small};
 pub(crate) use crate::convert::{color, downsample, style};
+use crate::convert::{image_id_color, program_id_color};
+use crate::diacritics::{COUNT, DIACRITICS, PLACEHOLDER, diacritic};
+use crate::graphics::Images;
 use crate::grid::Grid;
 use crate::input::Action;
 use crate::mirror::TermMirror;
@@ -265,6 +271,7 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
             let area = tmp.area;
             draw_terminal(&mut tmp, area, term);
             if let Some(id) = app.mirror.focused_id() {
+                draw_images(&mut tmp, area, app, id);
                 draw_selection(&mut tmp, area, app, id);
             }
             term.map(|t| t.cursor)
@@ -371,6 +378,7 @@ fn draw_grid(buf: &mut Buffer, grid: &Grid, app: &App) -> Option<Position> {
         let inner = Rect::new(inner.x, inner.y, inner.width, inner.height);
         let term = app.mirror.terminal(view.id);
         draw_terminal(buf, inner, term);
+        draw_images(buf, inner, app, view.id);
         draw_selection(buf, inner, app, view.id);
         if let Some(c) = term.map(|t| t.cursor).filter(|c| focused && c.visible)
             && c.col < inner.width
@@ -402,10 +410,215 @@ fn draw_terminal(buf: &mut Buffer, area: Rect, term: Option<&TermMirror>) {
             buf.set_stringn(
                 area.x + run.col,
                 y,
-                &run.text,
+                blank_placeholders(&run.text),
                 usize::from(area.width - run.col),
                 style(run.style),
             );
+        }
+    }
+}
+
+/// `text` with every Unicode placeholder cell (U+10EEEE and its diacritics) replaced by a
+/// space: a program's own placeholders never reach the outer terminal, where their image id
+/// could match one of the client's.
+fn blank_placeholders(text: &str) -> Cow<'_, str> {
+    if !text.contains(PLACEHOLDER) {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut after = false;
+    for c in text.chars() {
+        if c == PLACEHOLDER {
+            out.push(' ');
+            after = true;
+        } else if !(after && DIACRITICS.contains(&c)) {
+            out.push(c);
+            after = false;
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// The placed images of terminal `id`, over its text and under the selection highlight (which
+/// skips them), in `area`: each cell of
+/// a placement that has its outer image holds U+10EEEE, the diacritics of its row and column
+/// inside the image, and the outer id as its foreground, on the background underneath.
+fn draw_images(buf: &mut Buffer, area: Rect, app: &App, id: TerminalId) {
+    let (Some(images), Some(term)) = (app.images.as_ref(), app.mirror.terminal(id)) else {
+        return;
+    };
+    draw_program_placeholders(buf, area, images, term, id);
+    for p in &term.images {
+        let PlacementKind::Placed { col, row } = p.kind else {
+            continue;
+        };
+        let Some((outer, cols, rows)) = images.placed_id(id, p, app.cell) else {
+            continue;
+        };
+        for r in 0..rows {
+            let y = row.saturating_add(i32::from(r));
+            let Ok(y) = u16::try_from(y) else { continue };
+            if y >= area.height {
+                break;
+            }
+            for c in 0..cols {
+                let x = col.saturating_add(i32::from(c));
+                let Ok(x) = u16::try_from(x) else { continue };
+                if x >= area.width {
+                    break;
+                }
+                put_placeholder(buf, area.x, (area.x + x, area.y + y), outer, (r, c));
+            }
+        }
+    }
+}
+
+/// Puts the placeholder cell of image row `r` and column `c` of outer image `outer` at the
+/// cell `(bx, by)`, keeping the background underneath; `min_x` is the area's left edge.
+fn put_placeholder(
+    buf: &mut Buffer,
+    min_x: u16,
+    (bx, by): (u16, u16),
+    outer: u32,
+    (r, c): (u16, u16),
+) {
+    // A wide character whose second half this cell takes would spill over it.
+    if bx > min_x
+        && let Some(left) = buf.cell_mut((bx - 1, by))
+        && width(left.symbol()) > 1
+    {
+        left.set_symbol(" ");
+    }
+    let Some(cell) = buf.cell_mut((bx, by)) else {
+        return;
+    };
+    let bg = cell.bg;
+    cell.reset();
+    let symbol: String = [
+        PLACEHOLDER,
+        diacritic(usize::from(r)),
+        diacritic(usize::from(c)),
+    ]
+    .into_iter()
+    .collect();
+    cell.set_symbol(&symbol)
+        .set_fg(image_id_color(outer))
+        .set_bg(bg);
+}
+
+/// A program-made placeholder cell, as decoded: the image id, and the image row and column.
+#[derive(Debug, Clone, Copy)]
+struct Decoded {
+    at: u16,
+    id: u32,
+    row: usize,
+    col: usize,
+}
+
+/// The program-made placeholder cells of terminal `id` (U+10EEEE with up to three diacritics,
+/// the image id in the foreground colour), drawn over the client's outer image of the
+/// program's virtual placement. Cells whose image is unknown or not sent stay blank.
+fn draw_program_placeholders(
+    buf: &mut Buffer,
+    area: Rect,
+    images: &Images,
+    term: &TermMirror,
+    id: TerminalId,
+) {
+    let screen = if term.modes.has(Modes::ALTERNATE_SCREEN) {
+        ImageScreen::Alternate
+    } else {
+        ImageScreen::Primary
+    };
+    let mut newest: HashMap<u32, &Placement> = HashMap::new();
+    for p in &term.images {
+        if p.kind == PlacementKind::Virtual
+            && p.screen == screen
+            && newest
+                .get(&p.image)
+                .is_none_or(|n| n.generation < p.generation)
+        {
+            newest.insert(p.image, p);
+        }
+    }
+    if newest.is_empty() {
+        return;
+    }
+    for (row, line) in term.lines.iter().enumerate().take(usize::from(area.height)) {
+        let y = area.y + u16::try_from(row).unwrap_or(0);
+        let mut left: Option<Decoded> = None;
+        for run in &line.runs {
+            let mut at = run.col;
+            let mut chars = run.text.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c != PLACEHOLDER {
+                    at = at.saturating_add(width(c.encode_utf8(&mut [0; 4])));
+                    continue;
+                }
+                let mut marks = [None; 3];
+                let mut n = 0;
+                while let Some(&d) = chars.peek()
+                    && let Ok(i) = DIACRITICS.binary_search(&d)
+                {
+                    if let Some(slot) = marks.get_mut(n) {
+                        *slot = Some(i);
+                    }
+                    n += 1;
+                    chars.next();
+                }
+                let cell_at = at;
+                at = at.saturating_add(1);
+                let low = program_id_color(run.style.fg);
+                // The cell to the left, when it is next to this one and has the same colour.
+                let near = left.filter(|l| l.at + 1 == cell_at && l.id & 0xFF_FFFF == low);
+                // The third diacritic is the high byte of a 32-bit id; a cell with no
+                // diacritics at all takes everything from the cell to the left.
+                let (image, r, col) = match (marks[0], marks[1], marks[2]) {
+                    (None, ..) => match near {
+                        Some(l) => (l.id, l.row, l.col + 1),
+                        None => (low, 0, 0),
+                    },
+                    (Some(r), col, high) => {
+                        // Without a third diacritic, a cell that continues the one to the
+                        // left (same row, the next column) keeps its high byte; else 0.
+                        let high = match high {
+                            Some(h) => u8::try_from(h).ok(),
+                            None => Some(
+                                near.filter(|l| l.row == r && col.is_none_or(|c| c == l.col + 1))
+                                    .map_or(0, |l| (l.id >> 24) as u8),
+                            ),
+                        };
+                        let Some(high) = high else {
+                            left = None;
+                            continue;
+                        };
+                        let image = (u32::from(high) << 24) | low;
+                        let col = col.unwrap_or_else(|| {
+                            near.filter(|l| l.id == image && l.row == r)
+                                .map_or(0, |l| l.col + 1)
+                        });
+                        (image, r, col)
+                    }
+                };
+                left = Some(Decoded {
+                    at: cell_at,
+                    id: image,
+                    row: r,
+                    col,
+                });
+                if r >= COUNT || col >= COUNT || cell_at >= area.width {
+                    continue;
+                }
+                let Some(outer) = newest.get(&image).and_then(|p| images.virtual_id(id, p)) else {
+                    continue;
+                };
+                // Both are below 297.
+                let (r, col) = (
+                    u16::try_from(r).unwrap_or(0),
+                    u16::try_from(col).unwrap_or(0),
+                );
+                put_placeholder(buf, area.x, (area.x + cell_at, y), outer, (r, col));
+            }
         }
     }
 }
@@ -429,7 +642,10 @@ fn draw_selection(buf: &mut Buffer, area: Rect, app: &App, id: TerminalId) {
         let start = if row == from.1 { from.0 } else { 0 };
         let end = if row == to.1 { to.0 } else { u16::MAX };
         for col in start..=end.min(area.width - 1) {
-            if let Some(cell) = buf.cell_mut((area.x + col, area.y + row)) {
+            // An image cell keeps showing the image, without the highlight.
+            if let Some(cell) = buf.cell_mut((area.x + col, area.y + row))
+                && !cell.symbol().starts_with(PLACEHOLDER)
+            {
                 cell.set_style(style);
             }
         }

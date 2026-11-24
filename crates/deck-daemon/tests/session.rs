@@ -92,6 +92,7 @@ async fn a_viewport_resizes_the_pty_and_the_view() {
         .send(&ClientMsg::Viewport {
             cols: 100,
             rows: 30,
+            cell: None,
         })
         .await;
     client
@@ -258,6 +259,9 @@ async fn a_shell_that_fails_at_once_ends_the_attach_with_its_status() {
                 create: true,
                 cols: 82,
                 rows: 26,
+                cell: None,
+                images: false,
+                outer_name: None,
             },
             std::env::temp_dir(),
             support::hello_env(),
@@ -287,6 +291,9 @@ async fn a_missing_cwd_is_an_error_not_a_shell_in_the_home_dir() {
                 create: true,
                 cols: 82,
                 rows: 26,
+                cell: None,
+                images: false,
+                outer_name: None,
             },
             PathBuf::from("/nonexistent/deck-test"),
             support::hello_env(),
@@ -352,6 +359,7 @@ async fn a_stalled_client_does_not_stop_another_and_resyncs_when_it_reads_again(
     fast.send(&ClientMsg::Viewport {
         cols: 100,
         rows: 30,
+        cell: None,
     })
     .await;
     stalled
@@ -484,6 +492,9 @@ async fn session_selection_follows_the_attach_rules() {
                 create: false,
                 cols: 80,
                 rows: 24,
+                cell: None,
+                images: false,
+                outer_name: None,
             },
             std::env::temp_dir(),
             support::hello_env(),
@@ -542,7 +553,13 @@ async fn session_selection_follows_the_attach_rules() {
 async fn extreme_viewports_are_clamped_and_wide_output_still_works() {
     let daemon = TestDaemon::start().await;
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
-    client.send(&ClientMsg::Viewport { cols: 3, rows: 3 }).await;
+    client
+        .send(&ClientMsg::Viewport {
+            cols: 3,
+            rows: 3,
+            cell: None,
+        })
+        .await;
     client
         .wait(|c| c.view.as_ref().and_then(|v| v.layout_viewport) == Some((3, 3)))
         .await;
@@ -551,7 +568,11 @@ async fn extreme_viewports_are_clamped_and_wide_output_still_works() {
         .await;
     // Back to a normal size: the terminal still works after wide output in two columns.
     client
-        .send(&ClientMsg::Viewport { cols: 82, rows: 26 })
+        .send(&ClientMsg::Viewport {
+            cols: 82,
+            rows: 26,
+            cell: None,
+        })
         .await;
     client.type_line("echo ALIVE").await;
     client.wait_row("ALIVE").await;
@@ -560,6 +581,7 @@ async fn extreme_viewports_are_clamped_and_wide_output_still_works() {
         .send(&ClientMsg::Viewport {
             cols: u16::MAX,
             rows: u16::MAX,
+            cell: None,
         })
         .await;
     client

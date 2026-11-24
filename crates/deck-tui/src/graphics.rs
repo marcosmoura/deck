@@ -16,6 +16,8 @@ use std::sync::OnceLock;
 
 use deck_core::base64;
 use deck_core::icons::{Icon, IconKind};
+use deck_core::model::TerminalId;
+use deck_core::protocol::Placement;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 #[cfg(test)]
@@ -25,14 +27,9 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::app::App;
 use crate::colors::{Palette, Rgb};
 use crate::convert::{self, Resolved};
+use crate::diacritics::{PLACEHOLDER, diacritic};
+use crate::placed::Program;
 use crate::tier::Tier;
-
-/// The placeholder character of the kitty protocol's Unicode placeholders.
-pub const PLACEHOLDER: char = '\u{10EEEE}';
-/// The combining diacritic that stands for 0 in the protocol's row and column table.
-pub const DIACRITIC_ZERO: char = '\u{0305}';
-/// The one that stands for 1: column 1 of the second cell.
-pub const DIACRITIC_ONE: char = '\u{030D}';
 
 /// The first image id; the counter goes up from here, so an id is never 0.
 const FIRST_ID: u32 = 0xDEC001;
@@ -209,11 +206,11 @@ impl Pair {
 pub fn placeholder() -> String {
     [
         PLACEHOLDER,
-        DIACRITIC_ZERO,
-        DIACRITIC_ZERO,
+        diacritic(0),
+        diacritic(0),
         PLACEHOLDER,
-        DIACRITIC_ZERO,
-        DIACRITIC_ONE,
+        diacritic(0),
+        diacritic(1),
     ]
     .into_iter()
     .collect()
@@ -257,6 +254,10 @@ pub struct Images {
     pub(crate) order: Vec<(u32, Pair)>,
     sent: usize,
     pub(crate) next: u32,
+    /// Ids whose image was deleted, to give again.
+    free: Vec<u32>,
+    /// What the programs' images need.
+    pub(crate) program: Program,
     /// The pairs the drawing asked for since the last pre-pass.
     wanted: RefCell<Vec<Pair>>,
 }
@@ -271,6 +272,8 @@ impl Images {
             order: Vec::new(),
             sent: 0,
             next: FIRST_ID,
+            free: Vec::new(),
+            program: Program::default(),
             wanted: RefCell::new(Vec::new()),
         }
     }
@@ -349,13 +352,29 @@ impl Images {
         if self.ids.contains_key(&pair) {
             return true;
         }
-        if self.next > LAST_ID {
+        let Some(id) = self.alloc() else {
             return false;
-        }
-        self.ids.insert(pair, self.next);
-        self.order.push((self.next, pair));
-        self.next += 1;
+        };
+        self.ids.insert(pair, id);
+        self.order.push((id, pair));
         true
+    }
+
+    /// A free image id: one given back, else the next one; `None` when the 24-bit ids ran out.
+    pub(crate) fn alloc(&mut self) -> Option<u32> {
+        if let Some(id) = self.free.pop() {
+            return Some(id);
+        }
+        if self.next > LAST_ID {
+            return None;
+        }
+        self.next += 1;
+        Some(self.next - 1)
+    }
+
+    /// Gives an id back once its image is deleted.
+    pub(crate) fn release(&mut self, id: u32) {
+        self.free.push(id);
     }
 
     /// Writes the images registered since the last call, then flushes.
@@ -373,13 +392,13 @@ impl Images {
     /// Deletes every image that was sent, then flushes.
     pub fn delete_all(&self, out: &mut impl Write) -> io::Result<()> {
         let sent = self.order.get(..self.sent).unwrap_or_default();
-        if sent.is_empty() {
-            return Ok(());
+        let program = self.program.ids();
+        let mut any = false;
+        for id in sent.iter().map(|(id, _)| *id).chain(program) {
+            out.write_all(&delete(id))?;
+            any = true;
         }
-        for (id, _) in sent {
-            out.write_all(&delete(*id))?;
-        }
-        out.flush()
+        if any { out.flush() } else { Ok(()) }
     }
 }
 
@@ -409,6 +428,7 @@ impl App {
         B: Backend<Error = io::Error> + Write,
     {
         terminal.autoresize()?;
+        self.send_program_images(terminal.backend_mut())?;
         if let Some(images) = self.live_images() {
             images.take_wanted();
         }
@@ -451,10 +471,42 @@ impl App {
         Ok(fresh)
     }
 
+    /// Before a frame: sends the programs' images the terminal does not have yet and makes
+    /// the virtual placements the frame's cells show.
+    fn send_program_images(&mut self, out: &mut impl Write) -> io::Result<()> {
+        let wanted = self.wanted_placed();
+        let cell = self.cell;
+        let Some(images) = &mut self.images else {
+            return Ok(());
+        };
+        images.ensure_placed(out, &wanted, cell)
+    }
+
+    /// After a frame: deletes the program images it did not use.
+    pub fn finish_images(&mut self, out: &mut impl Write) -> io::Result<()> {
+        self.images
+            .as_mut()
+            .map_or(Ok(()), |images| images.finish_placed(out))
+    }
+
+    /// The placements, placed and virtual, of the terminals on screen: the active panel's.
+    fn wanted_placed(&self) -> Vec<(TerminalId, Placement)> {
+        let Some(panel) = self.mirror.active_panel() else {
+            return Vec::new();
+        };
+        panel
+            .terminals
+            .iter()
+            .filter_map(|t| Some((t.id, self.mirror.terminal(t.id)?)))
+            .flat_map(|(id, term)| term.images.iter().map(move |p| (id, *p)))
+            .collect()
+    }
+
     /// Sends the images a frame draws, as the pre-pass of a test: draws once into a scratch
     /// buffer.
     #[cfg(test)]
     pub fn send_images(&mut self, out: &mut impl Write) -> io::Result<()> {
+        self.send_program_images(out)?;
         let Some(images) = self.live_images() else {
             return Ok(());
         };

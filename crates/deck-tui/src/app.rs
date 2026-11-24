@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::graphics::{Images, SPINNER_FRAMES};
+use crate::placed::Piece;
 use deck_core::action::Action as Act;
 use deck_core::config::Config;
 use deck_core::keys::{KeyCode, KeyEvent, Modifiers, encode};
@@ -13,7 +14,7 @@ use deck_core::layout;
 use deck_core::model::TerminalId;
 use deck_core::mouse::{self, MouseButton, MouseEvent, MouseKind};
 use deck_core::protocol::{
-    ByeReason, ClientMsg, CursorShape, Modes, NoticeLevel, ScrollTo, ServerMsg,
+    ByeReason, CellPx, ClientMsg, CursorShape, Modes, NoticeLevel, ScrollTo, ServerMsg,
 };
 use deck_core::theme::Theme;
 use ratatui::crossterm::event as ct;
@@ -90,6 +91,8 @@ pub struct App {
     pub(crate) images: Option<Images>,
     /// The outer terminal's size in columns and rows.
     pub size: (u16, u16),
+    /// The outer terminal's cell size in pixels; `None` when it does not say.
+    pub cell: Option<CellPx>,
     pub armed: bool,
     pub flash: Option<(String, Instant)>,
     /// The flash is an error, drawn in the error colour.
@@ -214,6 +217,7 @@ impl App {
             font_answered: false,
             images: None,
             size,
+            cell: None,
             armed: false,
             flash: None,
             flash_error: false,
@@ -330,7 +334,11 @@ impl App {
             return Vec::new();
         }
         // Not a claim on the terminals' size: the client the user last typed in keeps it.
-        vec![Out::Send(ClientMsg::ReloadViewport { cols, rows })]
+        vec![Out::Send(ClientMsg::ReloadViewport {
+            cols,
+            rows,
+            cell: self.cell,
+        })]
     }
 
     /// A message from the daemon for the floating bar: at once when nothing of the daemon's
@@ -361,7 +369,30 @@ impl App {
 
     pub(crate) fn viewport_msg(&self) -> Out {
         let (cols, rows) = self.viewport();
-        Out::Send(ClientMsg::Viewport { cols, rows })
+        Out::Send(ClientMsg::Viewport {
+            cols,
+            rows,
+            cell: self.cell,
+        })
+    }
+
+    /// Whether the client can show program images: the outer terminal speaks the kitty
+    /// protocol, draws in 24-bit colour and has a known cell size. What `Attach` says.
+    pub fn program_images(&self) -> bool {
+        self.images.is_some() && self.cell.is_some()
+    }
+
+    /// The outer terminal's cell size changed (a font zoom keeps the columns and rows): the
+    /// daemon is told, since it sizes the terminals' pixels with it.
+    pub fn set_cell(&mut self, cell: Option<CellPx>) -> Vec<Out> {
+        if self.cell == cell {
+            return Vec::new();
+        }
+        self.cell = cell;
+        if too_small(self.size) {
+            return Vec::new();
+        }
+        vec![self.viewport_msg()]
     }
 
     /// A prompt, a confirmation or an overlay has the keyboard.
@@ -378,6 +409,9 @@ impl App {
     /// flash) stays.
     pub(crate) fn reset_session(&mut self) {
         self.mirror = Mirror::default();
+        if let Some(images) = &mut self.images {
+            images.program.clear();
+        }
         self.modal = None;
         self.picker = None;
         self.menu = None;
@@ -1415,6 +1449,45 @@ impl App {
                     vec![Out::Notify(bytes)]
                 }
             }
+            ServerMsg::Image {
+                terminal,
+                screen,
+                image,
+                generation,
+                width,
+                height,
+                format,
+                offset,
+                total,
+                data,
+            } => {
+                if let Some(images) = &mut self.images {
+                    images.program.piece(Piece {
+                        slot: (terminal, screen, image),
+                        generation,
+                        width,
+                        height,
+                        format,
+                        offset,
+                        total,
+                        data,
+                    });
+                    self.dirty = true;
+                }
+                Vec::new()
+            }
+            ServerMsg::ImageGone {
+                terminal,
+                screen,
+                image,
+                generation,
+            } => {
+                if let Some(images) = &mut self.images {
+                    images.program.gone((terminal, screen, image), generation);
+                    self.dirty = true;
+                }
+                Vec::new()
+            }
             ServerMsg::Notice { level, text } => {
                 self.push_notice(level, text, Instant::now());
                 Vec::new()
@@ -1430,6 +1503,12 @@ impl App {
                     .view()
                     .map(|v| (v.active_project, v.active_panel));
                 self.mirror.set_view(view);
+                if let Some(images) = &mut self.images {
+                    let mirror = &self.mirror;
+                    images
+                        .program
+                        .retain_terminals(|id| mirror.find_terminal(id).is_some());
+                }
                 self.check_row_gesture();
                 self.arm_spinner(Instant::now());
                 self.check_scroll_target();
@@ -1649,7 +1728,8 @@ mod tests {
             a.on_event(ct::Event::Resize(100, 30), now),
             [Out::Send(ClientMsg::Viewport {
                 cols: 100,
-                rows: 30
+                rows: 30,
+                cell: None,
             })]
         );
         assert!(a.on_event(ct::Event::Resize(19, 30), now).is_empty());
@@ -1658,7 +1738,11 @@ mod tests {
         assert!(!too_small((20, 5)));
         assert_eq!(
             a.on_event(ct::Event::Resize(20, 5), now),
-            [Out::Send(ClientMsg::Viewport { cols: 20, rows: 5 })]
+            [Out::Send(ClientMsg::Viewport {
+                cols: 20,
+                rows: 5,
+                cell: None
+            })]
         );
     }
 

@@ -148,7 +148,12 @@ async fn a_pty_changed_just_after_a_resize_is_put_back_by_the_rechecks() {
         bytes: b"sleep 0.4; stty cols 50\n".to_vec(),
     })
     .await;
-    c.send(&ClientMsg::Viewport { cols: 90, rows: 24 }).await;
+    c.send(&ClientMsg::Viewport {
+        cols: 90,
+        rows: 24,
+        cell: None,
+    })
+    .await;
     c.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((90, 24)))
         .await;
     // The change lands at 400 ms; the recheck at 1 s sets the layout size again.
@@ -343,7 +348,12 @@ async fn the_clamped_copy_follows_the_window_and_the_stored_ratios_stay() {
     let stored = panel(&c).ratios;
     assert_eq!(stored, Ratios::default_for(5));
 
-    c.send(&ClientMsg::Viewport { cols: 30, rows: 24 }).await;
+    c.send(&ClientMsg::Viewport {
+        cols: 30,
+        rows: 24,
+        cell: None,
+    })
+    .await;
     c.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((30, 24)))
         .await;
     assert_eq!(panel(&c).ratios, stored, "never overwritten");
@@ -364,6 +374,7 @@ async fn the_clamped_copy_follows_the_window_and_the_stored_ratios_stay() {
     c.send(&ClientMsg::Viewport {
         cols: 100,
         rows: 24,
+        cell: None,
     })
     .await;
     c.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((100, 24)))

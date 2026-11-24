@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 05 — Sending images to clients

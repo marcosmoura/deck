@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 02 — One emulator thread per terminal

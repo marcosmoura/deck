@@ -8,7 +8,6 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-2. DECK-19 Images in panels
 3. DECK-23 Daemon stats and stress tests
 4. DECK-25 Release automation and Homebrew
 5. DECK-21 Live upgrade
@@ -22,33 +21,33 @@ Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
-| ID      | Title                                     | Status      | Depends on                                                    | Spec                                                                         |
-| ------- | ----------------------------------------- | ----------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| DECK-01 | Core daemon and terminal                  | done        | —                                                             | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
-| DECK-02 | Sessions, projects, panels and sidebar    | done        | DECK-01                                                       | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
-| DECK-03 | Grid layout                               | done        | DECK-02, DECK-08                                              | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
-| DECK-04 | Persistence across daemon restarts        | done        | DECK-03, DECK-08                                              | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
-| DECK-05 | Control API                               | done        | DECK-03, DECK-04                                              | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
-| DECK-06 | Agent status, hooks and resume            | done        | DECK-05, DECK-04                                              | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
-| DECK-08 | Config and theming                        | done        | DECK-02                                                       | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
-| DECK-09 | Sidebar titles with icons                 | done        | DECK-06                                                       | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
-| DECK-10 | Sidebar mouse and buttons                 | done        | DECK-06                                                       | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
-| DECK-11 | Restore agent sessions                    | done        | DECK-06, DECK-10                                              | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
-| DECK-12 | Agent logos as images                     | done        | DECK-09                                                       | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
-| DECK-13 | OpenCode v2 hooks                         | done        | DECK-06                                                       | —                                                                            |
-| DECK-14 | Release workflow and local install        | done        | —                                                             | —                                                                            |
-| DECK-15 | Mouse text selection, copy on select      | done        | —                                                             | —                                                                            |
-| DECK-16 | Call projects spaces                      | done        | —                                                             | —                                                                            |
-| DECK-17 | Floating bar, sidebar highlight, menus    | done        | —                                                             | [floating-bar-menus](specs/2026-11-23-floating-bar-menus/00-overview.md)     |
-| DECK-18 | Sidebar reorder and space gaps            | done        | —                                                             | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
-| DECK-19 | Images in panels                          | in-progress | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
-| DECK-20 | Built-in icons                            | done        | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
-| DECK-21 | Live upgrade                              | ready       | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
-| DECK-22 | Terminal compatibility                    | ready       | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
-| DECK-23 | Daemon stats and stress tests             | ready       | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
-| DECK-24 | Scrollback search and copy mode           | ready       | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
-| DECK-25 | Release automation and Homebrew           | ready       | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
-| DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
+| ID      | Title                                     | Status | Depends on                                                    | Spec                                                                         |
+| ------- | ----------------------------------------- | ------ | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| DECK-01 | Core daemon and terminal                  | done   | —                                                             | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
+| DECK-02 | Sessions, projects, panels and sidebar    | done   | DECK-01                                                       | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
+| DECK-03 | Grid layout                               | done   | DECK-02, DECK-08                                              | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
+| DECK-04 | Persistence across daemon restarts        | done   | DECK-03, DECK-08                                              | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
+| DECK-05 | Control API                               | done   | DECK-03, DECK-04                                              | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
+| DECK-06 | Agent status, hooks and resume            | done   | DECK-05, DECK-04                                              | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
+| DECK-08 | Config and theming                        | done   | DECK-02                                                       | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
+| DECK-09 | Sidebar titles with icons                 | done   | DECK-06                                                       | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
+| DECK-10 | Sidebar mouse and buttons                 | done   | DECK-06                                                       | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
+| DECK-11 | Restore agent sessions                    | done   | DECK-06, DECK-10                                              | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
+| DECK-12 | Agent logos as images                     | done   | DECK-09                                                       | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
+| DECK-13 | OpenCode v2 hooks                         | done   | DECK-06                                                       | —                                                                            |
+| DECK-14 | Release workflow and local install        | done   | —                                                             | —                                                                            |
+| DECK-15 | Mouse text selection, copy on select      | done   | —                                                             | —                                                                            |
+| DECK-16 | Call projects spaces                      | done   | —                                                             | —                                                                            |
+| DECK-17 | Floating bar, sidebar highlight, menus    | done   | —                                                             | [floating-bar-menus](specs/2026-11-23-floating-bar-menus/00-overview.md)     |
+| DECK-18 | Sidebar reorder and space gaps            | done   | —                                                             | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
+| DECK-19 | Images in panels                          | done   | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
+| DECK-20 | Built-in icons                            | done   | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
+| DECK-21 | Live upgrade                              | ready  | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
+| DECK-22 | Terminal compatibility                    | ready  | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
+| DECK-23 | Daemon stats and stress tests             | ready  | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
+| DECK-24 | Scrollback search and copy mode           | ready  | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
+| DECK-25 | Release automation and Homebrew           | ready  | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
+| DECK-26 | Security, privacy and performance reviews | ready  | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
 
 ### Withdrawn
 

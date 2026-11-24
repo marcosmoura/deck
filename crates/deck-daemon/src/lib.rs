@@ -8,6 +8,7 @@ mod conn;
 mod emu;
 mod env;
 mod error;
+mod images;
 mod persist;
 mod platform;
 mod queue;

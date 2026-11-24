@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 deck-core = { path = "../deck-core" }
-alacritty_terminal = { workspace = true }
+ghostty-vt = { workspace = true, features = ["kitty-graphics", "png"] }
 libc = { workspace = true }
 portable-pty = { workspace = true }
 serde_json = { workspace = true }

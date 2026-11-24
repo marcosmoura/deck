@@ -1,13 +1,12 @@
 //! A terminal's screen as text: `capture` and the line search of `wait --text`.
 
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Column, Line};
-use alacritty_terminal::term::TermMode;
-use alacritty_terminal::term::cell::Flags;
 use deck_core::model::TerminalId;
 use deck_core::protocol::{Captured, Color, Modes, Style};
+use ghostty_vt::Error;
+use ghostty_vt::screen::Screen;
+use ghostty_vt::terminal::{Point, PointCoordinate};
 
-use super::{Emu, is_blank, modes, style_of};
+use super::{Emu, Glyph, glyph, modes_of};
 
 /// A capture holds at most this many lines.
 pub const MAX_LINES: usize = 10_000;
@@ -17,46 +16,81 @@ pub const MAX_BYTES: usize = 8 * 1024 * 1024;
 impl Emu {
     /// The modes programs set that decide how keys are encoded.
     pub fn modes(&self) -> Modes {
-        modes(*self.term.mode())
+        modes_of(&self.term)
+    }
+
+    /// One cell of the grid, `line` rows from the top of the live screen (negative lines are
+    /// the history).
+    fn glyph_at(&self, col: u16, line: i32) -> Glyph {
+        let point = if line >= 0 {
+            Point::Active(PointCoordinate {
+                x: col,
+                y: u32::try_from(line).unwrap_or(0),
+            })
+        } else {
+            let history = self.term.scrollback_rows().unwrap_or(0);
+            let y = i64::try_from(history).unwrap_or(0) + i64::from(line);
+            Point::History(PointCoordinate {
+                x: col,
+                y: u32::try_from(y).unwrap_or(0),
+            })
+        };
+        let read = || -> Result<Glyph, Error> {
+            let at = self.term.grid_ref(point)?;
+            let raw = at.cell()?;
+            let mut text = String::new();
+            if raw.has_text().unwrap_or(false) {
+                let mut buf = vec!['\0'; 8];
+                let len = match at.graphemes(&mut buf) {
+                    Err(Error::OutOfSpace { required }) => {
+                        buf = vec!['\0'; required];
+                        at.graphemes(&mut buf)?
+                    }
+                    other => other?,
+                };
+                text.extend(buf.iter().take(len));
+            }
+            let style = if raw.has_styling().unwrap_or(false) {
+                at.style().ok()
+            } else {
+                None
+            };
+            Ok(glyph(raw, style, text))
+        };
+        read().unwrap_or_default()
     }
 
     /// One row of the grid as text; negative lines are the history. A wide character is
     /// printed once, combining marks stay attached to their character, trailing blanks are
     /// left out. With `ansi` colours and attributes come as SGR sequences.
     fn row_text(&self, line: i32, ansi: bool) -> String {
-        let cells = &self.term.grid()[Line(line)];
-        let end = (0..self.term.columns())
-            .rev()
-            .find(|c| {
-                let cell = &cells[Column(*c)];
+        let cols = self.size().0;
+        let glyphs: Vec<Glyph> = (0..cols).map(|col| self.glyph_at(col, line)).collect();
+        let end = glyphs
+            .iter()
+            .rposition(|g| {
                 if ansi {
-                    !is_blank(cell)
+                    !g.is_blank()
                 } else {
-                    !matches!(cell.c, ' ' | '\0') || cell.zerowidth().is_some()
+                    !matches!(g.text.as_str(), "" | " ")
                 }
             })
-            .map_or(0, |c| c + 1);
+            .map_or(0, |i| i + 1);
         let mut out = String::new();
         let mut current = Style::default();
-        for col in 0..end {
-            let cell = &cells[Column(col)];
-            if cell
-                .flags
-                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-            {
+        for glyph in glyphs.iter().take(end) {
+            if glyph.spacer {
                 continue;
             }
-            if ansi {
-                let style = style_of(cell);
-                if style != current {
-                    sgr(&mut out, style);
-                    current = style;
-                }
+            if ansi && glyph.style != current {
+                sgr(&mut out, glyph.style);
+                current = glyph.style;
             }
-            out.push(if cell.c == '\0' { ' ' } else { cell.c });
-            if let Some(extra) = cell.zerowidth() {
-                out.extend(extra);
-            }
+            out.push_str(if glyph.text.is_empty() {
+                " "
+            } else {
+                &glyph.text
+            });
         }
         if current != Style::default() {
             out.push_str("\x1b[0m");
@@ -66,7 +100,7 @@ impl Emu {
 
     /// The first row of the visible screen that contains `needle`.
     pub fn find_line(&self, needle: &str) -> Option<String> {
-        let rows = i32::try_from(self.term.screen_lines()).unwrap_or(0);
+        let rows = i32::from(self.size().1);
         (0..rows)
             .map(|row| self.row_text(row, false))
             .find(|text| text.contains(needle))
@@ -82,11 +116,10 @@ impl Emu {
         history: bool,
         ansi: bool,
     ) -> Captured {
-        let mode = *self.term.mode();
-        let alternate = mode.contains(TermMode::ALT_SCREEN);
-        let rows = i32::try_from(self.term.screen_lines()).unwrap_or(i32::MAX);
+        let alternate = self.term.active_screen() == Ok(Screen::Alternate);
+        let rows = i32::from(self.size().1);
         let earlier = if history && !alternate {
-            i32::try_from(self.term.grid().history_size()).unwrap_or(0)
+            i32::try_from(self.history()).unwrap_or(0)
         } else {
             0
         };
@@ -131,15 +164,16 @@ impl Emu {
         taken.reverse();
 
         let (cols, screen) = self.size();
-        let point = self.term.grid().cursor.point;
         Captured {
             terminal,
             size: (cols, screen),
             cursor: (
-                u16::try_from(point.line.0.max(0))
+                self.term
+                    .cursor_y()
                     .unwrap_or(0)
                     .min(screen.saturating_sub(1)),
-                u16::try_from(point.column.0)
+                self.term
+                    .cursor_x()
                     .unwrap_or(0)
                     .min(cols.saturating_sub(1)),
             ),
@@ -186,38 +220,38 @@ fn sgr_color(out: &mut String, color: Color, base: u8, bright: u8, extended: u8)
 mod tests {
     use super::*;
 
+    fn new(cols: u16, rows: u16, scrollback: usize) -> Emu {
+        Emu::new(cols, rows, scrollback).expect("emulator")
+    }
+
     fn capture(e: &Emu, lines: Option<u32>, history: bool, ansi: bool) -> Captured {
         e.capture(TerminalId(1), lines, history, ansi)
     }
 
     #[test]
     fn the_screen_is_text_with_trailing_blanks_and_empty_lines_dropped() {
-        let mut e = Emu::new(20, 6, 100);
+        let mut e = new(20, 6, 100);
         e.feed(b"one   \r\n\r\ntwo\x1b[5;1H");
         let c = capture(&e, None, false, false);
         assert_eq!(c.lines, ["one", "", "two"]);
         assert_eq!((c.size, c.cursor, c.truncated), ((20, 6), (4, 0), 0));
         assert!(!c.alternate_screen);
         assert_eq!(capture(&e, Some(2), false, false).lines, ["", "two"]);
-        assert!(
-            capture(&Emu::new(10, 3, 0), None, false, false)
-                .lines
-                .is_empty()
-        );
+        assert!(capture(&new(10, 3, 0), None, false, false).lines.is_empty());
         assert_eq!(e.find_line("tw").as_deref(), Some("two"));
         assert_eq!(e.find_line("three"), None);
     }
 
     #[test]
     fn wide_and_combining_characters_are_printed_once() {
-        let mut e = Emu::new(20, 3, 0);
+        let mut e = new(20, 3, 0);
         e.feed("日本 🙂 e\u{301}x".as_bytes());
         assert_eq!(capture(&e, None, false, false).lines, ["日本 🙂 e\u{301}x"]);
     }
 
     #[test]
     fn history_is_prepended_but_not_on_the_alternate_screen() {
-        let mut e = Emu::new(10, 4, 100);
+        let mut e = new(10, 4, 100);
         for n in 1..=10 {
             e.feed(format!("{n}\r\n").as_bytes());
         }
@@ -236,7 +270,7 @@ mod tests {
 
     #[test]
     fn ansi_keeps_colours_and_attributes() {
-        let mut e = Emu::new(20, 2, 0);
+        let mut e = new(20, 2, 0);
         e.feed(b"a\x1b[1;31mb\x1b[0;38;2;1;2;3mc\x1b[0m d\x1b[44m  ");
         let c = capture(&e, None, false, true);
         assert_eq!(
@@ -248,7 +282,7 @@ mod tests {
 
     #[test]
     fn the_line_cap_counts_what_it_leaves_out() {
-        let mut e = Emu::new(10, 4, 30_000);
+        let mut e = new(10, 4, 30_000);
         for n in 1..=12_000 {
             e.feed(format!("{n}\r\n").as_bytes());
         }
@@ -265,7 +299,9 @@ mod tests {
 
     #[test]
     fn the_byte_cap_leaves_a_whole_number_of_lines() {
-        let mut e = Emu::new(1000, 2, 9_000);
+        // The scrollback budget is sized in bytes for 250 columns (sub-spec 03), so a
+        // 1000-column terminal needs more lines to pass 8 MiB.
+        let mut e = new(1000, 2, 40_000);
         let line = "x".repeat(1000);
         for _ in 0..(MAX_BYTES / 1001 + 50) {
             e.feed(format!("{line}\r\n").as_bytes());

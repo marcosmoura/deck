@@ -61,6 +61,16 @@ pub fn image_id_color(id: u32) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// The image id a program's placeholder cell carries in its foreground colour: an RGB colour
+/// is the low 24 bits, an indexed one the low 8, the default colour 0.
+pub fn program_id_color(color: deck_core::protocol::Color) -> u32 {
+    match color {
+        deck_core::protocol::Color::Rgb(r, g, b) => u32::from_be_bytes([0, r, g, b]),
+        deck_core::protocol::Color::Indexed(i) => u32::from(i),
+        deck_core::protocol::Color::Default => 0,
+    }
+}
+
 /// Claude's brand colour, `#d97757`: the colour of its icon in every tier.
 pub fn claude_color() -> Color {
     rgb((0xd9, 0x77, 0x57))

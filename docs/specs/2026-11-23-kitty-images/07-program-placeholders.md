@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 07 — Program-made image placeholders
@@ -17,7 +17,8 @@ Programs that draw images with Unicode placeholders themselves (`kitten icat --u
    - its row and column are its first two diacritics; a missing one is inherited from the placeholder cell to its left in the same mirror row (column + 1, same row and id, as kitty does), and a placeholder with neither and no placeholder to its left is row 0, column 0.
 3. **Drawing.** The client maps (terminal, active screen, id) to the newest generation with a `Virtual` placement in that terminal's frame and draws the cell with the outer id as foreground (RGB) and explicit row and column diacritics, never a third one. Rows or columns past the table's last entry (296) draw blank. A placeholder whose image is unknown or not ready, and every placeholder when images are off, stays the blank cell of sub-spec 06 (requirement 7).
 4. **Copy.** Placeholder characters are never copied by text selection; they become spaces.
-5. **Docs.** `docs/features/images.md` adds program placeholders and the limit of one virtual placement per image.
+5. **Terminal identity** (added 24 Nov 2026 after the user tried Claude Code: it shows kitty images only when the terminal names itself `ghostty`/`ghostty <version>` or `kitty`/`kitty(0.28+)`, from XTVERSION or `TERM`/`TERM_PROGRAM`, and deck panels have neither). At attach the client asks the outer terminal's XTVERSION (`CSI > q`) together with the OSC 10/11 colour queries, with the same timeout and the same removal of late answers from the input, and sends the name (`DCS >| name ST`, at most 64 printable characters) in `Role::Attach` (`outer_name: Option<String>`, same protocol version on this branch). The daemon keeps the name of the client the terminals follow, as for its colours. When that client attached with `images: true` and gave a name, every emulator of the session answers XTVERSION with that name (`set_xtversion`); otherwise XTVERSION stays unanswered, as today (the pinned reply test is unchanged for that case). The answer changes when the followed client changes.
+6. **Docs.** `docs/features/images.md` adds program placeholders and the limit of one virtual placement per image.
 
 ## Acceptance criteria
 
@@ -25,6 +26,8 @@ Programs that draw images with Unicode placeholders themselves (`kitten icat --u
 - [ ] A 32-bit id with a third diacritic, and cells without diacritics after the first, are decoded and drawn correctly.
 - [ ] Without the kitty environment, program placeholders draw as blanks and no `ESC _G` from program images is written.
 - [ ] Selecting over program placeholders copies spaces.
+- [ ] With a followed client that can show images and whose outer terminal answered `ghostty 1.2.0`, a program's `CSI > q` gets `DCS >| ghostty 1.2.0 ST`; with a client without images, or without a name, it gets no answer.
+- [ ] Claude Code's sequence works end to end once it has asked XTVERSION (an e2e test that sends `CSI > q` and reads the answer back, and a client-side unit test of the outer query and its timeout).
 - [ ] `docs/features/images.md` is updated.
 
 ## Tests

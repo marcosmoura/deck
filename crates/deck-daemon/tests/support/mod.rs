@@ -223,6 +223,12 @@ pub struct Attach {
     /// The outer window; the panel area is the window less the sidebar.
     pub cols: u16,
     pub rows: u16,
+    /// The outer terminal's cell size in pixels.
+    pub cell: Option<deck_core::protocol::CellPx>,
+    /// The client can show images.
+    pub images: bool,
+    /// The outer terminal's name.
+    pub outer_name: Option<String>,
     pub cwd: PathBuf,
     pub env: Vec<(OsString, OsString)>,
     pub colors: Option<OuterColors>,
@@ -235,6 +241,9 @@ impl Default for Attach {
             create: true,
             cols: 80,
             rows: 24,
+            cell: None,
+            images: false,
+            outer_name: None,
             cwd: std::env::temp_dir(),
             env: hello_env(),
             colors: None,
@@ -301,6 +310,9 @@ impl Client {
                 create: a.create,
                 cols: a.cols,
                 rows: a.rows,
+                cell: a.cell,
+                images: a.images,
+                outer_name: a.outer_name,
             },
             a.cwd,
             a.env,

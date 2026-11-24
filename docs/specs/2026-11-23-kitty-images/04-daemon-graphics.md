@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 04 — Cell size and kitty graphics in the daemon
@@ -11,15 +11,15 @@ Programs in a panel learn the real cell size in pixels and can use the kitty gra
 
 ## Requirements
 
-1. **Protocol** (`deck-core::protocol`, `PROTOCOL_VERSION` one above `main`'s; 20 today): `Role::Attach` gets `cell: Option<CellPx>` and `images: bool` (the client's capability, used by sub-spec 05; every client sends `false` until sub-spec 06), added together so the places that build `Role::Attach` (`crates/deck-tui/src/lib.rs`, `crates/deck/src/control.rs`, the tests) change once; `ClientMsg::Viewport` and `ClientMsg::ReloadViewport` get `cell: Option<CellPx>`. `CellPx { width: u16, height: u16 }` is the outer terminal's cell size in pixels, `None` when unknown. Round-trip tests.
+1. **Protocol** (`deck-core::protocol`, `PROTOCOL_VERSION` 21, one above `main`'s 20): `Role::Attach` gets `cell: Option<CellPx>` and `images: bool` (the client's capability, used by sub-spec 05; every client sends `false` until sub-spec 06), added together so the places that build `Role::Attach` (`crates/deck-tui/src/lib.rs`, `crates/deck/src/control.rs`, the tests) change once; `ClientMsg::Viewport` and `ClientMsg::ReloadViewport` get `cell: Option<CellPx>`. `CellPx { width: u16, height: u16 }` is the outer terminal's cell size in pixels, `None` when unknown. Round-trip tests.
 2. **Client** (`deck-tui`): the client measures the cell size with crossterm's `window_size()` (pixel width divided by columns, pixel height by rows; `None` when the pixel size is 0) and sends it in `Attach` and in every `Viewport`/`ReloadViewport`. The client's `SIGWINCH` path forwards only a changed size today; it also sends a `Viewport` when only the cell size changed (font zoom with the same columns and rows).
 3. **Cell size in the daemon**: the daemon keeps the cell size of the client the terminals follow (the one whose `Viewport` sized the PTYs, as for the size) and, when it is known:
    - passes it to every emulator of that session on resize (`Terminal::resize(cols, rows, cell_width_px, cell_height_px)`), so image grid sizes and `CSI 14/16 t` answers use it;
    - sets the PTY's pixel size to `cols × width` by `rows × height` (`PtySize::pixel_width`, `pixel_height`), in `resize_pty` and `sync_pty`, so programs that read `TIOCGWINSZ` see it;
    - re-applies both when only the cell size changed.
-     Unknown, the emulator gets 8×16 and the PTY 0×0 pixels, as today. A terminal created later in the session starts with the known size.
-4. **Kitty graphics on**: every emulator gets a 64 MiB image storage limit (`set_kitty_image_storage_limit`, both screens), the file, temporary-file and shared-memory mediums allowed, and deck's PNG decoder. A program's `a=q` query is answered by the emulator.
-5. **PNG decoder**: `png` (version 0.18) becomes a `[workspace.dependencies]` entry used by `deck-daemon`, recorded in architecture.md. A `DecodePng` implementation in `deck-daemon` decodes to 8-bit RGBA (expanding palette, grey and 16-bit images, filling alpha) into `libghostty-vt`'s `Bytes` (`Bytes::new_with_alloc`). `Emu::new` installs it (`set_png_decoder`) on the current thread before creating its terminal, holding one process-wide lock across the call, since each install also sets a process-global C option; so it works on emulator threads and in unit tests alike. A malformed PNG is rejected (the program gets the protocol's error answer), never a panic.
+     Unknown, the emulator gets 8×16 and the PTY 0×0 pixels, as today. `Emu` drops the crate's own `CSI 16 t` answer today (sub-spec 03 keeps that query unanswered, as alacritty did); from this sub-spec it lets the answer through when the cell size is known and keeps dropping it while it is unknown. A terminal created later in the session starts with the known size.
+4. **Kitty graphics on**: every emulator gets a 64 MiB image storage limit (`set_kitty_image_storage_limit`, both screens), the file, temporary-file and shared-memory mediums explicitly off (only direct transmission, `t=d`; see the overview's Limits for why). Added after the user tried Claude Code (overview Notes): before feeding output to the emulator, the daemon rewrites a `t=f` or `t=t` command into direct transmission by reading the file itself (on the PTY reader thread: resolved path, `O_NONBLOCK` and `O_NOCTTY`, regular files only, at most 64 MiB, honouring `S` and `O`; a `t=t` file is deleted afterwards when it is in a temp directory and its name contains `tty-graphics-protocol`). A path that fails these checks gets the command passed on unchanged, so the emulator answers it with an error. The PNG decoder is the crate's. A program's `a=q` query is answered by the emulator.
+5. **PNG decoder**: the crate's `RustPngDecoder` (`png` feature, from sub-spec 01). `Emu::new` installs it (`set_png_decoder`) on the current thread before creating its terminal, holding one process-wide lock across the call, since each install also sets a process-global C option; so it works on emulator threads and in unit tests alike. Palette, grey and 16-bit PNGs must come out as RGB or RGBA; if the crate's decoder does not expand them, `Emu::image` expands them (requirement 8). A malformed PNG is rejected (the program gets the protocol's error answer), never a panic.
 6. **New protocol types** (`deck-core::protocol`; names may differ from these where they would clash with `libghostty-vt`'s own types in `deck-daemon`):
    - `ImageScreen { Primary, Alternate }`.
    - `ImageFormat { Rgb, Rgba }` (3 or 4 bytes per pixel).
@@ -37,11 +37,12 @@ Programs in a panel learn the real cell size in pixels and can use the kitty gra
 - [ ] With a client cell size of 9×18 and an 80×24 panel, `CSI 16 t` answers 18;9, `CSI 14 t` 432;720, and the PTY's `TIOCGWINSZ` pixel size is 720×432; without a cell size, today's answers and 0×0.
 - [ ] A cell-size-only change reaches the emulator and the PTY.
 - [ ] A kitty `a=q` query from a program gets an `OK` answer.
-- [ ] A transmitted-and-placed RGBA image, a PNG, a PNG read from a file (`t=f`, in a temp dir) and a grey image each appear in `placements()` with the right cell position and grid size for a known cell size, and `image()` returns their pixels as RGB or RGBA.
+- [ ] A transmitted-and-placed RGBA image, a PNG, a PNG and a grey image each appear in `placements()` with the right cell position and grid size for a known cell size, and `image()` returns their pixels as RGB or RGBA.
+- [ ] A transmission with `t=f`, `t=t` or `t=s` gets an error answer and stores nothing, including a `t=f` path to a FIFO, which must not block the emulator thread.
 - [ ] A malformed PNG gets an error answer and the daemon keeps running.
 - [ ] Scrolling the image half out of the viewport lists it with a negative `row`; scrolling the display back keeps it on the right row.
 - [ ] A virtual placement is listed as `Virtual` with its `cols` and `rows`; an image placed on the alternate screen is listed with `Alternate`; a placement with `c=70000` lists `cols` as 65535, not wrapped.
-- [ ] architecture.md (protocol fields, cell size, PNG decoder, `png` dependency) is updated.
+- [ ] architecture.md (protocol fields, cell size, PNG decoder) is updated.
 
 ## Tests
 

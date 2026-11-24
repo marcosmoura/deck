@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 06 — Drawing placed images in the client
@@ -20,7 +20,7 @@ Run `kitten icat picture.png` (or chafa, timg with the kitty protocol) in a deck
    - a canvas over 64 MiB of RGBA is not built and the placement is not drawn (logged once);
    - it is sent with `a=t` (`f=32`, `s`, `v`, `i`, chunked with `m=1`, `q=2`) followed by one virtual placement (`a=p,U=1,i=<id>,c=<cols>,r=<rows>,q=2`); the outer terminal fits it to the box with no scaling.
 5. **Deleting outer images.** After each draw, an outer image no placement of that draw used is deleted (`a=d,d=I,i=<id>,q=2`) and its id freed. Switching panels deletes the outer images of the panel left; switching back builds them again from the kept pixels.
-6. **Drawing.** After a terminal's text and the text selection highlight are drawn into the buffer, and before borders and overlays, each `Placement` with `kind: Placed { col, row }` whose outer image is ready fills the cells of its rectangle (`col..col+cols`, `row..row+rows`, cut as in requirement 4) that lie inside the terminal's area:
+6. **Drawing.** After a terminal's text is drawn into the buffer, before the text selection highlight (which skips image cells, so they keep the background they had) and before overlays, each `Placement` with `kind: Placed { col, row }` whose outer image is ready fills the cells of its rectangle (`col..col+cols`, `row..row+rows`, cut as in requirement 4) that lie inside the terminal's area:
    - each cell's symbol is U+10EEEE with the diacritics of its row and column inside the image, foreground the outer id as RGB, no modifiers, the background of the cell underneath; row and column diacritics are always written, so each cell stands alone;
    - the diacritics table is copied from kitty's `rowcolumn-diacritics.txt` (or Ghostty's `src/terminal/kitty/graphics_unicode.zig`, in the clone the build makes), not typed by hand; DECK-12's two constants move into it, and a test checks its 297 entries and first and last values;
    - a wide character cut by the rectangle's edge has its other half drawn as a blank cell;

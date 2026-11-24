@@ -1,7 +1,9 @@
 //! A terminal: a PTY with its child process, reader, writer and wait threads, and its
 //! emulator.
 
+use std::cell::Cell;
 use std::io::{Read, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -10,6 +12,7 @@ use std::time::Duration;
 
 use deck_core::model::{SessionId, TerminalId};
 use deck_core::osc7::Osc7Scanner;
+use deck_core::protocol::CellPx;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::{Notify, oneshot};
 
@@ -22,6 +25,8 @@ use crate::server::Shared;
 
 /// At most one frame per terminal in this interval.
 pub const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// The least wait before the pass that follows a synchronized output's timeout.
+const HOLD_POLL: Duration = Duration::from_millis(5);
 
 /// Waits (each after the one before) until a resized PTY's real size is checked again.
 const PTY_RECHECKS: [Duration; 3] = [
@@ -46,6 +51,8 @@ pub struct SpawnRequest {
     pub env: Env,
     pub cols: u16,
     pub rows: u16,
+    /// The outer terminal's cell size in pixels, when a client reported it.
+    pub cell: Option<CellPx>,
 }
 
 /// A running terminal.
@@ -56,8 +63,8 @@ pub struct TermHandle {
     pub pid: Option<u32>,
     /// When the process started, on the daemon's clock.
     pub started: Duration,
-    emu: Mutex<Option<Emu>>,
-    master: Mutex<Box<dyn MasterPty + Send>>,
+    emu: EmuThread,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     input: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
     queued: Arc<InputBudget>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
@@ -113,32 +120,25 @@ impl TermHandle {
         }
     }
 
-    pub fn resize_pty(&self, cols: u16, rows: u16) {
-        // The emulator lock is held throughout, so `sync_pty` never sees the PTY resized
-        // and the emulator not yet.
-        let mut emu = lock(&self.emu);
+    /// Resizes the PTY and the emulator as one step, on the emulator thread, so
+    /// `sync_pty` never sees one without the other.
+    pub fn resize_pty(&self, cols: u16, rows: u16, cell: Option<CellPx>) {
         self.resizes.fetch_add(1, Ordering::AcqRel);
-        self.set_pty_size(cols, rows);
-        if let Some(e) = emu.as_mut() {
-            e.resize(cols, rows);
+        let master = Arc::clone(&self.master);
+        let id = self.id;
+        let done = self.emu.call(move |e| {
+            set_pty_size(&master, id, cols, rows, cell);
+            e.resize_with_cell(cols, rows, cell);
+        });
+        if done.is_none() {
+            // Released: only the PTY is left to resize.
+            set_pty_size(&self.master, self.id, cols, rows, cell);
         }
     }
 
-    fn set_pty_size(&self, cols: u16, rows: u16) {
-        let size = PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        };
-        if let Err(e) = lock(&self.master).resize(size) {
-            tracing::warn!(terminal = %self.id, "cannot resize the PTY: {e}");
-        }
-    }
-
-    /// The size the kernel holds for the PTY (`TIOCGWINSZ`).
-    pub fn pty_size(&self) -> Option<(u16, u16)> {
-        lock(&self.master).get_size().ok().map(|s| (s.cols, s.rows))
+    /// The size and pixel size the kernel holds for the PTY (`TIOCGWINSZ`).
+    pub fn pty_size(&self) -> Option<PtyGeometry> {
+        pty_size(&self.master)
     }
 
     /// Checks the PTY's real size shortly after the last resize and sets it again when
@@ -159,16 +159,17 @@ impl TermHandle {
         });
     }
 
-    /// Sets the PTY to the emulator's size when they differ.
+    /// Sets the PTY to the emulator's size and cell size when they differ.
     fn sync_pty(&self) {
-        let emu = lock(&self.emu);
-        let Some(e) = emu.as_ref() else {
-            return;
-        };
-        let (cols, rows) = e.size();
-        if self.pty_size() != Some((cols, rows)) {
-            self.set_pty_size(cols, rows);
-        }
+        let master = Arc::clone(&self.master);
+        let id = self.id;
+        self.emu.call(move |e| {
+            let (cols, rows) = e.size();
+            let cell = e.cell();
+            if pty_size(&master) != Some(((cols, rows), pixels_of(cols, rows, cell))) {
+                set_pty_size(&master, id, cols, rows, cell);
+            }
+        });
     }
 
     /// The foreground process of the PTY: its pid and argv.
@@ -177,14 +178,19 @@ impl TermHandle {
     }
 
     /// Runs `f` on the emulator; `None` once the terminal was released.
-    pub fn with_emu<R>(&self, f: impl FnOnce(&mut Emu) -> R) -> Option<R> {
-        lock(&self.emu).as_mut().map(f)
+    /// It blocks until the result is back and must not be called from the emulator
+    /// thread itself.
+    pub fn with_emu<R: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Emu) -> R + Send + 'static,
+    ) -> Option<R> {
+        self.emu.call(f)
     }
 
     /// Drops the emulator and the input channel (its writer thread ends); the reader
     /// then discards whatever a background job still prints.
     pub fn release(&self) {
-        *lock(&self.emu) = None;
+        self.emu.release();
         *lock(&self.input) = None;
     }
 
@@ -269,6 +275,127 @@ impl TermHandle {
     }
 }
 
+/// The pixel size of a PTY of `cols` by `rows` cells; 0 by 0 while the cell size is unknown.
+pub fn pixels_of(cols: u16, rows: u16, cell: Option<CellPx>) -> (u16, u16) {
+    cell.map_or((0, 0), |c| {
+        (cols.saturating_mul(c.width), rows.saturating_mul(c.height))
+    })
+}
+
+fn set_pty_size(
+    master: &Mutex<Box<dyn MasterPty + Send>>,
+    id: TerminalId,
+    cols: u16,
+    rows: u16,
+    cell: Option<CellPx>,
+) {
+    let (pixel_width, pixel_height) = pixels_of(cols, rows, cell);
+    let size = PtySize {
+        rows,
+        cols,
+        pixel_width,
+        pixel_height,
+    };
+    if let Err(e) = lock(master).resize(size) {
+        tracing::warn!(terminal = %id, "cannot resize the PTY: {e}");
+    }
+}
+
+type PtyGeometry = ((u16, u16), (u16, u16));
+
+fn pty_size(master: &Mutex<Box<dyn MasterPty + Send>>) -> Option<PtyGeometry> {
+    lock(master)
+        .get_size()
+        .ok()
+        .map(|s| ((s.cols, s.rows), (s.pixel_width, s.pixel_height)))
+}
+
+type Job = Box<dyn FnOnce(&mut Emu) + Send>;
+
+thread_local! {
+    /// The terminal whose emulator thread this is, on that thread.
+    static EMU_OF: Cell<Option<TerminalId>> = const { Cell::new(None) };
+}
+
+/// The thread that owns a terminal's emulator and runs, in order, the closures sent to it.
+/// It ends after `release` (or the drop of the handle) once the queued closures ran; it is
+/// never joined.
+struct EmuThread {
+    id: TerminalId,
+    jobs: Mutex<Option<mpsc::Sender<Job>>>,
+}
+
+impl EmuThread {
+    fn spawn(
+        id: TerminalId,
+        cols: u16,
+        rows: u16,
+        cell: Option<CellPx>,
+        scrollback: usize,
+    ) -> std::io::Result<Self> {
+        let (tx, rx) = mpsc::channel::<Job>();
+        let (ready_tx, ready) = mpsc::sync_channel::<Result<(), String>>(1);
+        std::thread::Builder::new()
+            .name(format!("emu-{id}"))
+            .spawn(move || {
+                EMU_OF.with(|c| c.set(Some(id)));
+                let mut emu = match Emu::new(cols, rows, scrollback) {
+                    Ok(mut emu) => {
+                        if cell.is_some() {
+                            emu.resize_with_cell(cols, rows, cell);
+                        }
+                        let _ = ready_tx.send(Ok(()));
+                        emu
+                    }
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e.to_string()));
+                        return;
+                    }
+                };
+                while let Ok(job) = rx.recv() {
+                    job(&mut emu);
+                }
+            })?;
+        // The emulator is built on its thread; wait for it, so a failure ends `start`.
+        match ready.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(std::io::Error::other(e)),
+            Err(_) => return Err(std::io::Error::other("the emulator thread ended")),
+        }
+        Ok(Self {
+            id,
+            jobs: Mutex::new(Some(tx)),
+        })
+    }
+
+    /// Runs `f` on the emulator and waits for its result; `None` once released, or when
+    /// `f` panicked.
+    fn call<R: Send + 'static>(&self, f: impl FnOnce(&mut Emu) -> R + Send + 'static) -> Option<R> {
+        debug_assert!(
+            EMU_OF.with(Cell::get) != Some(self.id),
+            "with_emu called from the emulator thread of terminal {}",
+            self.id
+        );
+        let tx = lock(&self.jobs).clone()?;
+        let (done, result) = mpsc::sync_channel(1);
+        let id = self.id;
+        let job: Job = Box::new(move |e| {
+            let outcome = catch_unwind(AssertUnwindSafe(|| f(e)));
+            if outcome.is_err() {
+                tracing::error!(terminal = %id, "a closure panicked on the emulator thread");
+            }
+            let _ = done.send(outcome.ok());
+        });
+        tx.send(job).ok()?;
+        result.recv().ok().flatten()
+    }
+
+    /// Ends the thread after the closures already queued.
+    fn release(&self) {
+        *lock(&self.jobs) = None;
+    }
+}
+
 /// Counts the input bytes queued for the writer thread.
 #[derive(Debug, Default)]
 struct InputBudget {
@@ -336,11 +463,12 @@ fn open_pty(req: &SpawnRequest) -> Result<Parts, String> {
             req.cwd.display()
         ));
     }
+    let (pixel_width, pixel_height) = pixels_of(req.cols, req.rows, req.cell);
     let size = PtySize {
         rows: req.rows,
         cols: req.cols,
-        pixel_width: 0,
-        pixel_height: 0,
+        pixel_width,
+        pixel_height,
     };
     let pair = native_pty_system()
         .openpty(size)
@@ -380,23 +508,32 @@ pub fn start(
     session: SessionId,
     req: &SpawnRequest,
     parts: Parts,
-) -> Arc<TermHandle> {
+) -> Result<Arc<TermHandle>, String> {
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
     let killer = parts.child.clone_killer();
     let pid = parts.child.process_id();
     let queued = Arc::new(InputBudget::default());
+    let emu = match EmuThread::spawn(
+        id,
+        req.cols,
+        req.rows,
+        req.cell,
+        shared.config().scrollback_lines,
+    ) {
+        Ok(emu) => emu,
+        Err(e) => {
+            parts.discard();
+            return Err(format!("could not start {}: {e}", req.program));
+        }
+    };
     let handle = Arc::new(TermHandle {
         id,
         session,
         program: req.program.clone(),
         pid,
         started: shared.clock.now(),
-        emu: Mutex::new(Some(Emu::new(
-            req.cols,
-            req.rows,
-            shared.config().scrollback_lines,
-        ))),
-        master: Mutex::new(parts.master),
+        emu,
+        master: Arc::new(Mutex::new(parts.master)),
         input: Mutex::new(Some(input_tx)),
         queued: Arc::clone(&queued),
         child: Arc::new(Mutex::new(parts.child)),
@@ -420,13 +557,25 @@ pub fn start(
     // Frames: one per interval while the emulator has news.
     let (s, h) = (Arc::clone(shared), Arc::clone(&handle));
     shared.handle.spawn(async move {
+        // While the program holds synchronized output, the pass that follows its timeout.
+        let mut hold: Option<Duration> = None;
         loop {
-            h.dirty.notified().await;
+            match hold.take() {
+                Some(wait) => {
+                    tokio::select! {
+                        () = h.dirty.notified() => {}
+                        () = tokio::time::sleep(wait.max(HOLD_POLL)) => {}
+                    }
+                }
+                None => h.dirty.notified().await,
+            }
             if h.is_closed() {
                 return;
             }
-            s.pump(&h);
+            hold = s.pump(&h);
             tokio::time::sleep(FRAME_INTERVAL).await;
+            // The interval counts towards the wait for the hold's timeout.
+            hold = hold.map(|wait| wait.saturating_sub(FRAME_INTERVAL));
         }
     });
 
@@ -437,7 +586,7 @@ pub fn start(
         h.drain(&s).await;
         s.terminal_gone(&h, status);
     });
-    handle
+    Ok(handle)
 }
 
 fn spawn_writer(
@@ -467,6 +616,8 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
         .spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
             let mut osc7 = Osc7Scanner::new(&s.hostname);
+            // Reads the files kitty graphics commands name, here and not on the emulator thread.
+            let mut files = crate::emu::files::Scanner::default();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
@@ -475,7 +626,7 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
                             break;
                         };
                         h.last_data.store(nanos(s.clock.now()), Ordering::Release);
-                        s.output(&h, bytes);
+                        files.scan(bytes, |piece| s.output(&h, piece));
                         for path in osc7.feed(bytes) {
                             s.osc7_cwd(&h, path);
                         }
@@ -537,6 +688,100 @@ fn spawn_waiter(handle: &Arc<TermHandle>) -> oneshot::Receiver<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn thread() -> EmuThread {
+        EmuThread::spawn(TerminalId(7), 10, 4, None, 100).expect("spawn")
+    }
+
+    #[test]
+    fn closures_run_in_order_on_a_named_thread() {
+        let t = thread();
+        assert_eq!(t.call(|e| e.feed(b"ab").len()), Some(0));
+        assert_eq!(t.call(|e| e.size()), Some((10, 4)));
+        t.call(|e| e.resize(20, 5));
+        assert_eq!(t.call(|e| e.size()), Some((20, 5)));
+        let name = t.call(|_| std::thread::current().name().map(str::to_owned));
+        assert_eq!(name, Some(Some(format!("emu-{}", TerminalId(7)))));
+    }
+
+    #[test]
+    fn the_pty_gets_the_cell_size_as_pixels() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 4,
+                cols: 10,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("pty");
+        let master = Mutex::new(pair.master);
+        let cell = Some(CellPx {
+            width: 9,
+            height: 18,
+        });
+        assert_eq!(pixels_of(10, 4, cell), (90, 72));
+        set_pty_size(&master, TerminalId(1), 10, 4, cell);
+        assert_eq!(pty_size(&master), Some(((10, 4), (90, 72))));
+        set_pty_size(&master, TerminalId(1), 12, 5, None);
+        assert_eq!(pty_size(&master), Some(((12, 5), (0, 0))));
+    }
+
+    struct EndSignal(mpsc::Sender<()>);
+
+    impl Drop for EndSignal {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    thread_local! {
+        static END: Cell<Option<EndSignal>> = const { Cell::new(None) };
+    }
+
+    #[test]
+    fn release_ends_the_thread_and_later_calls_return_none() {
+        let t = thread();
+        let (tx, ended) = mpsc::channel();
+        // Dropped when the thread exits.
+        t.call(move |_| END.with(|c| c.set(Some(EndSignal(tx)))));
+        t.release();
+        assert_eq!(t.call(|e| e.size()), None);
+        ended
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the emulator thread ends after release");
+    }
+
+    #[test]
+    fn a_panicking_closure_returns_none_and_the_thread_keeps_serving() {
+        let t = thread();
+        assert_eq!(t.call(|_| -> u8 { panic!("boom") }), None);
+        assert_eq!(t.call(|e| e.size()), Some((10, 4)));
+    }
+
+    #[test]
+    fn concurrent_callers_run_one_at_a_time_each_with_its_own_result() {
+        let t = Arc::new(thread());
+        let running = Arc::new(AtomicUsize::new(0));
+        let workers: Vec<_> = (0..8usize)
+            .map(|n| {
+                let (t, running) = (Arc::clone(&t), Arc::clone(&running));
+                std::thread::spawn(move || {
+                    for i in 0..50usize {
+                        let running = Arc::clone(&running);
+                        let got = t.call(move |_| {
+                            assert_eq!(running.fetch_add(1, Ordering::SeqCst), 0);
+                            running.fetch_sub(1, Ordering::SeqCst);
+                            n * 1000 + i
+                        });
+                        assert_eq!(got, Some(n * 1000 + i));
+                    }
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().expect("worker");
+        }
+    }
 
     #[test]
     fn input_past_the_cap_is_refused_until_the_writer_catches_up() {

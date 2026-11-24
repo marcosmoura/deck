@@ -637,14 +637,19 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
         pfx(&mut a, 'b'),
         [Out::Send(ClientMsg::Viewport {
             cols: 100,
-            rows: 24
+            rows: 24,
+            cell: None,
         })]
     );
     let (_, rows) = screen(&a);
     assert!(!rows[0].contains('│'), "{}", rows[0]);
     assert_eq!(
         pfx(&mut a, 'b'),
-        [Out::Send(ClientMsg::Viewport { cols: 71, rows: 24 })]
+        [Out::Send(ClientMsg::Viewport {
+            cols: 71,
+            rows: 24,
+            cell: None
+        })]
     );
     // It reappears when the window grows again, and resizing sends the panel area.
     let mut a = app_at(&Config::default(), (100, 24), mockup());
@@ -652,13 +657,21 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
     let outs = run(&mut a, &[ct::Event::Resize(40, 24)]);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::Viewport { cols: 40, rows: 24 })]
+        [Out::Send(ClientMsg::Viewport {
+            cols: 40,
+            rows: 24,
+            cell: None
+        })]
     );
     assert!(!a.sidebar_visible());
     let outs = run(&mut a, &[ct::Event::Resize(100, 24)]);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::Viewport { cols: 79, rows: 24 })]
+        [Out::Send(ClientMsg::Viewport {
+            cols: 79,
+            rows: 24,
+            cell: None
+        })]
     );
     assert_eq!(a.sidebar_width, 20);
     // A hidden sidebar stays hidden when the window grows.
@@ -669,7 +682,8 @@ fn the_sidebar_hides_when_the_window_is_narrow_and_toggles_by_key() {
         outs,
         [Out::Send(ClientMsg::Viewport {
             cols: 120,
-            rows: 30
+            rows: 30,
+            cell: None,
         })]
     );
     // Hidden from the config.

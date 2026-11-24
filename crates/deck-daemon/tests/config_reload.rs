@@ -233,14 +233,22 @@ async fn a_reload_moves_no_pty_to_a_client_that_was_not_active() {
         client.wait(|c| !c.configs().is_empty()).await;
     }
     // Both apply the new width and say so with a reload viewport.
-    a.send(&ClientMsg::ReloadViewport { cols: 59, rows: 24 })
-        .await;
+    a.send(&ClientMsg::ReloadViewport {
+        cols: 59,
+        rows: 24,
+        cell: None,
+    })
+    .await;
     b.type_line("stty size").await;
     b.wait_row("24 91").await;
     assert!(!b.has_row("24 59"), "a did not take the shell over");
 
-    b.send(&ClientMsg::ReloadViewport { cols: 79, rows: 24 })
-        .await;
+    b.send(&ClientMsg::ReloadViewport {
+        cols: 79,
+        rows: 24,
+        cell: None,
+    })
+    .await;
     b.type_line("stty size").await;
     b.wait_row("24 79").await;
     daemon.stop().await.unwrap();

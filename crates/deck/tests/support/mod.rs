@@ -23,7 +23,8 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term};
-use alacritty_terminal::vte::ansi::{Color, Processor, Rgb};
+pub use alacritty_terminal::vte::ansi::Color;
+use alacritty_terminal::vte::ansi::{Processor, Rgb};
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 
 /// The default theme's `accent`: the focused border.
@@ -227,6 +228,8 @@ pub enum TtyMode {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellView {
     pub ch: char,
+    /// The combining characters after `ch` (a placeholder's diacritics).
+    pub zerowidth: Vec<char>,
     pub fg: Color,
     pub bg: Color,
     pub flags: Flags,
@@ -302,6 +305,8 @@ pub struct Builder {
     config: Vec<(String, String)>,
     env: Vec<(String, Option<String>)>,
     colors: ColorAnswers,
+    cell_px: (u16, u16),
+    xtversion: Option<String>,
 }
 
 impl Builder {
@@ -333,6 +338,31 @@ impl Builder {
         self
     }
 
+    /// Gives the PTY a pixel size: every cell is `width` by `height` pixels (0 by default,
+    /// like a terminal that does not report one).
+    pub fn cell_px(mut self, width: u16, height: u16) -> Self {
+        self.cell_px = (width, height);
+        self
+    }
+
+    /// Makes the outer terminal one that speaks the kitty graphics protocol, in the way
+    /// the client detects: Ghostty's `TERM`, 24-bit colour and a cell of 8×16 pixels unless
+    /// [`Builder::cell_px`] says otherwise.
+    pub fn kitty(mut self) -> Self {
+        self.env.push(("TERM".into(), Some("xterm-ghostty".into())));
+        if self.cell_px == (0, 0) {
+            self.cell_px = (8, 16);
+        }
+        self
+    }
+
+    /// Makes the terminal answer XTVERSION (`CSI > 0 q`) with this name, like Ghostty
+    /// (`ghostty 1.2.0`); by default it does not answer.
+    pub fn xtversion(mut self, name: &str) -> Self {
+        self.xtversion = Some(name.into());
+        self
+    }
+
     /// Makes the terminal ignore colour queries.
     pub fn silent_colors(mut self) -> Self {
         self.colors = ColorAnswers::Silent;
@@ -354,7 +384,14 @@ impl Builder {
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_deref()))
             .collect();
-        Harness::start(self.size, argv, Home::with(&config, &env), self.colors)
+        Harness::start(
+            self.size,
+            argv,
+            Home::with(&config, &env),
+            self.colors,
+            self.cell_px,
+            self.xtversion,
+        )
     }
 }
 
@@ -365,6 +402,7 @@ pub struct Harness {
     writer: Writer,
     mirror: Arc<Mutex<Mirror>>,
     size: (u16, u16),
+    cell_px: (u16, u16),
     // Last: the home stops the daemon after the child is gone.
     home: Home,
 }
@@ -385,6 +423,8 @@ impl Harness {
             config: Vec::new(),
             env: Vec::new(),
             colors: ColorAnswers::Default,
+            cell_px: (0, 0),
+            xtversion: None,
         }
     }
 
@@ -398,9 +438,16 @@ impl Harness {
         Self::builder(size).spawn(argv)
     }
 
-    fn start(size: (u16, u16), argv: &[&str], home: Home, answers: ColorAnswers) -> Self {
+    fn start(
+        size: (u16, u16),
+        argv: &[&str],
+        home: Home,
+        answers: ColorAnswers,
+        cell_px: (u16, u16),
+        xtversion: Option<String>,
+    ) -> Self {
         let pty = native_pty_system()
-            .openpty(pty_size(size))
+            .openpty(pty_size(size, cell_px))
             .expect("open a PTY");
         let mut cmd = CommandBuilder::new(argv[0]);
         cmd.args(&argv[1..]);
@@ -412,6 +459,13 @@ impl Harness {
         let child = pty.slave.spawn_command(cmd).expect("spawn the program");
         drop(pty.slave);
 
+        // A terminal that names itself and has the Ghostty `TERM` also answers the graphics
+        // query `OK`, as Ghostty does.
+        let graphics_ok = xtversion.is_some()
+            && home
+                .env()
+                .iter()
+                .any(|(k, v)| k == "TERM" && v.to_string_lossy().contains("ghostty"));
         let events = Listener::default();
         let term = Term::new(
             Config::default(),
@@ -460,6 +514,27 @@ impl Harness {
                             _ => None,
                         })
                         .collect();
+                    let mut replies = replies;
+                    if let Some(name) = &xtversion
+                        && buf[..n]
+                            .windows(4)
+                            .any(|w| w == b"\x1b[>q" || w == b"\x1b[>0")
+                    {
+                        // A real terminal answers in order: XTVERSION before the DA1 that
+                        // follows it in the client's query.
+                        let at = replies
+                            .iter()
+                            .position(|r| r.starts_with("\x1b[?"))
+                            .unwrap_or(replies.len());
+                        replies.insert(at, format!("\x1bP>|{name}\x1b\\"));
+                    }
+                    if graphics_ok && buf[..n].windows(7).any(|w| w == b"\x1b_Gi=31") {
+                        let at = replies
+                            .iter()
+                            .position(|r| r.starts_with("\x1b[?"))
+                            .unwrap_or(replies.len());
+                        replies.insert(at, "\x1b_Gi=31;OK\x1b\\".into());
+                    }
                     for reply in replies {
                         let _ = lock(&writer).write_all(reply.as_bytes());
                     }
@@ -473,6 +548,7 @@ impl Harness {
             writer,
             mirror,
             size,
+            cell_px,
             home,
         }
     }
@@ -510,7 +586,9 @@ impl Harness {
             cols: usize::from(cols),
             rows: usize::from(rows),
         });
-        self.master.resize(pty_size(self.size)).expect("resize");
+        self.master
+            .resize(pty_size(self.size, self.cell_px))
+            .expect("resize");
     }
 
     /// Waits until `text` is on the screen; panics with the screen after `limit`.
@@ -629,6 +707,7 @@ impl Harness {
         let cell = &mirror.term.grid()[Line(i32::try_from(row).expect("row"))][Column(col)];
         CellView {
             ch: cell.c,
+            zerowidth: cell.zerowidth().map(<[char]>::to_vec).unwrap_or_default(),
             fg: cell.fg,
             bg: cell.bg,
             flags: cell.flags,
@@ -690,11 +769,11 @@ impl Drop for Harness {
     }
 }
 
-fn pty_size((cols, rows): (u16, u16)) -> PtySize {
+fn pty_size((cols, rows): (u16, u16), (cw, ch): (u16, u16)) -> PtySize {
     PtySize {
         rows,
         cols,
-        pixel_width: 0,
-        pixel_height: 0,
+        pixel_width: cols.saturating_mul(cw),
+        pixel_height: rows.saturating_mul(ch),
     }
 }

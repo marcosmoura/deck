@@ -182,7 +182,10 @@ impl Shared {
         }
         match until {
             WaitFor::Exit => Step::Pending(None),
-            WaitFor::Text(text) => match h.with_emu(|e| e.find_line(text)) {
+            WaitFor::Text(text) => match h.with_emu({
+                let text = text.clone();
+                move |e| e.find_line(&text)
+            }) {
                 Some(Some(line)) => done(Waited::Text(line)),
                 Some(None) => Step::Pending(None),
                 None => failed(format!("terminal {terminal} was closed")),

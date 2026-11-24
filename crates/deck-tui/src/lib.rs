@@ -15,6 +15,7 @@ mod context;
 #[cfg(test)]
 mod context_tests;
 mod convert;
+mod diacritics;
 #[cfg(test)]
 mod dialog_tests;
 mod draw;
@@ -33,6 +34,9 @@ mod menu_tests;
 mod mirror;
 mod modal;
 mod picker;
+mod placed;
+#[cfg(test)]
+mod placed_tests;
 #[cfg(test)]
 mod reload_tests;
 mod resize;
@@ -66,8 +70,8 @@ use std::time::{Duration, Instant};
 
 use deck_core::config::Config;
 use deck_core::protocol::{
-    ByeReason, ClientMsg, FrameReader, OuterColors, PROTOCOL_VERSION, Request, Response, Role,
-    ServerMsg, encode,
+    ByeReason, CellPx, ClientMsg, FrameReader, OuterColors, PROTOCOL_VERSION, Request, Response,
+    Role, ServerMsg, encode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -172,6 +176,7 @@ async fn run_async(mut options: Options) -> Exit {
         .filter(|h| !h.is_empty())
         .map(PathBuf::from);
     let mut app = App::new(&Config::default(), size, &probe.leftover).with_dirs(cwd.clone(), home);
+    app.cell = measure_cell();
     app.truecolor = convert::truecolor(std::env::var("COLORTERM").ok().as_deref());
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let plan = caps::plan(
@@ -202,6 +207,7 @@ async fn run_async(mut options: Options) -> Exit {
         socket: options.socket.clone(),
         cwd,
         colors: probe.colors,
+        outer_name: probe.xtversion.clone(),
     };
     let hello = ctx.hello(&app, options.session.clone(), options.create);
     let mut link = match Link::open(&ctx.socket, hello).await {
@@ -257,7 +263,12 @@ async fn run_async(mut options: Options) -> Exit {
         let outs = if early.is_empty() {
             tokio::select! {
             event = input_rx.recv() => match event {
-                Some(event) => app.on_event(event, Instant::now()),
+                Some(event) => {
+                    if matches!(event, ct::Event::Resize(..)) {
+                        app.cell = measure_cell();
+                    }
+                    app.on_event(event, Instant::now())
+                }
                 None => break Exit::Error("lost the terminal input".into()),
             },
             msg = link.server_rx.recv() => match msg {
@@ -270,6 +281,10 @@ async fn run_async(mut options: Options) -> Exit {
                 if app.take_dirty() {
                     last_draw = now;
                     if let Err(e) = app.draw_frame(&mut terminal) {
+                        break Exit::Error(format!("cannot draw: {e}"));
+                    }
+                    // What no placement used goes away.
+                    if let Err(e) = app.finish_images(terminal.backend_mut()) {
                         break Exit::Error(format!("cannot draw: {e}"));
                     }
                     let wanted = app.cursor_shape();
@@ -296,9 +311,11 @@ async fn run_async(mut options: Options) -> Exit {
             // size is also read here; a size the app already has is not a resize.
             _ = sigwinch.recv() => match ct_terminal::size() {
                 Ok((cols, rows)) if (cols, rows) != app.size => {
+                    app.cell = measure_cell();
                     app.on_event(ct::Event::Resize(cols, rows), Instant::now())
                 }
-                _ => Vec::new(),
+                // A font zoom changes the cell size and not the columns and rows.
+                _ => app.set_cell(measure_cell()),
             },
             _ = sigterm.recv() => break Exit::Signal,
             _ = sighup.recv() => break Exit::Signal,
@@ -343,6 +360,78 @@ async fn run_async(mut options: Options) -> Exit {
     exit
 }
 
+/// The outer terminal's cell size in pixels, from its pixel size (`TIOCGWINSZ`); `None` when
+/// it does not report one.
+fn measure_cell() -> Option<CellPx> {
+    cell_of(&ct_terminal::window_size().ok()?)
+}
+
+/// The cell size of a window: its pixel width over its columns, its pixel height over its
+/// rows; `None` when any of them is 0.
+fn cell_of(window: &ct_terminal::WindowSize) -> Option<CellPx> {
+    let size = |pixels: u16, cells: u16| pixels.checked_div(cells).filter(|n| *n > 0);
+    Some(CellPx {
+        width: size(window.width, window.columns)?,
+        height: size(window.height, window.rows)?,
+    })
+}
+
+#[cfg(test)]
+mod cell_tests {
+    use super::*;
+
+    fn window(columns: u16, rows: u16, width: u16, height: u16) -> ct_terminal::WindowSize {
+        ct_terminal::WindowSize {
+            columns,
+            rows,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn the_cell_size_is_the_pixel_size_over_the_cells() {
+        assert_eq!(
+            cell_of(&window(80, 24, 720, 432)),
+            Some(CellPx {
+                width: 9,
+                height: 18
+            })
+        );
+    }
+
+    #[test]
+    fn a_window_without_pixels_has_no_cell_size() {
+        assert_eq!(cell_of(&window(80, 24, 0, 0)), None);
+        assert_eq!(cell_of(&window(80, 24, 720, 0)), None);
+        assert_eq!(cell_of(&window(0, 0, 720, 432)), None);
+        assert_eq!(cell_of(&window(80, 24, 40, 20)), None);
+    }
+
+    #[test]
+    fn a_cell_size_change_alone_sends_a_viewport() {
+        let mut app = App::new(&Config::default(), (100, 30), &[]);
+        let cell = Some(CellPx {
+            width: 9,
+            height: 18,
+        });
+        let (cols, rows) = app.viewport();
+        assert_eq!(
+            app.set_cell(cell),
+            [app::Out::Send(ClientMsg::Viewport { cols, rows, cell })]
+        );
+        assert!(app.set_cell(cell).is_empty());
+        assert_eq!(
+            app.set_cell(None),
+            [app::Out::Send(ClientMsg::Viewport {
+                cols,
+                rows,
+                cell: None
+            })]
+        );
+    }
+}
+
 /// The font check's answer; the channel closes after it, so it is not waited on again.
 async fn recv_font(rx: &mut Option<mpsc::UnboundedReceiver<bool>>) -> Option<bool> {
     match rx {
@@ -356,6 +445,8 @@ struct Ctx {
     socket: PathBuf,
     cwd: PathBuf,
     colors: Option<OuterColors>,
+    /// The outer terminal's XTVERSION name.
+    outer_name: Option<String>,
 }
 
 impl Ctx {
@@ -368,6 +459,9 @@ impl Ctx {
                 create,
                 cols: cols.max(app::MIN_SIZE.0),
                 rows: rows.max(app::MIN_SIZE.1),
+                cell: app.cell,
+                images: app.program_images(),
+                outer_name: self.outer_name.clone(),
             },
             cwd: self.cwd.clone(),
             env: std::env::vars_os().collect(),

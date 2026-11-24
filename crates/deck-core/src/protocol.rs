@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -35,6 +35,8 @@ pub enum ClientMsg {
     Viewport {
         cols: u16,
         rows: u16,
+        /// The outer terminal's cell size in pixels, `None` when unknown.
+        cell: Option<CellPx>,
     },
     Input {
         terminal: TerminalId,
@@ -54,6 +56,7 @@ pub enum ClientMsg {
     ReloadViewport {
         cols: u16,
         rows: u16,
+        cell: Option<CellPx>,
     },
     /// Whether the outer terminal has focus. A client that never reported counts as focused.
     Focus(bool),
@@ -76,8 +79,72 @@ pub enum Role {
         create: bool,
         cols: u16,
         rows: u16,
+        /// The outer terminal's cell size in pixels, `None` when unknown.
+        cell: Option<CellPx>,
+        /// Whether the client can show images.
+        images: bool,
+        /// The outer terminal's name from its XTVERSION answer (printable, at most 64
+        /// characters), `None` when it gave none.
+        outer_name: Option<String>,
     },
     Control,
+}
+
+/// The outer terminal's cell size in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CellPx {
+    pub width: u16,
+    pub height: u16,
+}
+
+/// The screen a kitty image belongs to; each has its own image store and ids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ImageScreen {
+    Primary,
+    Alternate,
+}
+
+/// The layout of an image's pixels: 3 or 4 bytes per pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageFormat {
+    Rgb,
+    Rgba,
+}
+
+/// A rectangle of an image, in image pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Where a placement is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlacementKind {
+    /// The top-left cell relative to the viewport; negative when the image starts above or
+    /// left of it.
+    Placed { col: i32, row: i32 },
+    /// A virtual placement (`U=1`), shown only where the program writes placeholder cells.
+    Virtual,
+}
+
+/// One kitty image placement touching a terminal's viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Placement {
+    pub screen: ImageScreen,
+    /// The program's image id.
+    pub image: u32,
+    /// The image's generation; it changes when the image is transmitted again.
+    pub generation: u64,
+    pub kind: PlacementKind,
+    /// The cells the placement covers.
+    pub cols: u16,
+    pub rows: u16,
+    pub source: SourceRect,
+    /// The rendered size in pixels.
+    pub pixels: (u32, u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,7 +355,32 @@ pub enum ServerMsg {
         project: String,
         panel: String,
     },
+    /// One piece of an image's pixels, for a client that attached with `images`. The pieces of
+    /// one image come in order, `data` at most [`MAX_IMAGE_PIECE`] bytes at byte `offset` of
+    /// `total`; they precede the first frame that lists the image.
+    Image {
+        terminal: TerminalId,
+        screen: ImageScreen,
+        image: u32,
+        generation: u64,
+        width: u32,
+        height: u32,
+        format: ImageFormat,
+        offset: u32,
+        total: u32,
+        data: Vec<u8>,
+    },
+    /// The client can forget an image it was sent.
+    ImageGone {
+        terminal: TerminalId,
+        screen: ImageScreen,
+        image: u32,
+        generation: u64,
+    },
 }
+
+/// The most pixel bytes of one `ServerMsg::Image`.
+pub const MAX_IMAGE_PIECE: usize = 4 << 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoticeLevel {
@@ -355,6 +447,9 @@ pub struct Frame {
     pub history: u32,
     pub lines: Vec<(u16, Line)>,
     pub full: bool,
+    /// The terminal's image placements, always the complete list; empty for a client that did
+    /// not attach with `images`.
+    pub images: Vec<Placement>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -621,6 +716,25 @@ mod tests {
                 },
             )],
             full: true,
+            images: vec![placement(ImageScreen::Primary, 7)],
+        }
+    }
+
+    fn placement(screen: ImageScreen, image: u32) -> Placement {
+        Placement {
+            screen,
+            image,
+            generation: 9,
+            kind: PlacementKind::Placed { col: -1, row: 2 },
+            cols: 4,
+            rows: 3,
+            source: SourceRect {
+                x: 0,
+                y: 1,
+                width: 20,
+                height: 10,
+            },
+            pixels: (32, 48),
         }
     }
 
@@ -659,6 +773,12 @@ mod tests {
                     create: true,
                     cols: 80,
                     rows: 24,
+                    cell: Some(CellPx {
+                        width: 9,
+                        height: 18,
+                    }),
+                    images: true,
+                    outer_name: Some("ghostty 1.2.0".into()),
                 },
             ),
             hello(
@@ -668,17 +788,41 @@ mod tests {
                     create: false,
                     cols: 1,
                     rows: 2,
+                    cell: None,
+                    images: false,
+                    outer_name: None,
                 },
             ),
             ClientMsg::Viewport {
                 cols: 120,
                 rows: 40,
+                cell: Some(CellPx {
+                    width: 7,
+                    height: 15,
+                }),
+            },
+            ClientMsg::Viewport {
+                cols: 120,
+                rows: 40,
+                cell: None,
             },
             ClientMsg::Input {
                 terminal: TerminalId(9),
                 bytes: vec![0, 1, 0x1b, 255],
             },
-            ClientMsg::ReloadViewport { cols: 71, rows: 23 },
+            ClientMsg::ReloadViewport {
+                cols: 71,
+                rows: 23,
+                cell: Some(CellPx {
+                    width: 8,
+                    height: 16,
+                }),
+            },
+            ClientMsg::ReloadViewport {
+                cols: 71,
+                rows: 23,
+                cell: None,
+            },
             ClientMsg::Focus(false),
             ClientMsg::Focus(true),
             ClientMsg::Detach,
@@ -854,6 +998,24 @@ mod tests {
             },
             ServerMsg::SessionView(view()),
             ServerMsg::Frame(frame()),
+            ServerMsg::Image {
+                terminal: TerminalId(4),
+                screen: ImageScreen::Alternate,
+                image: 7,
+                generation: 3,
+                width: 20,
+                height: 10,
+                format: ImageFormat::Rgba,
+                offset: 4,
+                total: 800,
+                data: vec![0, 1, 2, 255],
+            },
+            ServerMsg::ImageGone {
+                terminal: TerminalId(4),
+                screen: ImageScreen::Primary,
+                image: 7,
+                generation: 3,
+            },
             ServerMsg::Clipboard {
                 selection: "c".into(),
                 text: "copied ✓".into(),
@@ -937,6 +1099,36 @@ mod tests {
         }
         for msg in server_msgs() {
             assert_eq!(decode::<ServerMsg>(&encode_ok(&msg)).unwrap(), msg);
+        }
+    }
+
+    #[test]
+    fn placements_round_trip() {
+        let base = Placement {
+            screen: ImageScreen::Alternate,
+            image: 7,
+            generation: u64::MAX,
+            kind: PlacementKind::Placed { col: -3, row: 5 },
+            cols: 65535,
+            rows: 2,
+            source: SourceRect {
+                x: 1,
+                y: 2,
+                width: 30,
+                height: 40,
+            },
+            pixels: (270, 36),
+        };
+        let virt = Placement {
+            screen: ImageScreen::Primary,
+            kind: PlacementKind::Virtual,
+            ..base
+        };
+        for p in [base, virt] {
+            assert_eq!(decode::<Placement>(&encode_ok(&p)).unwrap(), p);
+        }
+        for f in [ImageFormat::Rgb, ImageFormat::Rgba] {
+            assert_eq!(decode::<ImageFormat>(&encode_ok(&f)).unwrap(), f);
         }
     }
 

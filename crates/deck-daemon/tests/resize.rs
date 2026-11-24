@@ -226,7 +226,12 @@ async fn a_narrow_window_gets_a_clamped_copy_and_the_exact_sizes_return() {
     let wide = expected(&c, (200, 24));
     assert_eq!(wide[1].0, 18, "10% of 200 columns, less the border");
 
-    c.send(&ClientMsg::Viewport { cols: 40, rows: 24 }).await;
+    c.send(&ClientMsg::Viewport {
+        cols: 40,
+        rows: 24,
+        cell: None,
+    })
+    .await;
     c.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((40, 24)))
         .await;
     assert_eq!(panel(&c).ratios, lopsided, "never overwritten");
@@ -244,6 +249,7 @@ async fn a_narrow_window_gets_a_clamped_copy_and_the_exact_sizes_return() {
     c.send(&ClientMsg::Viewport {
         cols: 200,
         rows: 24,
+        cell: None,
     })
     .await;
     c.wait(|c| c.view.as_ref().unwrap().layout_viewport == Some((200, 24)))

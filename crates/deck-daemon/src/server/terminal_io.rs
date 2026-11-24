@@ -60,7 +60,7 @@ impl Shared {
             } => self
                 .terminal_handle(terminal)
                 .and_then(|h| {
-                    h.with_emu(|e| e.capture(terminal, lines, history, ansi))
+                    h.with_emu(move |e| e.capture(terminal, lines, history, ansi))
                         .ok_or_else(|| format!("no terminal {terminal}"))
                 })
                 .map(Response::Captured),

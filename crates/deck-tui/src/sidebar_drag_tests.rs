@@ -53,7 +53,11 @@ fn release(a: &mut App, column: u16, now: Instant) -> Vec<Out> {
 }
 
 fn viewport(cols: u16) -> Out {
-    Out::Send(ClientMsg::Viewport { cols, rows: 24 })
+    Out::Send(ClientMsg::Viewport {
+        cols,
+        rows: 24,
+        cell: None,
+    })
 }
 
 fn later(t0: Instant, ms: u64) -> Instant {
@@ -259,7 +263,11 @@ fn a_config_reload_replaces_the_width_only_when_it_changes_it() {
     assert_eq!(a.sidebar_width, 35);
     assert_eq!(
         outs,
-        [Out::Send(ClientMsg::ReloadViewport { cols: 64, rows: 24 })]
+        [Out::Send(ClientMsg::ReloadViewport {
+            cols: 64,
+            rows: 24,
+            cell: None
+        })]
     );
 }
 

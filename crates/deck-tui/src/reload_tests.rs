@@ -52,7 +52,11 @@ fn row(buf: &Buffer, y: u16) -> String {
 
 /// What a reload sends: the new size, without claiming the terminals.
 fn viewport(cols: u16, rows: u16) -> Out {
-    Out::Send(ClientMsg::ReloadViewport { cols, rows })
+    Out::Send(ClientMsg::ReloadViewport {
+        cols,
+        rows,
+        cell: None,
+    })
 }
 
 fn notice(level: NoticeLevel, text: &str) -> ServerMsg {
