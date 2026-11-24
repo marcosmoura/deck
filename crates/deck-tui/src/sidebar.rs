@@ -291,7 +291,8 @@ impl App {
             if line >= self.list_height() {
                 return None;
             }
-            let rows = self.sidebar_rows();
+            // The rows as drawn: a move just dropped is already at its new place.
+            let rows = self.preview_rows();
             return rows
                 .get(self.sidebar_offset + line)
                 .and_then(|r| r.sel())
@@ -795,8 +796,12 @@ impl App {
                 if line >= self.list_height() {
                     return Vec::new();
                 }
-                // The press only records the row: its release acts, a drag moves it.
-                self.row_press = rows.get(self.sidebar_offset + line).and_then(|r| r.sel());
+                // The press only records the row it is drawn on: its release acts, a drag
+                // moves it.
+                self.row_press = self
+                    .preview_rows()
+                    .get(self.sidebar_offset + line)
+                    .and_then(|r| r.sel());
                 Vec::new()
             }
             _ => Vec::new(),

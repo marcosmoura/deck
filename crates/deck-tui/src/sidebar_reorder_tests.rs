@@ -192,6 +192,19 @@ fn a_panel_drag_previews_and_drops_inside_its_space() {
 }
 
 #[test]
+fn a_click_before_the_moves_answer_acts_on_the_row_drawn_there() {
+    let mut a = app();
+    down(&mut a, 5, 4);
+    drag(&mut a, 5, 3);
+    up(&mut a, 5, 3);
+    // Row 4 shows panel 3 now, though the daemon's order still has panel 4 there.
+    assert_eq!(
+        click(&mut a, 5, 4),
+        [send(Act::FocusPanel { panel: PanelId(3) })]
+    );
+}
+
+#[test]
 fn the_preview_waits_for_the_answer_of_its_own_move() {
     let mut a = app();
     // An earlier action is still unanswered.
