@@ -8,9 +8,10 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
-7. DECK-39 Client exits when its terminal closes
-8. DECK-26 Security, privacy and performance reviews
-9. DECK-28 Stress suite follow-ups
+7. DECK-40 List OpenCode sessions without loading repositories
+8. DECK-39 Client exits when its terminal closes
+9. DECK-26 Security, privacy and performance reviews
+10. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
@@ -26,46 +27,47 @@ Open tasks the user has not placed in the queue:
 
 ## Tasks
 
-| ID      | Title                                     | Status      | Depends on                                                    | Spec                                                                         |
-| ------- | ----------------------------------------- | ----------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| DECK-01 | Core daemon and terminal                  | done        | —                                                             | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
-| DECK-02 | Sessions, projects, panels and sidebar    | done        | DECK-01                                                       | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
-| DECK-03 | Grid layout                               | done        | DECK-02, DECK-08                                              | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
-| DECK-04 | Persistence across daemon restarts        | done        | DECK-03, DECK-08                                              | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
-| DECK-05 | Control API                               | done        | DECK-03, DECK-04                                              | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
-| DECK-06 | Agent status, hooks and resume            | done        | DECK-05, DECK-04                                              | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
-| DECK-08 | Config and theming                        | done        | DECK-02                                                       | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
-| DECK-09 | Sidebar titles with icons                 | done        | DECK-06                                                       | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
-| DECK-10 | Sidebar mouse and buttons                 | done        | DECK-06                                                       | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
-| DECK-11 | Restore agent sessions                    | done        | DECK-06, DECK-10                                              | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
-| DECK-12 | Agent logos as images                     | done        | DECK-09                                                       | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
-| DECK-13 | OpenCode v2 hooks                         | done        | DECK-06                                                       | —                                                                            |
-| DECK-14 | Release workflow and local install        | done        | —                                                             | —                                                                            |
-| DECK-15 | Mouse text selection, copy on select      | done        | —                                                             | —                                                                            |
-| DECK-16 | Call projects spaces                      | done        | —                                                             | —                                                                            |
-| DECK-17 | Floating bar, sidebar highlight, menus    | done        | —                                                             | [floating-bar-menus](specs/2026-11-23-floating-bar-menus/00-overview.md)     |
-| DECK-18 | Sidebar reorder and space gaps            | done        | —                                                             | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
-| DECK-19 | Images in panels                          | done        | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
-| DECK-20 | Built-in icons                            | done        | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
-| DECK-21 | Live upgrade                              | done        | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
-| DECK-22 | Terminal compatibility                    | done        | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
-| DECK-23 | Daemon stats and stress tests             | done        | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
-| DECK-24 | Scrollback search and copy mode           | done        | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
-| DECK-25 | Release automation and Homebrew           | done        | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
-| DECK-26 | Security, privacy and performance reviews | in-progress | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
-| DECK-27 | Terminals in the sidebar                  | done        | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
-| DECK-28 | Stress suite follow-ups                   | todo        | DECK-23                                                       | —                                                                            |
-| DECK-29 | Recreate the Homebrew tap                 | done        | DECK-25                                                       | —                                                                            |
-| DECK-30 | Blinking cursor shapes                    | done        | DECK-22                                                       | —                                                                            |
-| DECK-31 | Install the agent skill with deck skills  | done        | —                                                             | —                                                                            |
-| DECK-32 | Harden release credentials                | todo        | —                                                             | —                                                                            |
-| DECK-33 | Signed releases checked by install.sh     | needs spec  | —                                                             | —                                                                            |
-| DECK-34 | Third-party licence notices               | todo        | —                                                             | —                                                                            |
-| DECK-35 | Setting for program clipboard writes      | todo        | DECK-26                                                       | —                                                                            |
-| DECK-36 | Setting for kitty file mediums            | todo        | DECK-26                                                       | —                                                                            |
-| DECK-37 | Fuzz target for the emulator feed         | todo        | —                                                             | —                                                                            |
-| DECK-38 | Daemon not dumpable on Linux              | todo        | —                                                             | —                                                                            |
-| DECK-39 | Client exits when its terminal closes     | in-progress | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
+| ID      | Title                                               | Status      | Depends on                                                    | Spec                                                                         |
+| ------- | --------------------------------------------------- | ----------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| DECK-01 | Core daemon and terminal                            | done        | —                                                             | [core-daemon-terminal](specs/2026-11-22-core-daemon-terminal/00-overview.md) |
+| DECK-02 | Sessions, projects, panels and sidebar              | done        | DECK-01                                                       | [sessions-sidebar](specs/2026-11-22-sessions-sidebar/00-overview.md)         |
+| DECK-03 | Grid layout                                         | done        | DECK-02, DECK-08                                              | [grid-layout](specs/2026-11-22-grid-layout/00-overview.md)                   |
+| DECK-04 | Persistence across daemon restarts                  | done        | DECK-03, DECK-08                                              | [persistence](specs/2026-11-22-persistence/00-overview.md)                   |
+| DECK-05 | Control API                                         | done        | DECK-03, DECK-04                                              | [control-api](specs/2026-11-22-control-api/00-overview.md)                   |
+| DECK-06 | Agent status, hooks and resume                      | done        | DECK-05, DECK-04                                              | [agent-status](specs/2026-11-22-agent-status/00-overview.md)                 |
+| DECK-08 | Config and theming                                  | done        | DECK-02                                                       | [config-theming](specs/2026-11-22-config-theming/00-overview.md)             |
+| DECK-09 | Sidebar titles with icons                           | done        | DECK-06                                                       | [sidebar-titles](specs/2026-11-22-sidebar-titles/00-overview.md)             |
+| DECK-10 | Sidebar mouse and buttons                           | done        | DECK-06                                                       | [sidebar-mouse](specs/2026-11-22-sidebar-mouse/00-overview.md)               |
+| DECK-11 | Restore agent sessions                              | done        | DECK-06, DECK-10                                              | [agent-restore](specs/2026-11-22-agent-restore/00-overview.md)               |
+| DECK-12 | Agent logos as images                               | done        | DECK-09                                                       | [agent-logos](specs/2026-11-23-agent-logos/00-overview.md)                   |
+| DECK-13 | OpenCode v2 hooks                                   | done        | DECK-06                                                       | —                                                                            |
+| DECK-14 | Release workflow and local install                  | done        | —                                                             | —                                                                            |
+| DECK-15 | Mouse text selection, copy on select                | done        | —                                                             | —                                                                            |
+| DECK-16 | Call projects spaces                                | done        | —                                                             | —                                                                            |
+| DECK-17 | Floating bar, sidebar highlight, menus              | done        | —                                                             | [floating-bar-menus](specs/2026-11-23-floating-bar-menus/00-overview.md)     |
+| DECK-18 | Sidebar reorder and space gaps                      | done        | —                                                             | [sidebar-reorder](specs/2026-11-23-sidebar-reorder/00-overview.md)           |
+| DECK-19 | Images in panels                                    | done        | —                                                             | [kitty-images](specs/2026-11-23-kitty-images/00-overview.md)                 |
+| DECK-20 | Built-in icons                                      | done        | —                                                             | [builtin-icons](specs/2026-11-23-builtin-icons/00-overview.md)               |
+| DECK-21 | Live upgrade                                        | done        | DECK-19                                                       | [live-upgrade](specs/2026-11-23-live-upgrade/00-overview.md)                 |
+| DECK-22 | Terminal compatibility                              | done        | DECK-19                                                       | [terminal-compat](specs/2026-11-23-terminal-compat/00-overview.md)           |
+| DECK-23 | Daemon stats and stress tests                       | done        | —                                                             | [daemon-stats](specs/2026-11-23-daemon-stats/00-overview.md)                 |
+| DECK-24 | Scrollback search and copy mode                     | done        | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
+| DECK-25 | Release automation and Homebrew                     | done        | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
+| DECK-26 | Security, privacy and performance reviews           | in-progress | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
+| DECK-27 | Terminals in the sidebar                            | done        | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
+| DECK-28 | Stress suite follow-ups                             | todo        | DECK-23                                                       | —                                                                            |
+| DECK-29 | Recreate the Homebrew tap                           | done        | DECK-25                                                       | —                                                                            |
+| DECK-30 | Blinking cursor shapes                              | done        | DECK-22                                                       | —                                                                            |
+| DECK-31 | Install the agent skill with deck skills            | done        | —                                                             | —                                                                            |
+| DECK-32 | Harden release credentials                          | todo        | —                                                             | —                                                                            |
+| DECK-33 | Signed releases checked by install.sh               | needs spec  | —                                                             | —                                                                            |
+| DECK-34 | Third-party licence notices                         | todo        | —                                                             | —                                                                            |
+| DECK-35 | Setting for program clipboard writes                | todo        | DECK-26                                                       | —                                                                            |
+| DECK-36 | Setting for kitty file mediums                      | todo        | DECK-26                                                       | —                                                                            |
+| DECK-37 | Fuzz target for the emulator feed                   | todo        | —                                                             | —                                                                            |
+| DECK-38 | Daemon not dumpable on Linux                        | todo        | —                                                             | —                                                                            |
+| DECK-39 | Client exits when its terminal closes               | in-progress | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
+| DECK-40 | List OpenCode sessions without loading repositories | todo        | DECK-26                                                       | —                                                                            |
 
 ### Withdrawn
 
@@ -76,6 +78,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-40
+
+**List OpenCode sessions without loading repositories.** Proposed on 24 Nov 2026 by the DECK-26 privacy audit (Q-4, high, security), placed first in the queue by the user.
+
+- What: deck's restore dialog ran `opencode session list` in every space root. In OpenCode 2.4.1 that boots the directory in OpenCode's background service, which imports the repository's plugins and starts its MCP servers (details and `file:line` in `docs/specs/2026-11-23-reviews/audit-privacy.md`, Q-4). DECK-26 sub-spec 03 closes the hole by listing only from `~`, which hides the OpenCode sessions of repositories. This task brings them back safely: one `opencode api GET "/api/session?parentID=null&order=desc&limit=N"` from `~` (an endpoint that boots no location), with the sessions kept whose directory is under a space root. In `crates/deck-daemon/src/server/listing.rs`, with a parser for the `{data, cursor}` answer.
+- Why: the restore dialog should show OpenCode sessions of the user's repositories without making OpenCode run code from them.
+- Acceptance: confirmed by a run first (field names, that the unfiltered list returns every project's sessions, behaviour of OpenCode versions without `api`, with a fallback to the `~`-only list); a test with a fake `opencode` proves no call runs with a space root as working directory and that sessions are filtered by directory; `docs/features/agents.md` and `docs/features/privacy.md` updated.
 
 ### DECK-38
 
