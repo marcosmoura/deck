@@ -17,7 +17,9 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue: none.
+Open tasks the user has not placed in the queue:
+
+- DECK-27 Terminals in the sidebar
 
 ## Tasks
 
@@ -48,6 +50,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-24 | Scrollback search and copy mode           | ready       | DECK-19                                                       | [copy-search](specs/2026-11-23-copy-search/00-overview.md)                   |
 | DECK-25 | Release automation and Homebrew           | ready       | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
 | DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
+| DECK-27 | Terminals in the sidebar                  | draft spec  | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
 
 ### Withdrawn
 
