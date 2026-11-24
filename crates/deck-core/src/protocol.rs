@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -255,6 +255,8 @@ pub enum Request {
         kind: AgentKind,
         limit: u16,
     },
+    /// What the daemon uses and what it holds; answered by `Response::Stats`.
+    Stats,
 }
 
 /// What a `Request::Wait` waits for.
@@ -422,6 +424,47 @@ pub enum Response {
         sessions: Vec<AgentSession>,
         error: Option<String>,
     },
+    /// The answer to `Request::Stats`.
+    Stats(Stats),
+}
+
+/// The daemon's own figures, from `Request::Stats`. A figure the daemon could not read is
+/// `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stats {
+    pub pid: u32,
+    pub uptime_secs: u64,
+    pub version: String,
+    pub protocol: u32,
+    /// Resident memory in bytes.
+    pub rss_bytes: Option<u64>,
+    pub fds: Option<u32>,
+    pub threads: Option<u32>,
+    /// CPU time of the daemon process, in milliseconds.
+    pub cpu_user_ms: Option<u64>,
+    pub cpu_system_ms: Option<u64>,
+    pub sessions: u32,
+    /// Terminals whose program still runs.
+    pub live: u32,
+    /// Terminals whose program ended and that are kept on screen.
+    pub exited: u32,
+    /// TUI clients attached to a session; control connections are not counted.
+    pub clients: u32,
+    /// One entry per terminal, live or kept; empty when the log line asks.
+    pub per_terminal: Vec<TerminalStats>,
+}
+
+/// One terminal in [`Stats`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalStats {
+    pub id: TerminalId,
+    pub session: String,
+    /// Lines of history the display can reach.
+    pub history: u32,
+    /// Columns and rows.
+    pub size: (u16, u16),
+    /// Bytes read from its PTY since it started.
+    pub bytes_read: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -943,6 +986,7 @@ mod tests {
                 kind: AgentKind::OpenCode,
                 limit: 50,
             }),
+            ClientMsg::Request(Request::Stats),
             ClientMsg::Action(Action::KillSession),
             ClientMsg::Action(Action::NewPanelWith {
                 project: crate::model::ProjectId(2),
@@ -1079,6 +1123,28 @@ mod tests {
                 sessions: Vec::new(),
                 error: Some("timed out".into()),
             }),
+            ServerMsg::Response(Response::Stats(Stats {
+                pid: 4312,
+                uptime_secs: 273_600,
+                version: "0.4.0".into(),
+                protocol: PROTOCOL_VERSION,
+                rss_bytes: Some(88_276_787),
+                fds: Some(61),
+                threads: None,
+                cpu_user_ms: Some(312_400),
+                cpu_system_ms: Some(41_000),
+                sessions: 2,
+                live: 13,
+                exited: 1,
+                clients: 1,
+                per_terminal: vec![TerminalStats {
+                    id: TerminalId(4),
+                    session: "main".into(),
+                    history: 10_000,
+                    size: (120, 40),
+                    bytes_read: 50_432_000,
+                }],
+            })),
             ServerMsg::ActionResult(Err(ActionError::InvalidSessionId)),
         ]
     }

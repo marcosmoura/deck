@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 02 — Stress and soak suite
@@ -19,7 +19,7 @@ A suite that loads the daemon hard and for long, and fails when it leaks, stalls
    - **control loop**: 2,000 `deck send` plus `deck capture` calls; fds back to baseline.
    - **soak**: for `DECK_SOAK_SECS` (default 600), with `scrollback_lines = 1000` so histories fill within the first minute, a mixed load (a terminal printing a line every 10 ms, terminals opened and closed every 5 s, a client attaching and detaching every 30 s); samples `deck stats` every 10 s into `target/stress/soak.csv`. After a 120 s warm-up, with at least 30 samples, it fails if the least-squares slope of rss is above a bound in MiB per hour or that of fds above 1 per hour. A quiet minute at the end (no load) checks idle CPU: daemon CPU seconds per minute below a bound.
 2. Each scenario writes its measurements to `target/stress/<scenario>.json` and prints a one-line summary.
-3. **`just stress [filter]`** runs the scenarios in a release build, one at a time (`cargo nextest run --release -p deck --test stress --run-ignored only --test-threads 1 {{filter}}`), after raising the open-file limit (`ulimit -n 4096`); `DECK_SOAK_SECS` passes through.
+3. **`just stress [filter]`** runs the scenarios in a release build, one at a time (`cargo nextest run --release -p deck --test stress --run-ignored only --test-threads 1 --no-capture {{filter}}`, so each scenario's summary prints), after raising the open-file limit (`ulimit -n 4096`); `DECK_SOAK_SECS` passes through.
 4. **Nightly workflow** `.github/workflows/stress.yml`: on a schedule (once a day) and on manual dispatch, `just stress` on `macos-15` and `ubuntu-24.04` with `DECK_SOAK_SECS=1800`, uploading `target/stress/` as an artifact even when a scenario fails (`if: always()`).
 5. **Bounds** set as the overview says, each written next to its scenario with the measured value it came from.
 6. Everything the suite exposes is fixed or filed (overview, Findings).

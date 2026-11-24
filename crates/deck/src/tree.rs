@@ -428,7 +428,7 @@ pub fn tree_text(tree: &[SessionView]) -> String {
 
 // The daemon.
 
-const NO_DAEMON: &str = "no deck daemon running";
+pub(crate) const NO_DAEMON: &str = "no deck daemon running";
 
 /// A connection to a running daemon: it never starts one.
 pub(crate) struct Api {

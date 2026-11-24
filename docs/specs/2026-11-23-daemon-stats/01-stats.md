@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — `deck stats` and the stats log line

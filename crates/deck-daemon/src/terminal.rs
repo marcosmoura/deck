@@ -74,6 +74,8 @@ pub struct TermHandle {
     /// Woken on every chunk of output and at the end of the stream.
     pub activity: Notify,
     last_data: AtomicU64,
+    /// Bytes the reader thread read from the PTY since it started.
+    bytes_read: AtomicU64,
     /// The exit code, set once the process ended and its output was read.
     finished: Mutex<Option<i32>>,
     eof: AtomicBool,
@@ -225,6 +227,11 @@ impl TermHandle {
     /// The exit code once the process ended and its output was read.
     pub fn finished(&self) -> Option<i32> {
         *lock(&self.finished)
+    }
+
+    /// Bytes read from the PTY since the terminal started.
+    pub fn bytes_read(&self) -> u64 {
+        self.bytes_read.load(Ordering::Relaxed)
     }
 
     /// When the program last printed, on the daemon's clock (zero before its first output).
@@ -509,6 +516,10 @@ pub fn start(
     req: &SpawnRequest,
     parts: Parts,
 ) -> Result<Arc<TermHandle>, String> {
+    if std::env::var_os(crate::TEST_LEAK_FD_VAR).is_some_and(|v| v == "1") {
+        // Test hook: a descriptor that is never closed.
+        std::mem::forget(std::fs::File::open("/dev/null"));
+    }
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
     let killer = parts.child.clone_killer();
     let pid = parts.child.process_id();
@@ -541,6 +552,7 @@ pub fn start(
         dirty: Notify::new(),
         activity: Notify::new(),
         last_data: AtomicU64::new(0),
+        bytes_read: AtomicU64::new(0),
         finished: Mutex::new(None),
         eof: AtomicBool::new(false),
         exited: AtomicBool::new(false),
@@ -626,6 +638,7 @@ fn spawn_reader(shared: &Arc<Shared>, handle: &Arc<TermHandle>, mut reader: Box<
                             break;
                         };
                         h.last_data.store(nanos(s.clock.now()), Ordering::Release);
+                        h.bytes_read.fetch_add(n as u64, Ordering::Relaxed);
                         files.scan(bytes, |piece| s.output(&h, piece));
                         for path in osc7.feed(bytes) {
                             s.osc7_cwd(&h, path);

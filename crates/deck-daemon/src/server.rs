@@ -40,6 +40,7 @@ mod cwd;
 mod launch;
 mod listing;
 mod restore;
+pub(crate) mod stats;
 mod terminal_io;
 mod waiting;
 
@@ -537,6 +538,8 @@ pub struct Shared {
     config: Mutex<Arc<Config>>,
     pub clock: Arc<dyn Clock>,
     pub version: u32,
+    /// When the daemon started, for the uptime in `Request::Stats`.
+    started: std::time::Instant,
     pub handle: Handle,
     state: Mutex<State>,
     /// The colours of the client each session follows, for the reader threads (which must
@@ -605,6 +608,7 @@ impl Shared {
             config: Mutex::new(Arc::new(config)),
             clock,
             version,
+            started: std::time::Instant::now(),
             handle: Handle::current(),
             state: Mutex::new(State::default()),
             session_colors: Mutex::new(HashMap::new()),

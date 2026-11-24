@@ -245,6 +245,10 @@ async fn dispatch(
                 shared.list_sessions(),
             )));
         }
+        Ok(ClientMsg::Request(Request::Stats)) => {
+            let stats = shared.stats(true).await;
+            queue.push_msg(ServerMsg::Response(Response::Stats(stats)));
+        }
         Ok(ClientMsg::Request(Request::KillServer)) => {
             queue.push_msg(ServerMsg::Response(Response::Ok));
             tracing::info!("shutting down: kill-server {}", hello.requester());

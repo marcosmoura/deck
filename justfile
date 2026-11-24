@@ -24,6 +24,11 @@ test:
 test-crate crate filter="":
     cargo nextest run -p {{crate}} {{filter}}
 
+# The stress and soak suite, in a release build, one scenario at a time. `DECK_SOAK_SECS`
+# sets the soak's length (default 600).
+stress filter="":
+    ulimit -n 4096 && cargo nextest run --release -p deck --test stress --run-ignored only --test-threads 1 --no-capture {{filter}}
+
 # Build and run deck with an isolated socket and state dir.
 run *args:
     cargo build -p deck

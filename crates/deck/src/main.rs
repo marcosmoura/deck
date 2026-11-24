@@ -7,6 +7,7 @@ mod daemon_cmd;
 mod guide;
 mod hooks;
 mod platform;
+mod stats_cmd;
 mod terminal_io;
 mod tree;
 
@@ -85,6 +86,13 @@ enum Command {
     Wait(terminal_io::WaitArgs),
     /// Prints how an agent inside deck uses these commands (the text of the agent skill).
     Guide,
+    /// Shows what the daemon uses (memory, descriptors, threads, CPU) and holds; `--json` for
+    /// scripts. Starts no daemon.
+    Stats {
+        /// Print one JSON document instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Stops the daemon; its sessions are restored by the next `deck`.
     KillServer {
         /// Also delete the saved state, so the next `deck` starts fresh.
@@ -152,6 +160,7 @@ fn main() -> ExitCode {
         Some(Command::Capture(args)) => Ok(terminal_io::capture(args)),
         Some(Command::Wait(args)) => Ok(terminal_io::wait(args)),
         Some(Command::Guide) => Ok(guide::run()),
+        Some(Command::Stats { json }) => Ok(stats_cmd::run(json)),
         Some(Command::KillServer { forget }) => control::kill_server(forget),
         Some(Command::Config { command }) => config_cmd::run(command),
         Some(Command::Hooks { command }) => hooks::run(command),

@@ -1,0 +1,31 @@
+name: Stress
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      DECK_SOAK_SECS: "1800"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+      - run: just stress
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-${{ matrix.os }}
+          path: target/stress/
+          if-no-files-found: warn

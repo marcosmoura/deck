@@ -8,10 +8,60 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 
+use std::time::Duration;
+
 #[cfg(target_os = "linux")]
 pub use linux::{process_argv, process_cwd};
 #[cfg(target_os = "macos")]
 pub use macos::{process_argv, process_cwd};
+
+/// What the daemon process uses; a figure that cannot be read is `None`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SelfStats {
+    /// Resident memory in bytes.
+    pub rss_bytes: Option<u64>,
+    /// Open file descriptors.
+    pub fds: Option<u32>,
+    pub threads: Option<u32>,
+    pub cpu_user: Option<Duration>,
+    pub cpu_system: Option<Duration>,
+}
+
+/// Measures the daemon process: memory, descriptors, threads and CPU time. Reads files or
+/// asks the kernel, so it runs off the async workers.
+pub fn self_stats() -> SelfStats {
+    let cpu = cpu_times();
+    #[cfg(target_os = "linux")]
+    let (rss_bytes, fds, threads) = (linux::rss_bytes(), linux::fds(), linux::threads());
+    #[cfg(target_os = "macos")]
+    let (rss_bytes, fds, threads) = (macos::rss_bytes(), macos::fds(), macos::threads());
+    SelfStats {
+        rss_bytes,
+        fds,
+        threads,
+        cpu_user: cpu.map(|c| c.0),
+        cpu_system: cpu.map(|c| c.1),
+    }
+}
+
+/// The user and system CPU time of this process, from `getrusage`.
+fn cpu_times() -> Option<(Duration, Duration)> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: `usage` is a zeroed `rusage`, valid for `getrusage` to write.
+    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    // SAFETY: the call succeeded, so it filled the struct; zero bytes were valid before.
+    let usage = unsafe { usage.assume_init() };
+    let of = |t: libc::timeval| {
+        Duration::new(
+            u64::try_from(t.tv_sec).unwrap_or(0),
+            u32::try_from(t.tv_usec).unwrap_or(0).saturating_mul(1000),
+        )
+    };
+    Some((of(usage.ru_utime), of(usage.ru_stime)))
+}
 
 /// The foreground process of a PTY: the leader of its foreground process group (`tcgetpgrp`
 /// on the master) and its argv as the kernel holds it. `None` when either cannot be read,
@@ -121,6 +171,31 @@ mod tests {
         let pid = child.id();
         while wait_status(pid).unwrap().is_none() {}
         assert!(wait_status(pid).is_err());
+    }
+
+    #[test]
+    fn self_stats_are_plausible_and_cpu_does_not_go_back() {
+        // A test process may hold only the three standard descriptors; two more make the
+        // count's growth checkable.
+        let before = self_stats();
+        let open: Vec<_> = (0..2)
+            .map(|_| std::fs::File::open("/dev/null").unwrap())
+            .collect();
+        let first = self_stats();
+        assert!(first.fds.unwrap() >= before.fds.unwrap() + 2, "{first:?}");
+        assert!(first.fds.unwrap() > 3, "{first:?}");
+        assert!(first.rss_bytes.unwrap() > 1 << 20);
+        assert!(first.threads.unwrap() >= 1);
+        // Burn some CPU so the second reading can only be later.
+        let mut x = 0u64;
+        for i in 0..5_000_000u64 {
+            x = x.wrapping_add(std::hint::black_box(i));
+        }
+        std::hint::black_box(x);
+        let second = self_stats();
+        drop(open);
+        assert!(second.cpu_user.unwrap() >= first.cpu_user.unwrap());
+        assert!(second.cpu_system.unwrap() >= first.cpu_system.unwrap());
     }
 
     #[test]

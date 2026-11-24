@@ -1,4 +1,5 @@
-//! macOS: the cwd of a process through `proc_pidinfo`, its arguments through `sysctl`.
+//! macOS: the cwd of a process through `proc_pidinfo`, its arguments through `sysctl`, and
+//! the daemon's own figures through `proc_pidinfo`.
 
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
@@ -36,6 +37,71 @@ pub fn process_cwd(pid: u32) -> Option<PathBuf> {
         .collect();
     let path = String::from_utf8(bytes).ok()?;
     (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// The `proc_taskinfo` of this process.
+fn task_info() -> Option<libc::proc_taskinfo> {
+    let size = libc::c_int::try_from(size_of::<libc::proc_taskinfo>()).ok()?;
+    let mut info = MaybeUninit::<libc::proc_taskinfo>::zeroed();
+    // SAFETY: `info` is a zeroed buffer of exactly `size` bytes, which `proc_pidinfo`
+    // fills; the struct is plain data, so all-zero is a valid value.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            libc::getpid(),
+            libc::PROC_PIDTASKINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: the call filled the whole struct (it returned `size`).
+    Some(unsafe { info.assume_init() })
+}
+
+/// The resident memory of this process in bytes.
+pub fn rss_bytes() -> Option<u64> {
+    Some(task_info()?.pti_resident_size)
+}
+
+/// The threads of this process.
+pub fn threads() -> Option<u32> {
+    u32::try_from(task_info()?.pti_threadnum).ok()
+}
+
+/// The open descriptors of this process: `PROC_PIDLISTFDS` lists them.
+pub fn fds() -> Option<u32> {
+    let pid = libc::c_int::try_from(std::process::id()).ok()?;
+    let entry = size_of::<libc::proc_fdinfo>();
+    // SAFETY: a null buffer with size 0 asks only for the size the list needs.
+    let needed =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0) };
+    let needed = usize::try_from(needed).ok().filter(|&n| n > 0)?;
+    // Room for descriptors opened between the two calls.
+    let capacity = needed / entry + 32;
+    let mut list = vec![
+        libc::proc_fdinfo {
+            proc_fd: 0,
+            proc_fdtype: 0
+        };
+        capacity
+    ];
+    let bytes = libc::c_int::try_from(capacity * entry).ok()?;
+    // SAFETY: `list` is valid for `bytes` bytes, which `proc_pidinfo` fills with whole
+    // entries and whose count it returns in bytes.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDLISTFDS,
+            0,
+            list.as_mut_ptr().cast(),
+            bytes,
+        )
+    };
+    let written = usize::try_from(written).ok().filter(|&n| n > 0)?;
+    u32::try_from(written / entry).ok()
 }
 
 /// The arguments of the process `pid` (`argv[0]` first), from `sysctl KERN_PROCARGS2`.

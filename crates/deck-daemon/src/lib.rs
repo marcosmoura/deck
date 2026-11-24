@@ -88,6 +88,13 @@ impl std::fmt::Debug for CwdQuery {
 /// for coding agents, in milliseconds.
 pub const TEST_AGENT_POLL_VAR: &str = "DECK_TEST_AGENT_POLL_MS";
 
+/// Shortens the interval of the stats log line, in milliseconds.
+pub const TEST_STATS_LOG_VAR: &str = "DECK_TEST_STATS_LOG_MS";
+
+/// The hidden variable that makes the daemon leak one file descriptor for every terminal it
+/// starts (set it to `1`), so the stress suite can check that it catches a leak.
+pub const TEST_LEAK_FD_VAR: &str = "DECK_TEST_LEAK_FD";
+
 /// How often the foreground process of every terminal is looked at.
 const AGENT_POLL: Duration = Duration::from_secs(1);
 
@@ -130,6 +137,9 @@ pub struct ListingStats {
     pub(crate) running: AtomicUsize,
 }
 
+/// How often the stats line is logged.
+const STATS_LOG: Duration = Duration::from_secs(600);
+
 /// How often the config file is looked at.
 const CONFIG_POLL: Duration = Duration::from_secs(1);
 
@@ -148,6 +158,8 @@ pub struct Options {
     /// How often the foreground process of every terminal is looked at for an agent.
     pub agent_poll: Duration,
     pub foreground_query: ForegroundQuery,
+    /// How often the stats line is logged.
+    pub stats_log: Duration,
     /// Counts the pending `wait` requests, for tests that check none is left behind.
     pub waiters: Arc<AtomicUsize>,
     /// Counts what the agent-session listings read, for tests.
@@ -165,6 +177,7 @@ impl Default for Options {
             cwd_query: CwdQuery::default(),
             agent_poll: AGENT_POLL,
             foreground_query: ForegroundQuery::default(),
+            stats_log: STATS_LOG,
             waiters: Arc::default(),
             listing: Arc::default(),
         }
@@ -191,6 +204,9 @@ impl Options {
         }
         if let Some(ms) = env(TEST_AGENT_POLL_VAR).and_then(|v| v.parse::<u64>().ok()) {
             options.agent_poll = Duration::from_millis(ms.max(10));
+        }
+        if let Some(ms) = env(TEST_STATS_LOG_VAR).and_then(|v| v.parse::<u64>().ok()) {
+            options.stats_log = Duration::from_millis(ms.max(10));
         }
         options
     }
@@ -322,6 +338,10 @@ impl Daemon {
             .map(|file| tokio::spawn(watch_config(Arc::clone(&shared), file, options.config_poll)));
         let tracker = tokio::spawn(Arc::clone(&shared).track_cwds(options.cwd_poll));
         let agents = tokio::spawn(Arc::clone(&shared).track_agents(options.agent_poll));
+        let stats_log = tokio::spawn(server::stats::log_every(
+            Arc::clone(&shared),
+            options.stats_log,
+        ));
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
@@ -348,6 +368,9 @@ impl Daemon {
         }
         tracker.abort();
         agents.abort();
+        stats_log.abort();
+        // One last line while the terminals are still there.
+        shared.log_stats().await;
         shared.finish_shutdown().await;
         // It stops at the shutdown flag; an open that was in flight is discarded and reaped.
         if let Some(launching) = launching {

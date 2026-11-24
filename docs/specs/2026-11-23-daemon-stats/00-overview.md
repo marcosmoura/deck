@@ -39,8 +39,8 @@ Asked by the user on 23 Nov 2026, as part of making deck a daily driver. [DECK-2
 
 | Sub-spec                 | Type      | Crate                        | Summary                                                                      | Depends | Status |
 | ------------------------ | --------- | ---------------------------- | ---------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-stats.md)        | shippable | deck-daemon, deck-core, deck | Self-measurement, `Request::Stats`, `deck stats`, the periodic log line      | —       | todo   |
-| [02](02-stress-suite.md) | shippable | deck (tests), repo           | Stress and soak scenarios, `just stress`, nightly workflow, bounds, findings | 01      | todo   |
+| [01](01-stats.md)        | shippable | deck-daemon, deck-core, deck | Self-measurement, `Request::Stats`, `deck stats`, the periodic log line      | —       | done   |
+| [02](02-stress-suite.md) | shippable | deck (tests), repo           | Stress and soak scenarios, `just stress`, nightly workflow, bounds, findings | 01      | done   |
 
 ## Affected docs
 

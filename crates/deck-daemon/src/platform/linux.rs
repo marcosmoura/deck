@@ -1,4 +1,5 @@
-//! Linux: the cwd and the arguments of a process through `/proc`.
+//! Linux: the cwd and the arguments of a process, and the daemon's own figures, through
+//! `/proc`.
 
 use std::path::PathBuf;
 
@@ -31,9 +32,52 @@ fn split_cmdline(raw: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// The resident memory in bytes: the second field of `/proc/self/statm`, in pages.
+pub fn rss_bytes() -> Option<u64> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    // SAFETY: `sysconf` only reads a system constant.
+    let page = u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
+    rss_pages(&statm)?.checked_mul(page)
+}
+
+fn rss_pages(statm: &str) -> Option<u64> {
+    statm.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// The open descriptors: the entries of `/proc/self/fd`, less the one that listing opens.
+pub fn fds() -> Option<u32> {
+    let count = std::fs::read_dir("/proc/self/fd").ok()?.count();
+    u32::try_from(count.saturating_sub(1)).ok()
+}
+
+/// The threads: the `Threads:` line of `/proc/self/status`.
+pub fn threads() -> Option<u32> {
+    threads_in(&std::fs::read_to_string("/proc/self/status").ok()?)
+}
+
+fn threads_in(status: &str) -> Option<u32> {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("Threads:"))?
+        .trim()
+        .parse()
+        .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_figures_are_read_from_proc_text() {
+        assert_eq!(rss_pages("5000 1234 300 1 0 900 0\n"), Some(1234));
+        assert_eq!(rss_pages("5000"), None);
+        assert_eq!(
+            threads_in("Name:\tdeck\nThreads:\t38\nVmRSS: 5 kB\n"),
+            Some(38)
+        );
+        assert_eq!(threads_in("Name:\tdeck\n"), None);
+    }
 
     #[test]
     fn a_cmdline_splits_at_nuls() {
