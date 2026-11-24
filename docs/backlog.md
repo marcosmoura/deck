@@ -8,6 +8,7 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
+5. DECK-29 Recreate the Homebrew tap
 6. DECK-21 Live upgrade
 7. DECK-22 Terminal compatibility
 8. DECK-24 Scrollback search and copy mode
@@ -49,6 +50,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
 | DECK-27 | Terminals in the sidebar                  | done        | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
 | DECK-28 | Stress suite follow-ups                   | todo        | DECK-23                                                       | —                                                                            |
+| DECK-29 | Recreate the Homebrew tap                 | todo        | DECK-25                                                       | —                                                                            |
 
 ### Withdrawn
 
@@ -59,6 +61,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-29
+
+**Recreate the Homebrew tap.** Asked on 24 Nov 2026: `marcosmoura/homebrew-tap` dates from 2022 and holds only an unused `tsv-utils` formula; recreate it with deck as its only formula and overhaul the repository.
+
+- What: in `marcosmoura/homebrew-tap`, replace `main` with a fresh single-commit history (the same repository, so its URL, settings and secrets stay; `tsv-utils` and the old history are dropped). The new tree: `README.md` (what the tap is, `brew install marcosmoura/tap/deck`, that `Formula/deck.rb` is written by deck's release workflow and never edited by hand), `LICENSE` (MIT), `.github/workflows/tests.yml` (on push and pull request, macOS and Linux: `brew style`, `brew audit --strict` and `brew install` plus `brew test` of every formula in `Formula/`, passing when there is none yet), `.github/dependabot.yml` (GitHub Actions, weekly), third-party actions pinned by SHA. No branch protection: DECK-25's release job commits `Formula/deck.rb` to `main` directly. No `Formula/deck.rb` until deck's first release writes it. Built in a local clone; the one force-push to `main` waits for the user's go-ahead.
+- Why: the tap is where `brew install marcosmoura/tap/deck` (DECK-25) installs from; it should hold only deck and check what the release job writes.
+- Acceptance: the tap's `main` has the new single commit and nothing of the old tree; its workflow passes `actionlint` locally and is green on GitHub after the push; `docs/architecture.md` (Releases, Homebrew tap) says the tap checks the formula on every write.
 
 ### DECK-28
 
