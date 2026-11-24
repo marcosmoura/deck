@@ -14,6 +14,7 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 7. DECK-22 Terminal compatibility
 8. DECK-24 Scrollback search and copy mode
 9. DECK-26 Security, privacy and performance reviews
+10. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
@@ -49,6 +50,7 @@ Open tasks the user has not placed in the queue: none.
 | DECK-25 | Release automation and Homebrew           | ready       | —                                                             | [release-homebrew](specs/2026-11-23-release-homebrew/00-overview.md)         |
 | DECK-26 | Security, privacy and performance reviews | ready       | DECK-19, DECK-20, DECK-21, DECK-22, DECK-23, DECK-24, DECK-25 | [reviews](specs/2026-11-23-reviews/00-overview.md)                           |
 | DECK-27 | Terminals in the sidebar                  | in-progress | —                                                             | [sidebar-terminals](specs/2026-11-24-sidebar-terminals/00-overview.md)       |
+| DECK-28 | Stress suite follow-ups                   | todo        | DECK-23                                                       | —                                                                            |
 
 ### Withdrawn
 
@@ -59,6 +61,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-28
+
+**Stress suite follow-ups.** Asked on 24 Nov 2026: the after-merge steps of [DECK-23](specs/2026-11-23-daemon-stats/00-overview.md), deferred to the end of the queue.
+
+- What: run `DECK_SOAK_SECS=86400 just stress soak` once on the user's machine, in the background, and record its summary (rss and fds slopes, idle CPU, and whether CPU under load kept climbing, as one 600 s run hinted) in `docs/features/stats.md`; read the rss slope by hand, since the 50 MiB/h bound does not tighten with length. Once the repository has a GitHub remote, dispatch `.github/workflows/stress.yml` once, adjust any bound the hosted runners exceed (the 0.1 s flood echo bound first) and record the runners' numbers next to the macOS ones. That run is also the first check of the Linux `self_stats` code, never compiled so far. Optional: make `attach_loop` record its JSON before asserting, like the other scenarios.
+- Why: DECK-23's bounds come from one macOS machine and a 600 s soak; the spec asks for a 24-hour soak and runner numbers.
+- Acceptance: `docs/features/stats.md` has the 24-hour soak's summary with date and machine; once a remote exists, a green nightly run on `macos-15` and `ubuntu-24.04` with its numbers in the table, or the reason it could not run.
 
 ### DECK-16
 
