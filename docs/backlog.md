@@ -65,7 +65,7 @@ Open tasks the user has not placed in the queue:
 | DECK-36 | Setting for kitty file mediums            | todo        | DECK-26                                                       | —                                                                            |
 | DECK-37 | Fuzz target for the emulator feed         | todo        | —                                                             | —                                                                            |
 | DECK-38 | Daemon not dumpable on Linux              | todo        | —                                                             | —                                                                            |
-| DECK-39 | Client exits when its terminal closes     | ready       | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
+| DECK-39 | Client exits when its terminal closes     | in-progress | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
 
 ### Withdrawn
 
