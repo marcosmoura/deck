@@ -79,7 +79,7 @@ impl Shared {
 
     /// Writes the state. A scheduled save (`last == false`) gives up when the daemon is
     /// shutting down; the shutdown save (`last == true`) always writes.
-    fn save(&self, last: bool) {
+    pub(super) fn save(&self, last: bool) {
         let _writing = lock(&self.save_lock);
         let file = {
             let mut st = self.st();
@@ -177,14 +177,57 @@ impl Shared {
         launches
     }
 
-    /// Starts the restored terminals one after the other; clients can already attach.
+    /// Starts the restored terminals one after the other; clients can already attach. A live
+    /// upgrade holds it between two terminals.
     pub async fn launch_restored(self: Arc<Self>, launches: Vec<Launch>) {
         for launch in launches {
-            if self.st().shutting_down {
-                return;
-            }
-            self.launch_one(launch).await;
+            // `Err(true)`: stop; `Err(false)`: a handoff runs, wait.
+            let slot = loop {
+                let step = {
+                    let st = self.st();
+                    if st.shutting_down {
+                        Err(true)
+                    } else if st.upgrading {
+                        Err(false)
+                    } else {
+                        Ok(self.open_slot())
+                    }
+                };
+                match step {
+                    Ok(slot) => break slot,
+                    Err(true) => return,
+                    Err(false) => tokio::time::sleep(Duration::from_millis(20)).await,
+                }
+            };
+            self.launch_one(launch, slot).await;
         }
+    }
+
+    /// The terminals of the model that have no process: what a restore starts, and what the
+    /// new image of a live upgrade starts for terminals that had not started yet.
+    pub(crate) fn pending_launches(&self) -> Vec<Launch> {
+        let st = self.st();
+        let mut launches = Vec::new();
+        for sess in &st.sessions {
+            for project in &sess.model.projects {
+                for panel in &project.panels {
+                    launches.extend(
+                        panel
+                            .terminals
+                            .iter()
+                            .filter(|t| !sess.terminals.contains_key(&t.id))
+                            .map(|t| Launch {
+                                session: sess.model.id,
+                                project: project.id,
+                                panel: panel.id,
+                                root: project.root.clone(),
+                                saved: TerminalState::from_model(t),
+                            }),
+                    );
+                }
+            }
+        }
+        launches
     }
 
     /// The program and arguments a restored terminal is started with: the resume command
@@ -265,7 +308,7 @@ impl Shared {
         )
     }
 
-    async fn launch_one(self: &Arc<Self>, launch: Launch) {
+    async fn launch_one(self: &Arc<Self>, launch: Launch, slot: super::OpenSlot) {
         let tid = launch.saved.id;
         // The first directory that exists: portable-pty would silently use the home
         // directory for a missing one, so the daemon looks itself.
@@ -286,8 +329,9 @@ impl Shared {
         })
         .await
         .unwrap_or_else(|e| Err(format!("could not start the terminal: {e}")));
+        drop(slot);
 
-        let mut st = self.st();
+        let mut st = self.st_after_open().await;
         let sid = launch.session;
         let present = st
             .session_mut(sid)

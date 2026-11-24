@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 02 — The handoff
@@ -26,20 +26,20 @@ The daemon hands itself over to a new binary on `SIGUSR2`: it freezes, writes it
    - refuse new actions, requests that open terminals, and `launch_restored` steps (`the daemon is upgrading`), and wait up to 2 s for spawns already in flight to finish;
    - queue `Bye` to every client (`ServerShutdown` here; [03](03-upgrade-command.md) makes it `Upgrading`) and flush the writers as at shutdown (`WRITER_FLUSH`);
    - wait up to 500 ms for each terminal's queued input to be written to its PTY, then drop the rest with one log line per terminal;
-   - pause every reader ([01](01-snapshot-adopt.md)) and every wait thread: a wait thread stops calling `waitpid` and hands over any exit status it already reaped;
+   - pause every reader ([01](01-snapshot-adopt.md)) and every wait thread: a reader hands over the bytes it read but held back (an unfinished escape sequence or UTF-8 character, the image scanner's held bytes), and a wait thread stops calling `waitpid` and hands over any exit status it already reaped;
    - stop the cwd, agent, config and stats tasks;
    - from here the model does not change; take each terminal's snapshot through `with_emu`.
 7. **Save**: write `state.json` synchronously (`persist::write`, not the shutdown path), so a failed adoption restores the current layout.
 
 ### Exec and adoption
 
-8. **Handoff file**: an unlinked 0600 temp file in the runtime directory, JSON, with `handoff_version`, the old protocol version, `next_id`, every session's model (as `state.json` stores it, plus each terminal's title, cwd, `exit_status`, agent state and `keep`), each session's environment, `last_attached`, pending notices, the table of recent exit statuses used by `wait --exit`, recorded termination signals, and per terminal: its id, pid, master fd number, size, whether it reports its cwd, an exit status already reaped, and its snapshot (base64). Also the fd numbers of the listener and both lock files. Kept terminals whose program exited carry no fd or pid.
+8. **Handoff file**: an unlinked 0600 temp file in the runtime directory, JSON, with `handoff_version`, the old protocol version, `next_id`, every session's model (as `state.json` stores it, plus each terminal's title, cwd, `exit_status`, agent state and `keep`), each session's environment, `last_attached`, pending notices, the table of recent exit statuses used by `wait --exit`, recorded termination signals, and per terminal: its id, pid, master fd number, size, whether it reports its cwd, an exit status already reaped, its snapshot (base64) and the bytes its reader held back (base64). Also the fd numbers of the listener and both lock files. Kept terminals whose program exited carry no fd or pid.
 9. **Exec**: the marker keeps saying `upgrading` through the exec (clients never signal a daemon whose marker says so, and wait instead; the new image rewrites it). As the last steps, clear `FD_CLOEXEC` on each terminal's master, the listener, the two lock fds and the handoff file, block the signals (5), and `execve` the new binary with `daemon --adopt <fd>` and the daemon's environment minus `DECK_TEST_PROTOCOL_VERSION` (an upgrade always moves to the new binary's own version; `DECK_TEST_PARENT_PID` and the other test variables stay). fd 2 (the log) is inherited as today; the reader and writer dups are CLOEXEC and close by themselves.
 10. **Adopt** (`deck daemon --adopt <fd>`): skips log rotation and the stderr redirect (fd 2 already is the log; an adopt failure goes there) and the lock and bind steps. It:
     - first sets `FD_CLOEXEC` again on every inherited fd;
     - checks each inherited lock fd is the file on disk (`fstat` dev and inode against `deck.lock` and `state.lock`) and the listener is a listening Unix socket;
     - installs its signal handlers, then unblocks the four signals;
-    - reads the handoff file and rebuilds the sessions; for each live terminal makes an `AdoptedMaster` and `AdoptedChild` (with an already reaped status, if any), a new `Emu` at the recorded size fed the snapshot, and starts the reader, writer and wait threads. A terminal that fails to adopt is dropped (its master closed, so its program gets `SIGHUP`), logged and reported in a notice; the others go on;
+    - reads the handoff file and rebuilds the sessions; for each live terminal makes an `AdoptedMaster` and `AdoptedChild` (with an already reaped status, if any), a new `Emu` at the recorded size fed the snapshot and then the held-back bytes, and starts the reader, writer and wait threads. A terminal that fails to adopt is dropped (its master closed, so its program gets `SIGHUP`), logged and reported in a notice; the others go on;
     - nudges each terminal's size (`TIOCSWINSZ` to rows − 1, or rows + 1 for a one-row terminal, then back after 100 ms) so full-screen programs get a real `SIGWINCH` and redraw;
     - writes the marker with `generation` + 1 and the number of adopted terminals, saves `state.json`, starts its tasks, accepts connections, and acts on any recorded termination signal.
       If the handoff file cannot be read at all, it starts like a fresh daemon from `state.json` (the programs are gone, the layout restores) with an error notice.

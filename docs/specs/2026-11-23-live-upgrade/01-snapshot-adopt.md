@@ -1,6 +1,6 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 01 — Snapshot, adopted PTYs and pausable readers
@@ -24,7 +24,8 @@ The three building blocks the handoff in [02](02-handoff.md) needs, each testabl
 2. The snapshot never contains a sequence that makes the emulator reply (no DA, DSR, DECRQM, XTVERSION or colour queries), so feeding it produces no `EmuEvent::Reply`.
 3. **Adopted PTY** in `deck-daemon/src/platform/`: `AdoptedMaster::from_fd(OwnedFd)` implementing `portable_pty::MasterPty` (`resize` with `TIOCSWINSZ`, `get_size` with `TIOCGWINSZ`, `try_clone_reader` and `take_writer` as dups, `process_group_leader` with `tcgetpgrp`, `as_raw_fd`, `tty_name` returning `None`). `AdoptedChild::new(pid)` implementing `portable_pty::Child` and `ChildKiller` (`try_wait`/`wait` through `platform::wait_status`, `kill` sends `SIGHUP` and then `SIGKILL` after the same grace period as portable-pty's, `process_id`). Every `unsafe` block has a `// SAFETY:` comment.
 4. **Pausable readers**: the `pty-reader` thread waits with a `platform::poll_readable(fd, timeout)` helper (`poll(2)`, a timeout of at most 50 ms; `unsafe` stays in `platform/`) before each read and checks a per-terminal pause flag. `TermHandle::pause_reader()` sets it and returns once the reader has acknowledged, and the reader acknowledges only after the last chunk it read has been fed to the emulator (or the terminal has hit EOF); bytes not read stay in the kernel. `resume_reader()` clears it.
-5. **Pausable waiters**: likewise, `pause_waiter()` stops the `pty-wait` thread from calling `waitpid` and returns any exit status it had already reaped; `resume_waiter()` restarts it.
+   The reader holds back an incomplete escape sequence or UTF-8 character at the end of a chunk (at most 8 KiB; it feeds the held bytes when the PTY stays quiet for one poll), so that the emulator is at the start of a sequence when a pause takes effect. `pause_reader()` returns `Result<Vec<u8>, PauseTimeout>`: the held bytes (the kitty scanner's partial command first, then the carry), which [02](02-handoff.md) stores in the handoff file and feeds to the copy right after the snapshot, before the output still in the kernel. The reader keeps them, so a rollback needs only `resume_reader()`. The limit is 1 s.
+5. **Pausable waiters**: likewise, `pause_waiter()` stops the `pty-wait` thread from calling `waitpid` and returns any exit status it had already reaped; `resume_waiter()` restarts it. `pause_waiter()` returns `Result<Option<i32>, PauseTimeout>`, the same error as `pause_reader()`, with the same 1 s limit.
 6. Pausing costs nothing while not paused: the poll timeout only bounds how fast a pause is seen; output latency stays as today.
 7. `AdoptedMaster`'s writer does not send portable-pty's `\n` + VEOF on drop (that is portable-pty's own behaviour for the writers it makes).
 
@@ -47,3 +48,9 @@ The three building blocks the handoff in [02](02-handoff.md) needs, each testabl
 ## Notes
 
 - If DECK-19's `libghostty-vt` offers its own VT formatter for the screen, the worker may build `snapshot` on it, as long as requirement 1 and the acceptance criteria hold; say so in the report.
+- Deviations recorded after implementation:
+  - A snapshot taken while a program holds synchronized output (`?2026`) shows the screen as it is and never writes the mode. It does not wait for the hold to end: with the readers paused only the emulator's timeout could end it, so the rest of the frame arrives after the handoff.
+  - The saved cursor (`DECSC`) is not replayed: the emulator does not expose it. The primary screen's cursor behind the alternate screen is replayed.
+  - The adopted-PTY and pause tests are unit tests next to the code (`platform/adopted/tests.rs`, `terminal.rs`), not in `crates/deck-daemon/tests/`, because `platform` and `terminal` are private modules of the crate.
+  - `deck-daemon` gained `anyhow` (already a workspace dependency) to name `portable_pty::Error` in the `MasterPty` impl.
+  - A sequence a program leaves unfinished for longer than one reader poll (50 ms) is fed to the emulator anyway, so a pause in that window leaves the emulator mid-sequence; accepted as rare.

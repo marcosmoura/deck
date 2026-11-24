@@ -52,6 +52,9 @@ impl Shared {
                 if st.shutting_down {
                     return;
                 }
+                if st.upgrading {
+                    continue;
+                }
                 st.sessions
                     .iter()
                     .flat_map(|s| s.terminals.values())
@@ -80,6 +83,9 @@ impl Shared {
             let mut st = self.st();
             if st.shutting_down {
                 return;
+            }
+            if st.upgrading {
+                continue;
             }
             for (h, cwd) in found {
                 // OSC 7 may have arrived while the query ran: it wins.

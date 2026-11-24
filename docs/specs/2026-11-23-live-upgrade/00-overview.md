@@ -46,9 +46,9 @@ Asked by the user on 23 Nov 2026, as part of making deck a daily driver: every p
 
 | Sub-spec                    | Type       | Crate                     | Summary                                                                                         | Depends | Status |
 | --------------------------- | ---------- | ------------------------- | ----------------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-snapshot-adopt.md)  | foundation | deck-daemon               | `Emu::snapshot` VT replay with round-trip tests; adopted PTY and child types; pausable readers  | DECK-19 | todo   |
-| [02](02-handoff.md)         | foundation | deck-daemon, deck         | Handoff file, `SIGUSR2`, preflight, CLOEXEC, `execve`, `daemon --adopt`, rollback on failure    | 01      | todo   |
-| [03](03-upgrade-command.md) | shippable  | deck, deck-tui, deck-core | `deck upgrade`, `ByeReason::Upgrading` and client reattach, automatic upgrade on mismatch, docs | 02      | todo   |
+| [01](01-snapshot-adopt.md)  | foundation | deck-daemon               | `Emu::snapshot` VT replay with round-trip tests; adopted PTY and child types; pausable readers  | DECK-19 | done   |
+| [02](02-handoff.md)         | foundation | deck-daemon, deck         | Handoff file, `SIGUSR2`, preflight, CLOEXEC, `execve`, `daemon --adopt`, rollback on failure    | 01      | done   |
+| [03](03-upgrade-command.md) | shippable  | deck, deck-tui, deck-core | `deck upgrade`, `ByeReason::Upgrading` and client reattach, automatic upgrade on mismatch, docs | 02      | done   |
 
 ## Affected docs
 

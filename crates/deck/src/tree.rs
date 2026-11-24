@@ -439,7 +439,7 @@ impl Api {
     pub(crate) fn connect() -> anyhow::Result<Self> {
         let paths = checked_paths()?;
         let socket = control_socket(&paths);
-        match Conn::open(&socket, REPLY_TIMEOUT) {
+        match Conn::connect(&paths, &socket, REPLY_TIMEOUT) {
             Ok(conn) => Ok(Self { conn }),
             Err(e)
                 if matches!(

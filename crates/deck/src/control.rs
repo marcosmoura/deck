@@ -17,7 +17,7 @@ use deck_core::protocol::{
 };
 use deck_daemon::{DaemonPaths, check_runtime_dir, saved_session_count};
 
-use crate::platform;
+use crate::{platform, upgrade_cmd};
 
 /// How long the launcher waits for a daemon it started to accept connections.
 const START_TIMEOUT: Duration = Duration::from_secs(3);
@@ -66,8 +66,31 @@ pub fn attach(session: Option<String>, create: bool) -> anyhow::Result<ExitCode>
     attach_guards()?;
     let paths = checked_paths()?;
     ensure_daemon(&paths)?;
+    upgrade_older_daemon(&paths)?;
     let create = create || session.is_none();
     run_client(paths, session, create)
+}
+
+/// A daemon of an older protocol that can hand itself over is upgraded before attaching.
+/// One that cannot, or a newer one, is left to the mismatch error of the client.
+fn upgrade_older_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
+    use upgrade_cmd::Done;
+    let paths = upgrade_cmd::runtime_paths(paths);
+    let Some(daemon) = upgrade_cmd::daemon_version(&paths) else {
+        return Ok(());
+    };
+    if !upgrade_cmd::can_upgrade(&paths, daemon) {
+        return Ok(());
+    }
+    eprintln!("upgrading the deck daemon (protocol {daemon} → {PROTOCOL_VERSION})");
+    match upgrade_cmd::perform(&paths)? {
+        Done::Upgraded { .. } | Done::NoDaemon | Done::NotUpgradable => Ok(()),
+        Done::Refused(why) => bail!("{why}"),
+        Done::TimedOut => bail!(
+            "the upgrade did not finish; see {}",
+            paths.log_file.display()
+        ),
+    }
 }
 
 /// Runs the attach client on `session`.
@@ -102,7 +125,7 @@ pub fn new_session(
     };
     let paths = checked_paths()?;
     ensure_daemon(&paths)?;
-    let mut conn = Conn::open(&paths.socket, REPLY_TIMEOUT).context("cannot connect")?;
+    let mut conn = Conn::connect(&paths, &paths.socket, REPLY_TIMEOUT).context("cannot connect")?;
     let created = match conn.control(Request::NewSession { name, cwd: dir }) {
         Outcome::Response(Response::Session { name, .. }) => name,
         Outcome::Response(Response::Error(text)) => bail!("{text}"),
@@ -122,7 +145,7 @@ pub fn new_session(
 /// never start one.
 fn session_request(request: Request) -> anyhow::Result<ExitCode> {
     let paths = checked_paths()?;
-    let Ok(mut conn) = Conn::open(&paths.socket, REPLY_TIMEOUT) else {
+    let Ok(mut conn) = Conn::connect(&paths, &paths.socket, REPLY_TIMEOUT) else {
         eprintln!("no deck daemon running");
         return Ok(ExitCode::FAILURE);
     };
@@ -160,6 +183,10 @@ fn finish(exit: deck_tui::Exit) -> anyhow::Result<ExitCode> {
         Exit::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
         Exit::Error(text) => bail!("{text}"),
         Exit::Signal => return Ok(ExitCode::FAILURE),
+        // The client executes the new binary itself; this is when it could not.
+        Exit::Upgrading { .. } | Exit::Upgraded => {
+            println!("[deck was upgraded; run \"deck\" to reattach]");
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -190,6 +217,18 @@ impl Conn {
             reader: FrameReader::new(),
             said_hello: false,
         })
+    }
+
+    /// Like [`Conn::open`], after a handoff that is under way has ended: the new daemon
+    /// answers where the old one stopped. An error is a connection that cannot be made.
+    pub(crate) fn connect(
+        paths: &DaemonPaths,
+        socket: &Path,
+        timeout: Duration,
+    ) -> io::Result<Self> {
+        upgrade_cmd::wait_out_handoff(&upgrade_cmd::runtime_paths(paths))
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        Self::open(socket, timeout)
     }
 
     /// Lets reads wait without limit (for the answer to a `wait`).
@@ -276,10 +315,18 @@ pub(crate) fn bye_text(reason: &ByeReason) -> String {
         ByeReason::SessionEnded => "the session ended".into(),
         ByeReason::ServerShutdown => "deck daemon stopped".into(),
         ByeReason::VersionMismatch { daemon } => mismatch_text(*daemon),
+        ByeReason::Upgrading { .. } => "the deck daemon is upgrading; try again".into(),
     }
 }
 
 pub(crate) fn mismatch_text(daemon: u32) -> String {
+    let upgradable = daemon_paths().is_ok_and(|paths| upgrade_cmd::can_upgrade(&paths, daemon));
+    if upgradable {
+        return format!(
+            "the daemon speaks protocol {daemon}, this deck speaks {PROTOCOL_VERSION}; \
+             run \"deck upgrade\" to hand it over to this deck; what runs in it keeps running"
+        );
+    }
     format!(
         "the daemon speaks protocol {daemon}, this deck speaks {PROTOCOL_VERSION}; \
          run \"deck kill-server\" to restart it; sessions are restored when the daemon saved them"
@@ -325,18 +372,28 @@ fn daemon_answers(paths: &DaemonPaths) -> bool {
 /// starter, or an old daemon still holds the lock while it shuts down. So the launcher keeps
 /// polling the socket until the deadline and, once its daemon is gone, starts another after
 /// a short back-off (a few times at most).
+///
+/// A daemon that is handing itself over to a new binary is waited for (up to 30 s), not
+/// replaced: it answers again as soon as the new image runs.
 fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
+    let handoff_paths = upgrade_cmd::runtime_paths(paths);
+    upgrade_cmd::wait_out_handoff(&handoff_paths)?;
     if daemon_answers(paths) {
         return Ok(());
     }
     let exe = std::env::current_exe().context("cannot find the deck executable")?;
-    let deadline = Instant::now() + START_TIMEOUT;
+    let mut deadline = Instant::now() + START_TIMEOUT;
     let log_start = fs::metadata(&paths.log_file).map_or(0, |m| m.len());
     let mut attempts = 0;
     let mut exited: Option<Arc<AtomicBool>> = None;
     loop {
         if daemon_answers(paths) {
             return Ok(());
+        }
+        // A handoff began after the check above: wait it out, then look again.
+        if upgrade_cmd::wait_out_handoff(&handoff_paths)? {
+            deadline = Instant::now() + START_TIMEOUT;
+            continue;
         }
         let gone = exited.as_ref().is_none_or(|e| e.load(Ordering::Acquire));
         // Our daemon is gone: it may have refused a state file written by a newer deck.
@@ -374,7 +431,7 @@ fn ensure_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
 pub fn probe(session: Option<String>) -> anyhow::Result<ExitCode> {
     let paths = checked_paths()?;
     ensure_daemon(&paths)?;
-    let mut conn = Conn::open(&paths.socket, REPLY_TIMEOUT).context("cannot connect")?;
+    let mut conn = Conn::connect(&paths, &paths.socket, REPLY_TIMEOUT).context("cannot connect")?;
     conn.hello(Role::Attach {
         session,
         create: true,
@@ -411,7 +468,7 @@ pub(crate) fn control_socket(paths: &DaemonPaths) -> PathBuf {
 /// `deck ls`, of the session `only` when given.
 pub fn ls(only: Option<&str>) -> anyhow::Result<ExitCode> {
     let paths = checked_paths()?;
-    let Ok(mut conn) = Conn::open(&control_socket(&paths), REPLY_TIMEOUT) else {
+    let Ok(mut conn) = Conn::connect(&paths, &control_socket(&paths), REPLY_TIMEOUT) else {
         match saved_session_count(&paths) {
             0 => println!("no sessions"),
             n => println!(
@@ -467,7 +524,7 @@ fn session_lines(sessions: &[SessionSummary]) -> String {
 }
 
 /// True while a daemon holds `deck.lock`.
-fn lock_held(lock: &Path) -> bool {
+pub(crate) fn lock_held(lock: &Path) -> bool {
     let Ok(file) = File::open(lock) else {
         return false;
     };
@@ -488,7 +545,7 @@ fn wait_unlocked(lock: &Path, limit: Duration) -> bool {
 
 /// The pid in the lock file; the daemon writes it just after taking the lock, so retry
 /// briefly. Never a pid that `kill` would treat as a group (0 or below).
-fn read_pid(lock: &Path) -> Option<i32> {
+pub(crate) fn read_pid(lock: &Path) -> Option<i32> {
     let deadline = Instant::now() + ANSWER_TIMEOUT;
     loop {
         let pid = fs::read_to_string(lock)

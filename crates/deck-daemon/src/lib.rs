@@ -8,6 +8,7 @@ mod conn;
 mod emu;
 mod env;
 mod error;
+mod handoff;
 mod images;
 mod persist;
 mod platform;
@@ -34,6 +35,11 @@ use config_file::{Change, ConfigFile};
 pub use clock::{Clock, Drain, Fire, ManualClock, Poke, SystemClock, Throttle};
 pub use config_file::Notice;
 pub use error::DaemonError;
+pub use handoff::{
+    Adopt, EarlySignals, HANDOFF_VERSION, HandoffTest, Marker, TEST_EXEC_FAIL_VAR,
+    TEST_HANDOFF_DELAY_VAR, TEST_PREFREEZE_DELAY_VAR, Upgrade, catch_early_signals, early_signals,
+    prepare_adoption, write_private,
+};
 pub use persist::saved_session_count;
 pub use platform::process_cwd;
 pub use startup::{DaemonPaths, check_runtime_dir, effective_uid};
@@ -164,6 +170,14 @@ pub struct Options {
     pub waiters: Arc<AtomicUsize>,
     /// Counts what the agent-session listings read, for tests.
     pub listing: Arc<ListingStats>,
+    /// The control the embedder's signal handlers use for live upgrades. When set, the
+    /// daemon keeps `deck.handoff` and upgrades itself when asked.
+    pub upgrade: Option<Upgrade>,
+    /// What a new image found of the old one's handoff (`deck daemon --adopt <fd>`); see
+    /// [`prepare_adoption`].
+    pub adopt: Option<Adopt>,
+    /// Test seams of a handoff.
+    pub handoff_test: HandoffTest,
 }
 
 impl Default for Options {
@@ -180,6 +194,9 @@ impl Default for Options {
             stats_log: STATS_LOG,
             waiters: Arc::default(),
             listing: Arc::default(),
+            upgrade: None,
+            adopt: None,
+            handoff_test: HandoffTest::default(),
         }
     }
 }
@@ -207,6 +224,15 @@ impl Options {
         }
         if let Some(ms) = env(TEST_STATS_LOG_VAR).and_then(|v| v.parse::<u64>().ok()) {
             options.stats_log = Duration::from_millis(ms.max(10));
+        }
+        if env(TEST_EXEC_FAIL_VAR).is_some_and(|v| v == "1") {
+            options.handoff_test.exec_fail = true;
+        }
+        if let Some(ms) = env(TEST_HANDOFF_DELAY_VAR).and_then(|v| v.parse::<u64>().ok()) {
+            options.handoff_test.frozen_delay = Duration::from_millis(ms);
+        }
+        if let Some(ms) = env(TEST_PREFREEZE_DELAY_VAR).and_then(|v| v.parse::<u64>().ok()) {
+            options.handoff_test.prefreeze_delay = Duration::from_millis(ms);
         }
         options
     }
@@ -258,7 +284,7 @@ impl Daemon {
         paths: DaemonPaths,
         config: Config,
         shutdown: F,
-        options: Options,
+        mut options: Options,
         on_locked: H,
     ) -> Result<(), DaemonError>
     where
@@ -268,27 +294,61 @@ impl Daemon {
         let uid = effective_uid()
             .await
             .map_err(|e| DaemonError::io("cannot read the user id", e))?;
-        let locks = startup::prepare(&paths, uid)?;
-        on_locked().map_err(|e| DaemonError::io("cannot prepare the daemon log", e))?;
 
-        // A save that did not finish leaves a temp file; the state itself is read before
-        // anything is bound, so a file this daemon cannot use stops it early.
-        persist::remove_tmp(&paths.state_file());
-        let loaded = persist::load(&paths)?;
-
-        // Only the daemon removes the socket, and only under the lock.
-        match fs::remove_file(&paths.socket) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(DaemonError::io(
-                    format!("cannot remove {}", paths.socket.display()),
-                    e,
-                ));
+        // A new image has read what the old one handed over (`prepare_adoption`). When that
+        // failed, it starts over from `state.json` like a daemon that was never upgraded.
+        let mut adoption = None;
+        let mut adopt_error = None;
+        match options.adopt.take() {
+            Some(Adopt::Handed(file)) => adoption = Some(*file),
+            Some(Adopt::Failed(why)) => {
+                // Logged by the notice below, once the log file is stderr.
+                adopt_error = Some(why);
             }
+            None => {}
         }
-        let listener = UnixListener::bind(&paths.socket)
-            .map_err(|e| DaemonError::io(format!("cannot bind {}", paths.socket.display()), e))?;
+
+        let (locks, listener, loaded) = match &adoption {
+            Some(file) => {
+                let locks = startup::Locks::inherited(
+                    fs::File::from(platform::own_fd(file.lock_fd)),
+                    fs::File::from(platform::own_fd(file.state_lock_fd)),
+                );
+                let std_listener =
+                    std::os::unix::net::UnixListener::from(platform::own_fd(file.listener_fd));
+                std_listener
+                    .set_nonblocking(true)
+                    .map_err(|e| DaemonError::io("cannot use the inherited socket", e))?;
+                let listener = UnixListener::from_std(std_listener)
+                    .map_err(|e| DaemonError::io("cannot use the inherited socket", e))?;
+                (locks, listener, persist::Loaded::Missing)
+            }
+            None => {
+                let locks = startup::prepare(&paths, uid)?;
+                on_locked().map_err(|e| DaemonError::io("cannot prepare the daemon log", e))?;
+
+                // A save that did not finish leaves a temp file; the state itself is read
+                // before anything is bound, so a file this daemon cannot use stops it early.
+                persist::remove_tmp(&paths.state_file());
+                let loaded = persist::load(&paths)?;
+
+                // Only the daemon removes the socket, and only under the lock.
+                match fs::remove_file(&paths.socket) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(DaemonError::io(
+                            format!("cannot remove {}", paths.socket.display()),
+                            e,
+                        ));
+                    }
+                }
+                let listener = UnixListener::bind(&paths.socket).map_err(|e| {
+                    DaemonError::io(format!("cannot bind {}", paths.socket.display()), e)
+                })?;
+                (locks, listener, loaded)
+            }
+        };
         tracing::info!(socket = %paths.socket.display(), pid = std::process::id(), "deck daemon listening");
 
         let (config, notices, watched) = match options.config_path {
@@ -298,11 +358,17 @@ impl Daemon {
             }
             None => (config, Vec::new(), None),
         };
+        let clock: Arc<dyn Clock> = match &adoption {
+            Some(file) => Arc::new(SystemClock::starting_at(Duration::from_nanos(
+                file.clock_nanos,
+            ))),
+            None => options.clock,
+        };
         let (shared, mut shutdown_rx) = server::Shared::new(
             paths.clone(),
             config,
             notices,
-            options.clock,
+            clock,
             options.protocol_version,
             server::Probes {
                 cwd: options.cwd_query,
@@ -311,26 +377,93 @@ impl Daemon {
             },
             options.waiters,
         );
-        let launches = match loaded {
-            persist::Loaded::Missing => Vec::new(),
-            persist::Loaded::State(file, notes) => {
-                for note in notes {
-                    tracing::warn!("state.json: {note}");
-                }
-                shared.restore(*file)
+        if let Some(why) = adopt_error {
+            shared.notify(
+                NoticeLevel::Error,
+                format!(
+                    "the upgrade could not hand the terminals over ({why}); see {}",
+                    paths.log_file.display()
+                ),
+            );
+        }
+        let mut generation = 0;
+        let mut recorded = Vec::new();
+        let launches = if let Some(file) = adoption {
+            generation = file.generation + 1;
+            recorded = file.signals.clone();
+            let (old_pid, old_protocol) = (file.pid, file.protocol_version);
+            let adopting = Arc::clone(&shared);
+            let adopted = tokio::task::spawn_blocking(move || {
+                let mut file = file;
+                sweep_children(&mut file);
+                adopting.adopt(file)
+            })
+            .await
+            .map_err(|e| DaemonError::io("cannot adopt the terminals", io::Error::other(e)))?;
+            let rt = tokio::runtime::Handle::current();
+            for terminal in &adopted.live {
+                terminal.nudge_pty(&rt);
             }
-            persist::Loaded::Bad(why) => {
-                tracing::error!("{why}");
-                shared.notify(
-                    NoticeLevel::Error,
-                    format!(
-                        "previous state could not be read; see {}",
-                        paths.log_file.display()
-                    ),
-                );
-                Vec::new()
+            // The same count the marker gets: every terminal of the model, the ones whose
+            // program already ended included.
+            tracing::info!(
+                "adopted {} terminals from pid {old_pid} (protocol {old_protocol} \u{2192} {}), {} running",
+                shared.terminal_count(),
+                options.protocol_version,
+                adopted.live.len()
+            );
+            if adopted.dropped > 0 {
+                tracing::warn!("{} terminals could not be adopted", adopted.dropped);
+            }
+            let saving = Arc::clone(&shared);
+            let _ = tokio::task::spawn_blocking(move || saving.save_now()).await;
+            adopted.launches
+        } else {
+            match loaded {
+                persist::Loaded::Missing => Vec::new(),
+                persist::Loaded::State(file, notes) => {
+                    for note in notes {
+                        tracing::warn!("state.json: {note}");
+                    }
+                    shared.restore(*file)
+                }
+                persist::Loaded::Bad(why) => {
+                    tracing::error!("{why}");
+                    shared.notify(
+                        NoticeLevel::Error,
+                        format!(
+                            "previous state could not be read; see {}",
+                            paths.log_file.display()
+                        ),
+                    );
+                    Vec::new()
+                }
             }
         };
+        let upgrade = options.upgrade.clone();
+        let inherited = {
+            let (lock, state_lock) = locks.raw_fds();
+            handoff::Inherited {
+                listener: std::os::fd::AsRawFd::as_raw_fd(&listener),
+                lock,
+                state_lock,
+            }
+        };
+        let write_marker = || {
+            if upgrade.is_some() {
+                let marker = Marker {
+                    handoff: HANDOFF_VERSION,
+                    pid: std::process::id(),
+                    generation,
+                    terminals: shared.terminal_count(),
+                    upgrading: false,
+                };
+                if let Err(e) = marker.write(&paths.marker_file()) {
+                    tracing::warn!("cannot write {}: {e}", paths.marker_file().display());
+                }
+            }
+        };
+        write_marker();
         // Clients can connect while the terminals start.
         let launching = (!launches.is_empty())
             .then(|| tokio::spawn(Arc::clone(&shared).launch_restored(launches)));
@@ -342,24 +475,71 @@ impl Daemon {
             Arc::clone(&shared),
             options.stats_log,
         ));
+        // A termination signal that came during the handoff ends the new image at once.
+        let stop_now = recorded.first().is_some_and(|first| {
+            tracing::info!("shutting down: {first}");
+            shared.request_shutdown();
+            true
+        });
         tokio::pin!(shutdown);
-        loop {
-            tokio::select! {
-                accepted = listener.accept() => match accepted {
-                    Ok((stream, _)) => {
-                        tokio::spawn(conn::handle(Arc::clone(&shared), stream, uid));
+        let mut shutdown_done = false;
+        if !stop_now {
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => match accepted {
+                        Ok((stream, _)) => {
+                            tokio::spawn(conn::handle(Arc::clone(&shared), stream, uid));
+                        }
+                        Err(e) => {
+                            tracing::warn!("cannot accept a connection: {e}");
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                    },
+                    // The embedder (`deck daemon`) logs why it asked.
+                    () = &mut shutdown, if !shutdown_done => {
+                        shared.request_shutdown();
+                        break;
                     }
-                    Err(e) => {
-                        tracing::warn!("cannot accept a connection: {e}");
-                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    _ = shutdown_rx.changed() => break,
+                    () = upgrade_requested(upgrade.as_ref()) => {
+                        let Some(control) = upgrade.as_ref() else { continue };
+                        // The embedder's signal task lives in `shutdown`: it is polled on,
+                        // so a termination signal is recorded and not lost.
+                        let handoff = handoff::attempt(
+                        &shared,
+                        control,
+                        &paths,
+                        uid,
+                        generation,
+                        inherited,
+                        options.handoff_test,
+                    );
+                        tokio::pin!(handoff);
+                        loop {
+                            tokio::select! {
+                                () = &mut handoff => break,
+                                () = &mut shutdown, if !shutdown_done => {
+                                    shutdown_done = true;
+                                    control.record("the embedder asked to stop");
+                                }
+                            }
+                        }
+                        let signals = control.end();
+                        if let Some(first) = signals.first() {
+                            if shutdown_done {
+                                tracing::info!("shutting down: {first}");
+                            } else {
+                                tracing::info!("shutting down: {first} (during the upgrade)");
+                            }
+                            shared.request_shutdown();
+                            break;
+                        }
+                        if shutdown_done {
+                            shared.request_shutdown();
+                            break;
+                        }
                     }
-                },
-                // The embedder (`deck daemon`) logs why it asked.
-                () = &mut shutdown => {
-                    shared.request_shutdown();
-                    break;
                 }
-                _ = shutdown_rx.changed() => break,
             }
         }
         drop(listener);
@@ -379,8 +559,39 @@ impl Daemon {
         if let Err(e) = fs::remove_file(&paths.socket) {
             tracing::warn!("cannot remove the socket: {e}");
         }
+        if upgrade.is_some() {
+            let _ = fs::remove_file(paths.marker_file());
+        }
         drop(locks);
         Ok(())
+    }
+}
+
+/// Completes when an upgrade is asked for; never when there is no control.
+async fn upgrade_requested(upgrade: Option<&Upgrade>) {
+    match upgrade {
+        Some(upgrade) => upgrade.requested().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Reaps the children that ended while nobody waited for them. A status for a terminal that
+/// is adopted goes into its record, as if the old image had reaped it; the others are
+/// children of the old image that nothing adopts (a process that was being discarded, a
+/// listing helper).
+fn sweep_children(file: &mut handoff::file::HandoffFile) {
+    for (pid, status) in platform::reap_children() {
+        match file
+            .terminals
+            .iter_mut()
+            .find(|t| t.pid == Some(pid) && t.reaped.is_none())
+        {
+            Some(terminal) => {
+                tracing::info!("reaped pid {pid} (status {status}): it ended during the handoff");
+                terminal.reaped = Some(status);
+            }
+            None => tracing::info!("reaped pid {pid} (status {status}), a child nothing adopted"),
+        }
     }
 }
 
@@ -391,6 +602,10 @@ async fn watch_config(shared: Arc<server::Shared>, mut file: ConfigFile, poll: D
     ticks.tick().await;
     loop {
         ticks.tick().await;
+        // The new image reads the file again; a handoff does not look at it.
+        if shared.st_is_upgrading() {
+            continue;
+        }
         // Reading the file may block (a slow disk): not on an async task.
         let polled = tokio::task::spawn_blocking(move || {
             let change = file.poll();

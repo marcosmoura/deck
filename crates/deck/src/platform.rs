@@ -46,6 +46,16 @@ pub fn terminate(pid: i32) -> io::Result<()> {
     }
 }
 
+/// Sends `SIGUSR2` to the daemon: the request of an upgrade.
+pub fn request_upgrade(pid: i32) -> io::Result<()> {
+    // SAFETY: plain `kill(2)`; no memory is involved.
+    if unsafe { libc::kill(pid, libc::SIGUSR2) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 /// Starts `cmd` in a new session with stdin, stdout and stderr on `/dev/null`, so it
 /// outlives this process and the terminal it was started from. A thread reaps it; the flag
 /// it returns is set once the process has exited.

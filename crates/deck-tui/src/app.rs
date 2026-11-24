@@ -1721,6 +1721,10 @@ impl App {
                 ByeReason::ServerShutdown => Exit::DaemonStopped,
                 ByeReason::Error(text) => Exit::Error(text),
                 ByeReason::VersionMismatch { daemon } => Exit::Mismatch(daemon),
+                ByeReason::Upgrading { exe } => Exit::Upgrading {
+                    exe,
+                    session: self.mirror.session_name().map(str::to_string),
+                },
             })],
         }
     }
@@ -1933,6 +1937,26 @@ mod tests {
         assert_eq!(
             a.on_server(bye(ByeReason::VersionMismatch { daemon: 9 })),
             [Out::Exit(Exit::Mismatch(9))]
+        );
+        assert_eq!(
+            a.on_server(bye(ByeReason::Upgrading {
+                exe: "/opt/deck".into()
+            })),
+            [Out::Exit(Exit::Upgrading {
+                exe: "/opt/deck".into(),
+                session: Some("main".into())
+            })]
+        );
+        // Before the first view there is no session to come back to.
+        let mut early = App::new(&Config::default(), (80, 24), &[]);
+        assert_eq!(
+            early.on_server(bye(ByeReason::Upgrading {
+                exe: "/opt/deck".into()
+            })),
+            [Out::Exit(Exit::Upgrading {
+                exe: "/opt/deck".into(),
+                session: None
+            })]
         );
         assert_eq!(
             a.on_server(ServerMsg::Clipboard {

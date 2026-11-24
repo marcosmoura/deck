@@ -26,6 +26,21 @@ impl DaemonPaths {
         self.state_dir.join("state.json")
     }
 
+    /// The marker of a daemon that can hand itself over to a new binary.
+    pub fn marker_file(&self) -> PathBuf {
+        self.runtime_dir.join("deck.handoff")
+    }
+
+    /// Where a client leaves the path of the binary to hand over to.
+    pub fn upgrade_request_file(&self) -> PathBuf {
+        self.runtime_dir.join("deck.upgrade")
+    }
+
+    /// What the daemon says about an upgrade it refused or could not do.
+    pub fn upgrade_result_file(&self) -> PathBuf {
+        self.runtime_dir.join("deck.upgrade.result")
+    }
+
     pub fn from_env(env: EnvLookup<'_>, uid: u32) -> Result<Self, PathError> {
         Ok(Self {
             runtime_dir: paths::runtime_dir(env, uid),
@@ -48,8 +63,21 @@ pub async fn effective_uid() -> io::Result<u32> {
 /// The two held locks; dropping them releases both.
 #[derive(Debug)]
 pub(crate) struct Locks {
-    _runtime: File,
-    _state: File,
+    runtime: File,
+    state: File,
+}
+
+impl Locks {
+    /// The locks a new image inherited, from their descriptors.
+    pub(crate) fn inherited(runtime: File, state: File) -> Self {
+        Self { runtime, state }
+    }
+
+    /// The descriptors of the two lock files.
+    pub(crate) fn raw_fds(&self) -> (std::os::fd::RawFd, std::os::fd::RawFd) {
+        use std::os::fd::AsRawFd;
+        (self.runtime.as_raw_fd(), self.state.as_raw_fd())
+    }
 }
 
 /// The check [`prepare`] makes on the runtime directory, without creating it: a missing
@@ -71,10 +99,7 @@ pub(crate) fn prepare(paths: &DaemonPaths, uid: u32) -> Result<Locks, DaemonErro
     let state = lock_file(&paths.state_lock, || {
         DaemonError::StateInUse(paths.state_dir.clone())
     })?;
-    Ok(Locks {
-        _runtime: runtime,
-        _state: state,
-    })
+    Ok(Locks { runtime, state })
 }
 
 fn unsafe_dir(path: &Path, reason: impl Into<String>) -> DaemonError {

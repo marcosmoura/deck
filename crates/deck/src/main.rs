@@ -10,6 +10,7 @@ mod platform;
 mod stats_cmd;
 mod terminal_io;
 mod tree;
+mod upgrade_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -99,6 +100,8 @@ enum Command {
         #[arg(long)]
         forget: bool,
     },
+    /// Hands the running daemon over to this deck without stopping what runs in it.
+    Upgrade,
     /// Prints the default config, checks a config file or shows where it lives.
     Config {
         #[command(subcommand)]
@@ -120,7 +123,14 @@ enum Command {
     },
     /// Runs the daemon in the foreground.
     #[command(hide = true)]
-    Daemon,
+    Daemon {
+        /// A new image of the running daemon: the descriptor of the handoff file.
+        #[arg(long, value_name = "FD", conflicts_with = "handoff_check")]
+        adopt: Option<i32>,
+        /// Exits 0 when this build reads handoff version N, else 1.
+        #[arg(long = "handoff-check", value_name = "N")]
+        handoff_check: Option<u32>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -138,7 +148,11 @@ fn main() -> ExitCode {
     }
     let cli = Cli::parse();
     let result = match cli.command {
-        Some(Command::Daemon) => daemon_cmd::run(),
+        Some(Command::Daemon {
+            handoff_check: Some(version),
+            ..
+        }) => return daemon_cmd::handoff_check(version),
+        Some(Command::Daemon { adopt, .. }) => daemon_cmd::run(adopt),
         Some(Command::Attach { name, create }) => control::attach(name, create),
         None => control::attach(None, false),
         Some(Command::New {
@@ -162,6 +176,7 @@ fn main() -> ExitCode {
         Some(Command::Guide) => Ok(guide::run()),
         Some(Command::Stats { json }) => Ok(stats_cmd::run(json)),
         Some(Command::KillServer { forget }) => control::kill_server(forget),
+        Some(Command::Upgrade) => upgrade_cmd::run(),
         Some(Command::Config { command }) => config_cmd::run(command),
         Some(Command::Hooks { command }) => hooks::run(command),
         Some(Command::AgentEvent(args)) => Ok(agent_event::run(&args)),
@@ -184,6 +199,8 @@ mod tests {
         assert!(!help.contains("\n  daemon"), "{help}");
         assert!(!help.contains("_probe"), "{help}");
         assert!(Cli::try_parse_from(["deck", "daemon"]).is_ok());
+        assert!(Cli::try_parse_from(["deck", "daemon", "--adopt", "7"]).is_ok());
+        assert!(Cli::try_parse_from(["deck", "daemon", "--handoff-check", "1"]).is_ok());
         assert!(Cli::try_parse_from(["deck", "_probe", "--session", "x"]).is_ok());
     }
 

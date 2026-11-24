@@ -38,6 +38,9 @@ impl Shared {
                 if st.shutting_down {
                     return;
                 }
+                if st.upgrading {
+                    continue;
+                }
                 st.sessions
                     .iter()
                     .flat_map(|s| s.terminals.values())
@@ -71,6 +74,9 @@ impl Shared {
             // Once shutting down, the state that stays is the one resume needs.
             if st.shutting_down {
                 return;
+            }
+            if st.upgrading {
+                continue;
             }
             let now = self.clock.now();
             let mut changed: Vec<SessionId> = Vec::new();
@@ -145,7 +151,7 @@ impl Shared {
             .filter(|_| kind == AgentKind::OpenCode)
             .map(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
         let mut st = self.st();
-        if st.shutting_down {
+        if st.shutting_down || st.upgrading {
             return Response::Ok;
         }
         let Some(handle) = st

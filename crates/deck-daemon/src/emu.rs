@@ -24,6 +24,7 @@ mod capture;
 pub(crate) mod files;
 mod graphics;
 mod rows;
+mod snapshot;
 
 pub use graphics::ImagePixels;
 

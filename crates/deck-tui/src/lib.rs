@@ -141,6 +141,14 @@ pub enum Exit {
     Error(String),
     /// `SIGTERM` or `SIGHUP`.
     Signal,
+    /// The daemon hands itself over to the binary at `exe`; [`run`] executes
+    /// `<exe> attach <session>` once the terminal is restored and never returns this.
+    Upgrading {
+        exe: PathBuf,
+        session: Option<String>,
+    },
+    /// The daemon was upgraded and the client could not execute the new binary.
+    Upgraded,
 }
 
 /// Runs the client until it ends; the outer terminal is restored when this returns.
@@ -152,7 +160,76 @@ pub fn run(options: Options) -> Exit {
         Ok(rt) => rt,
         Err(e) => return Exit::Error(format!("cannot start the runtime: {e}")),
     };
-    runtime.block_on(run_async(options))
+    let exit = runtime.block_on(run_async(options));
+    // The runtime and its handlers go before the process is replaced.
+    drop(runtime);
+    reattach(exit, exec_attach)
+}
+
+/// A client told that the daemon is upgrading comes back to its session by executing the new
+/// binary (the terminal is restored by now); `exec` replaces the process and returns only
+/// the error when it cannot.
+fn reattach(exit: Exit, exec: impl FnOnce(&Path, Option<&str>) -> io::Error) -> Exit {
+    match exit {
+        Exit::Upgrading { exe, session } => {
+            let _ = exec(&exe, session.as_deref());
+            Exit::Upgraded
+        }
+        other => other,
+    }
+}
+
+/// `<exe> attach <session>` (plain `<exe>` before the client had a session) in place of
+/// this process, with its tty and environment.
+fn exec_attach(exe: &Path, session: Option<&str>) -> io::Error {
+    use std::os::unix::process::CommandExt;
+    let mut command = std::process::Command::new(exe);
+    if let Some(session) = session {
+        command.arg("attach").arg(session);
+    }
+    command.exec()
+}
+
+/// Why `attach_to` did not get a session.
+#[derive(Debug, PartialEq, Eq)]
+enum Refused {
+    Text(String),
+    /// The daemon is handing itself over to this binary: come back to the session there.
+    Upgrading {
+        exe: PathBuf,
+        session: String,
+    },
+}
+
+impl Refused {
+    fn text(self) -> String {
+        match self {
+            Self::Text(text) => text,
+            Self::Upgrading { .. } => "the deck daemon is upgrading".into(),
+        }
+    }
+
+    fn exit(self) -> Exit {
+        match self {
+            Self::Text(text) => Exit::Error(text),
+            Self::Upgrading { exe, session } => Exit::Upgrading {
+                exe,
+                session: Some(session),
+            },
+        }
+    }
+}
+
+/// What a `Bye` answers to an attach to `name`.
+fn refusal(reason: ByeReason, name: &str) -> Refused {
+    match reason {
+        ByeReason::Error(text) => Refused::Text(text),
+        ByeReason::Upgrading { exe } => Refused::Upgrading {
+            exe,
+            session: name.to_string(),
+        },
+        _ => Refused::Text(format!("cannot attach to {name}")),
+    }
 }
 
 enum Server {
@@ -565,19 +642,16 @@ const ATTACH_FOR: Duration = Duration::from_secs(5);
 
 /// Attaches to `name` on a new connection and waits for its first view, which goes to `app`.
 /// `Err` is why the daemon refused (the session is gone, say) or could not be reached.
-async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, String> {
+async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, Refused> {
     let hello = ctx.hello(app, Some(name.to_string()), false);
     let mut link = Link::open(&ctx.socket, hello)
         .await
-        .map_err(|e| format!("cannot connect to the deck daemon: {e}"))?;
+        .map_err(|e| Refused::Text(format!("cannot connect to the deck daemon: {e}")))?;
     let wait = async {
         loop {
             match link.server_rx.recv().await {
                 Some(Server::Msg(msg)) => match *msg {
-                    ServerMsg::Bye {
-                        reason: ByeReason::Error(text),
-                    } => return Err(text),
-                    ServerMsg::Bye { .. } => return Err(format!("cannot attach to {name}")),
+                    ServerMsg::Bye { reason } => return Err(refusal(reason, name)),
                     msg => {
                         let first = matches!(msg, ServerMsg::SessionView(_));
                         for out in app.on_server(msg) {
@@ -599,7 +673,9 @@ async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, String>
                     }
                 },
                 Some(Server::Closed) | None => {
-                    return Err("lost the connection to the deck daemon".to_string());
+                    return Err(Refused::Text(
+                        "lost the connection to the deck daemon".to_string(),
+                    ));
                 }
             }
         }
@@ -607,7 +683,9 @@ async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, String>
     match tokio::time::timeout(ATTACH_FOR, wait).await {
         Ok(Ok(())) => Ok(link),
         Ok(Err(text)) => Err(text),
-        Err(_) => Err(format!("the daemon did not answer for {name}")),
+        Err(_) => Err(Refused::Text(format!(
+            "the daemon did not answer for {name}"
+        ))),
     }
 }
 
@@ -620,7 +698,9 @@ async fn switch(ctx: &Ctx, app: &mut App, link: &mut Link, name: String) -> Resu
     app.reset_session();
     let (new, flash) = match attach_to(ctx, app, &name).await {
         Ok(new) => (new, None),
-        Err(text) => {
+        Err(refused @ Refused::Upgrading { .. }) => return Err(refused.exit()),
+        Err(refused) => {
+            let text = refused.text();
             let back = match &previous {
                 Some(previous) => attach_to(ctx, app, previous).await.ok(),
                 None => None,
@@ -654,8 +734,9 @@ async fn follow(ctx: &Ctx, app: &mut App, link: &mut Link, ended: &str) -> Resul
                 }
                 return Ok(true);
             }
-            Err(text) => {
-                flash = Some(text);
+            Err(refused @ Refused::Upgrading { .. }) => return Err(refused.exit()),
+            Err(refused) => {
+                flash = Some(refused.text());
                 skip.push(name);
             }
         }
@@ -700,6 +781,79 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{ByeReason, Exit, Path, Refused, reattach, refusal};
+
+    #[test]
+    fn an_upgrading_client_executes_the_new_binary_on_its_session() {
+        let mut ran = None;
+        let exit = reattach(
+            Exit::Upgrading {
+                exe: "/opt/deck/bin/deck".into(),
+                session: Some("work".into()),
+            },
+            |exe: &Path, session: Option<&str>| {
+                ran = Some((exe.to_path_buf(), session.map(str::to_string)));
+                std::io::Error::other("no exec in a test")
+            },
+        );
+        assert_eq!(
+            ran,
+            Some(("/opt/deck/bin/deck".into(), Some("work".to_string())))
+        );
+        // The exec failed: the client ends and says how to come back.
+        assert_eq!(exit, Exit::Upgraded);
+    }
+
+    #[test]
+    fn an_upgrading_client_without_a_session_executes_the_plain_binary() {
+        let mut ran = None;
+        reattach(
+            Exit::Upgrading {
+                exe: "/opt/deck/bin/deck".into(),
+                session: None,
+            },
+            |exe: &Path, session: Option<&str>| {
+                ran = Some((exe.to_path_buf(), session.map(str::to_string)));
+                std::io::Error::other("no exec in a test")
+            },
+        );
+        assert_eq!(ran, Some(("/opt/deck/bin/deck".into(), None)));
+    }
+
+    #[test]
+    fn an_upgrade_during_a_switch_reattaches_to_the_target_session() {
+        let upgrading = ByeReason::Upgrading {
+            exe: "/opt/deck/bin/deck".into(),
+        };
+        let refused = refusal(upgrading, "other");
+        assert_eq!(
+            refused,
+            Refused::Upgrading {
+                exe: "/opt/deck/bin/deck".into(),
+                session: "other".into()
+            }
+        );
+        assert_eq!(
+            refused.exit(),
+            Exit::Upgrading {
+                exe: "/opt/deck/bin/deck".into(),
+                session: Some("other".into())
+            }
+        );
+        assert_eq!(
+            refusal(ByeReason::SessionEnded, "x"),
+            Refused::Text("cannot attach to x".into())
+        );
+    }
+
+    #[test]
+    fn other_exits_do_not_execute_anything() {
+        let exit = reattach(Exit::DaemonStopped, |_: &Path, _: Option<&str>| {
+            unreachable!("no exec")
+        });
+        assert_eq!(exit, Exit::DaemonStopped);
+    }
+
     /// A font check whose thread ended without an answer reads as "found nothing", and the
     /// loop's arm is then switched off.
     #[tokio::test]

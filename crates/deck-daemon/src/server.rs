@@ -37,6 +37,7 @@ use crate::{CwdQuery, ForegroundQuery};
 mod agents;
 mod control;
 mod cwd;
+mod handoff;
 mod launch;
 mod listing;
 mod restore;
@@ -56,6 +57,8 @@ pub(crate) const FALLBACK_COLORS: OuterColors = OuterColors {
 };
 const HANG_UP_GRACE: Duration = Duration::from_secs(2);
 const WRITER_FLUSH: Duration = Duration::from_secs(1);
+/// What is answered to a request that arrives during a live upgrade.
+pub(crate) const UPGRADING: &str = "the daemon is upgrading";
 /// The panel area of a session no client has sized yet.
 const DEFAULT_VIEWPORT: (u16, u16) = (80, 24);
 
@@ -240,6 +243,11 @@ struct State {
     /// Sessions being created: their first process is starting, outside the lock.
     creating: usize,
     shutting_down: bool,
+    /// A live upgrade is under way: what changes the model or opens a process is refused.
+    upgrading: bool,
+    /// The handoff has taken its list of terminals: a process that was started meanwhile
+    /// waits to be added until the handoff is over.
+    frozen: bool,
     /// Terminals that left the model and are being hung up; shutdown finishes them.
     hanging: Vec<Arc<TermHandle>>,
     /// Notices no attached client has seen, oldest first.
@@ -555,6 +563,9 @@ pub struct Shared {
     waiters: Arc<AtomicUsize>,
     writers: AtomicUsize,
     writers_done: Notify,
+    /// Processes about to be started or being started: a handoff waits for them. Counted
+    /// under the state lock that checks `upgrading`, so a spawn is either refused or seen.
+    opening: AtomicUsize,
     attaching: tokio::sync::Mutex<()>,
     /// Serializes the writes of `state.json`; taken before `state`.
     save_lock: Mutex<()>,
@@ -592,7 +603,23 @@ impl Drop for WriterGuard {
     }
 }
 
+/// One process being started; see `Shared::open_slot`.
+pub(crate) struct OpenSlot(Arc<Shared>);
+
+impl Drop for OpenSlot {
+    fn drop(&mut self) {
+        self.0.opening.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 impl Shared {
+    /// Counts a process about to be started. Call it while holding the state lock that just
+    /// saw `upgrading` unset; drop it once the process is open.
+    pub(crate) fn open_slot(self: &Arc<Self>) -> OpenSlot {
+        self.opening.fetch_add(1, Ordering::AcqRel);
+        OpenSlot(Arc::clone(self))
+    }
+
     pub fn new(
         paths: DaemonPaths,
         config: Config,
@@ -618,6 +645,7 @@ impl Shared {
             waiters,
             writers: AtomicUsize::new(0),
             writers_done: Notify::new(),
+            opening: AtomicUsize::new(0),
             attaching: tokio::sync::Mutex::new(()),
             save_lock: Mutex::new(()),
             hostname: crate::platform::hostname(),
@@ -770,6 +798,9 @@ impl Shared {
             if st.shutting_down {
                 return Err("the daemon is shutting down".into());
             }
+            if st.upgrading {
+                return Err(UPGRADING.into());
+            }
             let plan = self.plan_attach(&mut st, a, viewport)?;
             if matches!(plan, Plan::Create(_)) {
                 st.creating += 1;
@@ -784,7 +815,7 @@ impl Shared {
                     .await
                     .map_err(|e| format!("could not start {}: {e}", new.req.program))
                     .and_then(|opened| opened);
-                let mut st = self.st();
+                let mut st = self.st_after_open().await;
                 st.creating -= 1;
                 let parts = opened?;
                 if st.shutting_down {
@@ -1095,6 +1126,9 @@ impl Shared {
 
     pub fn viewport(&self, cid: ClientId, cols: u16, rows: u16, cell: Option<CellPx>) {
         let mut st = self.st();
+        if st.upgrading {
+            return;
+        }
         let tick = st.touch();
         let Some(client) = st.clients.get_mut(&cid) else {
             return;
@@ -1128,6 +1162,9 @@ impl Shared {
     /// the terminals follow it only when that client is the one that was active last.
     pub fn reload_viewport(&self, cid: ClientId, cols: u16, rows: u16, cell: Option<CellPx>) {
         let mut st = self.st();
+        if st.upgrading {
+            return;
+        }
         let Some(client) = st.clients.get_mut(&cid) else {
             return;
         };
@@ -1622,6 +1659,9 @@ impl Shared {
         cid: ClientId,
         action: Action,
     ) -> Result<(), ActionError> {
+        if self.st().upgrading {
+            return Err(ActionError::Spawn(UPGRADING.into()));
+        }
         let sid = self
             .st()
             .clients
@@ -1868,11 +1908,15 @@ impl Shared {
         launch: Option<LaunchSpec>,
         focus: bool,
     ) -> Result<Made, ActionError> {
-        let (project_id, panel_id, tid, req) = {
+        let (project_id, panel_id, tid, req, slot) = {
             let mut st = self.st();
             if st.shutting_down {
                 return Err(ActionError::ShuttingDown);
             }
+            if st.upgrading {
+                return Err(ActionError::Spawn(UPGRADING.into()));
+            }
+            let slot = self.open_slot();
             let sess = st.session(sid).ok_or(ActionError::NotAttached)?;
             let cell = sess.cell;
             let (existing, root) = match &target {
@@ -1910,7 +1954,7 @@ impl Shared {
                     terminal: tid,
                 },
             );
-            (project_id, panel_id, tid, req)
+            (project_id, panel_id, tid, req, slot)
         };
 
         let open_req = req.clone();
@@ -1918,8 +1962,9 @@ impl Shared {
             .await
             .map_err(|e| ActionError::Spawn(format!("could not start {}: {e}", req.program)))?
             .map_err(ActionError::Spawn)?;
+        drop(slot);
 
-        let mut st = self.st();
+        let mut st = self.st_after_open().await;
         // The world may have changed while the process started.
         let checked = if st.shutting_down {
             Err(ActionError::ShuttingDown)
@@ -2030,11 +2075,15 @@ impl Shared {
             let (c, r) = layout::inner(rect, n + 1);
             Ok((n, clamp_size(c, r)))
         };
-        let (panel_id, tid, req, dirs) = {
+        let (panel_id, tid, req, dirs, slot) = {
             let mut st = self.st();
             if st.shutting_down {
                 return Err(ActionError::ShuttingDown);
             }
+            if st.upgrading {
+                return Err(ActionError::Spawn(UPGRADING.into()));
+            }
+            let slot = self.open_slot();
             let sess = st.session(sid).ok_or(ActionError::NotAttached)?;
             let cell = sess.cell;
             let panel_id = panel
@@ -2078,7 +2127,7 @@ impl Shared {
                     terminal: tid,
                 },
             );
-            (panel_id, tid, req, dirs)
+            (panel_id, tid, req, dirs, slot)
         };
 
         let program = req.program.clone();
@@ -2100,8 +2149,9 @@ impl Shared {
         .await
         .map_err(|e| ActionError::Spawn(format!("could not start {program}: {e}")))?
         .map_err(ActionError::Spawn)?;
+        drop(slot);
 
-        let mut st = self.st();
+        let mut st = self.st_after_open().await;
         // The world may have changed while the process started.
         let checked = if st.shutting_down {
             Err(ActionError::ShuttingDown)
@@ -2214,6 +2264,9 @@ impl Shared {
             if st.shutting_down {
                 return Err(ActionError::ShuttingDown);
             }
+            if st.upgrading {
+                return Err(ActionError::Spawn(UPGRADING.into()));
+            }
             let name = match name {
                 Some(n) if st.sessions.iter().any(|s| s.model.name == n) => {
                     return Err(ActionError::SessionExists(n));
@@ -2229,7 +2282,7 @@ impl Shared {
             .await
             .map_err(|e| ActionError::Spawn(format!("could not start {}: {e}", new.req.program)))
             .and_then(|opened| opened.map_err(ActionError::Spawn));
-        let mut st = self.st();
+        let mut st = self.st_after_open().await;
         st.creating -= 1;
         let parts = opened?;
         if st.shutting_down {
@@ -2249,6 +2302,9 @@ impl Shared {
         name: &str,
         answer: impl FnOnce(),
     ) -> Result<bool, ActionError> {
+        if self.st().upgrading {
+            return Err(ActionError::Spawn(UPGRADING.into()));
+        }
         self.kill_session(|s| s.model.name == name, answer)
             .map_err(|_| ActionError::NoSuchSession(name.to_string()))
     }
@@ -2256,6 +2312,9 @@ impl Shared {
     pub fn rename_session_named(self: &Arc<Self>, from: &str, to: &str) -> Result<(), ActionError> {
         let to = validate_name(to, NameKind::Session)?;
         let st = self.st();
+        if st.upgrading {
+            return Err(ActionError::Spawn(UPGRADING.into()));
+        }
         let sid = st
             .sessions
             .iter()

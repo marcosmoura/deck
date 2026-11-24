@@ -34,6 +34,9 @@ fn locate(session: &Session, id: u64) -> Option<Kind> {
 impl Shared {
     /// Answers the control requests that read or edit the tree.
     pub async fn control(self: &Arc<Self>, request: Request) -> Response {
+        if !matches!(request, Request::Tree { .. }) && self.st().upgrading {
+            return Response::Error(super::UPGRADING.into());
+        }
         let result = match request {
             Request::Tree { session } => return self.tree(session.as_deref()),
             Request::NewProject {

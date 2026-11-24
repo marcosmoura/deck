@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 26;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -421,10 +421,17 @@ pub enum NoticeLevel {
 /// `VersionMismatch` keeps its shape in every version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ByeReason {
-    VersionMismatch { daemon: u32 },
+    VersionMismatch {
+        daemon: u32,
+    },
     SessionEnded,
     ServerShutdown,
     Error(String),
+    /// The daemon hands itself over to the binary at `exe`; a client comes back by running
+    /// `<exe> attach`.
+    Upgrading {
+        exe: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1177,6 +1184,11 @@ mod tests {
             ServerMsg::Bye {
                 reason: ByeReason::Error("boom".into()),
             },
+            ServerMsg::Bye {
+                reason: ByeReason::Upgrading {
+                    exe: "/opt/deck/bin/deck".into(),
+                },
+            },
             ServerMsg::Response(Response::Sessions(vec![SessionSummary {
                 id: SessionId(1),
                 name: "main".into(),
@@ -1386,6 +1398,15 @@ mod tests {
             reason: ByeReason::VersionMismatch { daemon: 1 },
         });
         assert_eq!(&bye[4..], &[4, 0, 1]);
+        // The reasons keep their indices; `Upgrading` comes after the four older ones.
+        for (reason, index) in [
+            (ByeReason::SessionEnded, 1),
+            (ByeReason::ServerShutdown, 2),
+            (ByeReason::Error(String::new()), 3),
+            (ByeReason::Upgrading { exe: "/x".into() }, 4),
+        ] {
+            assert_eq!(encode_ok(&ServerMsg::Bye { reason })[5], index);
+        }
     }
 
     #[test]

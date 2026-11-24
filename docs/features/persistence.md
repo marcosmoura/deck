@@ -18,6 +18,10 @@ deck follows each terminal's working directory, so a restored shell comes back w
 - For the others, deck asks the operating system every 5 s for the directory of the terminal's own process (the shell, or the program started explicitly). A job running in the foreground is ignored: its directory is not where the shell is. A `cd` is therefore saved up to 5 s plus the 500 ms save window later.
 - Many shells do not send OSC 7 unless configured to. In zsh or bash, `printf '\033]7;file://localhost%s\007' "$PWD"` from the prompt command (`precmd` or `PROMPT_COMMAND`) makes the change instant.
 
+## Upgrade versus restart
+
+`deck upgrade` ([Sessions](sessions.md#upgrading)) is not a restart: the daemon keeps its process, so every program keeps running with its screen and scrollback, and attached clients come back by themselves. A restart (`deck kill-server`, a crash, a logout, a reboot) is what this page describes: the layout comes back and every terminal starts a fresh process, without scrollback. If an upgrade fails outright, the layout is still saved first, so at worst it falls back to a restart.
+
 ## What does not
 
 - Scrollback and what was on the screen. A restored terminal starts at 80×24 until a client attaches.

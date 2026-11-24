@@ -26,6 +26,8 @@ From source, with the toolchain pinned in `.mise.toml` (`mise install`), into `~
 just install
 ```
 
+After installing a new version, run `deck upgrade` to hand the running daemon over to it without stopping what runs in it.
+
 To try it without installing, with an isolated socket and state directory: `just run`.
 
 ## Use
@@ -36,6 +38,7 @@ deck attach work    # attach to the session "work" (it must exist)
 deck ls             # list the sessions
 deck new work -d    # create a session without attaching
 deck kill-session work
+deck upgrade        # hand the running daemon over to this deck, keeping every program
 deck kill-server    # stop the daemon and every session
 ```
 

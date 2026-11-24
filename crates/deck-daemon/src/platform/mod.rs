@@ -3,6 +3,8 @@
 
 #![allow(unsafe_code)]
 
+mod adopted;
+mod exec;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -10,6 +12,11 @@ mod macos;
 
 use std::time::Duration;
 
+pub use adopted::{AdoptedChild, AdoptedMaster, finished};
+pub use exec::{
+    block_handoff_signals, catch_early_signals, close_inherited, execve, fd_identity,
+    is_listening_socket, own_fd, set_cloexec, take_early_signals, unblock_handoff_signals,
+};
 #[cfg(target_os = "linux")]
 pub use linux::{process_argv, process_cwd};
 #[cfg(target_os = "macos")]
@@ -88,13 +95,22 @@ fn decode_status(raw: libc::c_int) -> i32 {
 /// it runs. portable-pty reports a death by signal as code 1 with only a text name, so the
 /// daemon asks the operating system itself. The same POSIX call on macOS and Linux.
 pub fn wait_status(pid: u32) -> std::io::Result<Option<i32>> {
+    reap(pid, libc::WNOHANG)
+}
+
+/// Waits until the child `pid` has ended and reaps it: its exit code.
+pub fn wait_exit(pid: u32) -> std::io::Result<i32> {
+    reap(pid, 0)?.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+}
+
+fn reap(pid: u32, flags: libc::c_int) -> std::io::Result<Option<i32>> {
     let pid = libc::pid_t::try_from(pid)
         .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     loop {
         let mut raw: libc::c_int = 0;
-        // SAFETY: `raw` is a valid `c_int` that `waitpid` writes the status to; `WNOHANG`
-        // makes the call return at once.
-        let rc = unsafe { libc::waitpid(pid, &mut raw, libc::WNOHANG) };
+        // SAFETY: `raw` is a valid `c_int` that `waitpid` writes the status to; with
+        // `WNOHANG` the call returns at once, without it until the child ends.
+        let rc = unsafe { libc::waitpid(pid, &mut raw, flags) };
         if rc == 0 {
             return Ok(None);
         }
@@ -105,6 +121,57 @@ pub fn wait_status(pid: u32) -> std::io::Result<Option<i32>> {
         if err.raw_os_error() != Some(libc::EINTR) {
             return Err(err);
         }
+    }
+}
+
+/// Reaps every child that has already ended, without blocking: `(pid, exit code)` of each.
+/// A new image of a live upgrade does it once, before it starts its own wait threads, for
+/// children the old image left behind (processes that were being discarded, listing
+/// helpers) and for adopted terminals whose program ended during the handoff.
+pub fn reap_children() -> Vec<(u32, i32)> {
+    let mut reaped = Vec::new();
+    loop {
+        let mut raw: libc::c_int = 0;
+        // SAFETY: `raw` is a valid `c_int` that `waitpid` writes the status to; `WNOHANG`
+        // makes the call return at once.
+        let rc = unsafe { libc::waitpid(-1, &mut raw, libc::WNOHANG) };
+        if rc > 0 {
+            if let Ok(pid) = u32::try_from(rc) {
+                reaped.push((pid, decode_status(raw)));
+            }
+        } else if rc == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return reaped;
+        }
+    }
+}
+
+/// Sends `signal` to the process `pid`.
+pub fn signal(pid: u32, signal: libc::c_int) -> std::io::Result<()> {
+    let pid = libc::pid_t::try_from(pid)
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: `kill` only takes two integers.
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Waits up to `timeout` for `fd` to have something to read: `true` when it has data, hung
+/// up or failed (a read then says which), `false` on a timeout or an interrupted wait.
+pub fn poll_readable(fd: std::os::fd::RawFd, timeout: Duration) -> bool {
+    let mut entry = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let millis = libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX);
+    // SAFETY: `entry` is one valid `pollfd`, and the count passed is 1.
+    let rc = unsafe { libc::poll(&mut entry, 1, millis) };
+    match rc {
+        0 => false,
+        n if n > 0 => true,
+        _ => std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR),
     }
 }
 

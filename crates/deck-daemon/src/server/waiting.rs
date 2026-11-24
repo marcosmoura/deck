@@ -45,6 +45,25 @@ impl Exits {
             .map(|(_, code, _)| *code)
     }
 
+    /// The codes with their age at `now`, for a live upgrade.
+    pub(super) fn export(&self, now: Duration) -> Vec<(TerminalId, i32, Duration)> {
+        self.0
+            .iter()
+            .map(|(id, code, at)| (*id, *code, now.saturating_sub(*at)))
+            .collect()
+    }
+
+    /// The reverse of [`Exits::export`].
+    pub(super) fn import(
+        &mut self,
+        codes: impl IntoIterator<Item = (TerminalId, i32, Duration)>,
+        now: Duration,
+    ) {
+        for (id, code, age) in codes {
+            self.record(id, code, now.saturating_sub(age));
+        }
+    }
+
     fn prune(&mut self, now: Duration) {
         self.0
             .retain(|(.., at)| now.saturating_sub(*at) < KEEP_EXITS);

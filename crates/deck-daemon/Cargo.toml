@@ -9,10 +9,12 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 deck-core = { path = "../deck-core" }
 ghostty-vt = { workspace = true, features = ["kitty-graphics", "png"] }
 libc = { workspace = true }
 portable-pty = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [

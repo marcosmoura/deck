@@ -24,6 +24,17 @@ impl SystemClock {
     }
 }
 
+impl SystemClock {
+    /// A clock that reads `start` now and goes on from there: a new image continues the old
+    /// one's time, so instants kept in the model stay valid.
+    pub fn starting_at(start: Duration) -> Self {
+        let now = Instant::now();
+        Self {
+            origin: now.checked_sub(start).unwrap_or(now),
+        }
+    }
+}
+
 impl Default for SystemClock {
     fn default() -> Self {
         Self::new()

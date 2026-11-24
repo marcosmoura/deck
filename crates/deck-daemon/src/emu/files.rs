@@ -133,6 +133,11 @@ impl Scanner {
         out.flush();
     }
 
+    /// The bytes held back until more output shows what they are: a partial command.
+    pub(crate) fn pending(&self) -> &[u8] {
+        &self.buf
+    }
+
     fn step(&mut self, b: u8, out: &mut Out) {
         let n = self.buf.len();
         if n == 0 {
