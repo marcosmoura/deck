@@ -13,7 +13,14 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue: none.
+Open tasks the user has not placed in the queue:
+
+- DECK-32 Harden release credentials
+- DECK-33 Signed releases checked by install.sh
+- DECK-34 Third-party licence notices
+- DECK-35 Setting for program clipboard writes
+- DECK-36 Setting for kitty file mediums
+- DECK-37 Fuzz target for the emulator feed
 
 ## Tasks
 
@@ -49,6 +56,12 @@ Open tasks the user has not placed in the queue: none.
 | DECK-29 | Recreate the Homebrew tap                 | done        | DECK-25                                                       | —                                                                            |
 | DECK-30 | Blinking cursor shapes                    | done        | DECK-22                                                       | —                                                                            |
 | DECK-31 | Install the agent skill with deck skills  | done        | —                                                             | —                                                                            |
+| DECK-32 | Harden release credentials                | todo        | —                                                             | —                                                                            |
+| DECK-33 | Signed releases checked by install.sh     | needs spec  | —                                                             | —                                                                            |
+| DECK-34 | Third-party licence notices               | todo        | —                                                             | —                                                                            |
+| DECK-35 | Setting for program clipboard writes      | todo        | DECK-26                                                       | —                                                                            |
+| DECK-36 | Setting for kitty file mediums            | todo        | DECK-26                                                       | —                                                                            |
+| DECK-37 | Fuzz target for the emulator feed         | todo        | —                                                             | —                                                                            |
 
 ### Withdrawn
 
@@ -59,6 +72,54 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-37
+
+**Fuzz target for the emulator feed.** Proposed on 24 Nov 2026 by the DECK-26 security review (info), accepted by the user: all terminal output passes through `Emu::feed` and the young `ghostty-vt` bindings, whose Zig code is built without runtime safety checks, and nothing fuzzes them.
+
+- What: a fuzz target that feeds arbitrary bytes, kitty graphics and OSC sequences to `Emu::feed` with the daemon's configuration, plus a `just` recipe to run it for a bounded time. Adds a fuzzing tool (for example `cargo-fuzz`), which this task approves; recorded in `docs/architecture.md#dependencies`.
+- Why: the security review found the high-severity PNG allocation (B-1) by reading code; a fuzzer finds the next one.
+- Acceptance: the target builds and runs for a bounded time locally; crashes it finds are fixed or filed; the recipe and tool are documented.
+
+### DECK-36
+
+**Setting for kitty file mediums.** Proposed on 24 Nov 2026 by the DECK-26 security review (B-6, low), accepted by the user.
+
+- What: a config key that turns the kitty graphics file and temporary-file mediums (`t=f`, `t=t`) off, or restricts them to temporary files. Touches `deck-core` (config) and `deck-daemon` (`emu/files.rs`).
+- Why: output alone, including an ssh session, can make the daemon open any regular file the user can read and learn from the reply whether it exists, its size and whether it is a PNG; `t=t` deletes matching files in temp directories. Kitty behaves the same, so the default stays compatible.
+- Acceptance: with the setting off, `t=f` and `t=t` answer an error and open nothing (test); the setting is documented in `docs/features/`.
+
+### DECK-35
+
+**Setting for program clipboard writes.** Proposed on 24 Nov 2026 by the DECK-26 security review (B-5, low), accepted by the user.
+
+- What: a config key to allow, deny, or confine to the focused terminal the clipboard writes programs make (OSC 52, OSC 1337 `Copy=`, OSC 5522). Touches `deck-core` (config) and `deck-daemon`.
+- Why: any terminal of a session, visible or not, can set the clipboard (clipboard poisoning from `cat` or ssh), with no way to turn it off.
+- Acceptance: each mode is tested end to end; the setting is documented in `docs/features/`.
+
+### DECK-34
+
+**Third-party licence notices.** Proposed on 24 Nov 2026 by the DECK-26 security review (C-6, low), accepted by the user.
+
+- What: generate a notices file for the crates and the vendored libghostty-vt code linked into `deck` and ship it in the release tarballs and the Homebrew install. Adds a generator tool (for example `cargo-about`), which this task approves; recorded in `docs/architecture.md#dependencies`.
+- Why: the binary statically links about 140 crates (MIT, Apache-2.0, Zlib, MPL-2.0) and Ghostty's library, and the tarballs carry none of their licence texts.
+- Acceptance: every release tarball holds the notices file; CI fails when it is out of date.
+
+### DECK-33
+
+**Signed releases checked by `install.sh`.** Proposed on 24 Nov 2026 by the DECK-26 security review (C-3, low to medium), accepted by the user.
+
+- What: build provenance or a signature for every release asset (for example `actions/attest-build-provenance` or minisign), verified by `install.sh` and documented.
+- Why: `install.sh` checks a checksum taken from the same release as the tarball, so it catches corruption but not a replaced asset; anyone with Contents write on the repository can ship code to `curl | sh` users.
+- Acceptance: a release asset that was not built by the release workflow fails `install.sh`; the verification is documented. Needs a spec (new action, permissions, key handling).
+
+### DECK-32
+
+**Harden release credentials.** Proposed on 24 Nov 2026 by the DECK-26 security review (C-2, medium), accepted by the user. Part of it is repository settings only the user can change.
+
+- What: enable the "Protect main" ruleset (now disabled) and add a `v*` tag ruleset that blocks update and deletion; replace the owner's personal access token with a GitHub App or machine identity that cannot bypass them; make `release.yml` fail unless the tagged commit is on `main`; use immutable releases with a draft-then-publish flow; consider an environment restricted to `main` and `v*` for both secrets. The job split that keeps the token away from downloaded tools is done in DECK-26.
+- Why: the release token can push to `main` (from which `install.sh` is served), create or move a `v*` tag that the release workflow then builds and publishes to the tap, and replace the assets of an existing release.
+- Acceptance: a tag on a commit not on `main` does not publish; a published asset cannot be replaced; the settings are recorded in `docs/architecture.md`.
 
 ### DECK-31
 
