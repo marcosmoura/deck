@@ -8,15 +8,14 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
+5. DECK-30 Blinking cursor shapes
 6. DECK-21 Live upgrade
 7. DECK-26 Security, privacy and performance reviews
 8. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
-Open tasks the user has not placed in the queue:
-
-- DECK-30 Blinking cursor shapes
+Open tasks the user has not placed in the queue: none.
 
 ## Tasks
 
