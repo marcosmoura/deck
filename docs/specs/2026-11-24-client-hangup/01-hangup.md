@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 01 — The client exits when its terminal closes
@@ -56,3 +56,10 @@ status: todo
 ## Notes
 
 - The stuck clients found on 24 Nov 2026 had stdin, stdout and stderr shown as `(revoked)` by `lsof`, their `just run` parents and login shells orphaned to `launchd`. A closed PTY master in the test is the nearest reproducible case; the worker confirms on macOS and Linux which of `POLLHUP`, `POLLIN` with `FIONREAD` 0 or failing, and a failing `tcgetattr` each case gives, and records it here.
+
+### Worker's observations
+
+- macOS (Darwin 27.3, run on this machine): closing the PTY master (`close_master`) makes `poll(2)` on the client's stdin report `POLLHUP` every time (9 of 9 runs, flowing and idle sessions), so the `POLLHUP` branch alone ended the client. The `POLLIN` with `FIONREAD` 0 or failing branch and the failing `tcgetattr` branch did not fire in these tests; they are kept for a revoked tty (the case the stuck clients showed) and are untested here. With the closure forced to always answer `Idle`, the idle-session test fails (the client stays), which shows the reader's detection is what ends it; the flowing-output test still passes then, because the failed draw ends the client.
+- Linux was not run (no Linux here). The code treats `POLLHUP`, `POLLERR` and `POLLNVAL` as a hang-up, as Linux reports a closed master as `POLLHUP` on the slave; that is expected, not observed.
+- Deviation: the wait closure takes a second descriptor (`Fn(Duration, BorrowedFd) -> StdinState`), a socket pair the main loop writes to on `SIGWINCH`; `Ready` also means that socket is readable. Without it, a resize followed by a key lost the key: crossterm (mio, edge-triggered) returns the `Resize` and drops the tty readiness when both are pending in one poll, and a reader blocked on descriptor 0 alone met exactly that (`a_tiny_window_*` tests failed). The old 50 ms crossterm poll consumed the signal at once.
+- The harness reader must keep draining the PTY after `Harness` is dropped (as before): on macOS an exiting program waits for its tty output to be read, so a stopped reader made `Child::wait` in `Drop` hang. Only `close_master` stops it.

@@ -38,3 +38,15 @@ pub fn signal(pid: i32, signal: i32) {
     let rc = unsafe { libc::kill(pid, signal) };
     assert_eq!(rc, 0, "kill: {}", std::io::Error::last_os_error());
 }
+
+/// Waits up to `millis` for `fd` to be readable, hung up or failing; false after the wait.
+pub fn wait_readable(fd: RawFd, millis: i32) -> bool {
+    let mut poll = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: `poll` is one valid `pollfd` and the count says so; the caller keeps `fd` open.
+    let ready = unsafe { libc::poll(&raw mut poll, 1, millis) };
+    ready > 0
+}

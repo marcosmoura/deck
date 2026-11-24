@@ -43,6 +43,7 @@ mod picker;
 mod placed;
 #[cfg(test)]
 mod placed_tests;
+mod reader;
 #[cfg(test)]
 mod reload_tests;
 mod resize;
@@ -95,11 +96,14 @@ use tokio::sync::mpsc;
 use tokio::time::sleep_until;
 
 use crate::app::{App, Out};
+pub use crate::reader::{StdinState, WaitStdin};
 
 /// The redraw timer: at most one draw per tick, and only when something changed.
 const REDRAW: Duration = Duration::from_millis(16);
 /// How often the input thread looks at its stop flag.
 const INPUT_POLL: Duration = Duration::from_millis(50);
+/// How long the main loop waits for the input thread on the way out.
+const READER_JOIN: Duration = Duration::from_millis(200);
 /// How long the writer may take to flush the last messages (`Detach`) on the way out.
 const FLUSH_FOR: Duration = Duration::from_millis(500);
 
@@ -116,6 +120,8 @@ pub struct Options {
     /// Create the session when it does not exist (`deck` without a name).
     pub create: bool,
     pub read_stdin: ReadStdin,
+    /// Waits for input without reading it and tells when the terminal is gone.
+    pub wait_stdin: WaitStdin,
 }
 
 impl std::fmt::Debug for Options {
@@ -308,23 +314,28 @@ async fn run_async(mut options: Options) -> Exit {
 
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<ct::Event>();
     let stop = Arc::new(AtomicBool::new(false));
+    // The thread says it is done by dropping `done_tx`; the exit never waits for it for long.
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    // The main loop wakes the reader on `SIGWINCH`; see `reader::run`.
+    let (wake_rx, wake_tx) = match std::os::unix::net::UnixStream::pair() {
+        Ok(pair) => pair,
+        Err(e) => return Exit::Error(format!("cannot start the input thread: {e}")),
+    };
+    let _ = wake_rx.set_nonblocking(true);
+    let _ = wake_tx.set_nonblocking(true);
     let reader = {
         let stop = Arc::clone(&stop);
-        let mut late = colors::LateAnswers::new(probe.late, Instant::now());
+        let late = colors::LateAnswers::new(probe.late, Instant::now());
+        let wait = options.wait_stdin;
+        let stuck = std::env::var_os("DECK_TEST_STUCK_READER").is_some_and(|v| v == "1");
         std::thread::spawn(move || {
-            while !stop.load(Ordering::Acquire) {
-                let events = match ct::poll(INPUT_POLL) {
-                    Ok(true) => match ct::read() {
-                        Ok(event) => late.feed(event, Instant::now()),
-                        Err(_) => break,
-                    },
-                    Ok(false) => late.flush(Instant::now()),
-                    Err(_) => break,
-                };
-                if events.into_iter().any(|e| input_tx.send(e).is_err()) {
-                    break;
+            let _done = done_tx;
+            if stuck {
+                loop {
+                    std::thread::park();
                 }
             }
+            reader::run(wait, &wake_rx, late, &stop, &input_tx);
         })
     };
 
@@ -332,6 +343,7 @@ async fn run_async(mut options: Options) -> Exit {
         Ok(t) => t,
         Err(e) => return Exit::Error(format!("cannot start the screen: {e}")),
     };
+    let ignore_sighup = std::env::var_os("DECK_TEST_IGNORE_SIGHUP").is_some_and(|v| v == "1");
     let panic_after_first_draw = std::env::var_os("DECK_TEST_PANIC").is_some_and(|v| v == "1");
     let mut shape = None;
     let mut drawn_once = false;
@@ -406,16 +418,19 @@ async fn run_async(mut options: Options) -> Exit {
             },
             // crossterm drops a SIGWINCH that becomes ready together with the TTY, so the
             // size is also read here; a size the app already has is not a resize.
-            _ = sigwinch.recv() => match ct_terminal::size() {
+            _ = sigwinch.recv() => {
+                let _ = (&wake_tx).write(&[0]);
+                match ct_terminal::size() {
                 Ok((cols, rows)) if (cols, rows) != app.size => {
                     app.cell = measure_cell();
                     app.on_event(ct::Event::Resize(cols, rows), Instant::now())
                 }
                 // A font zoom changes the cell size and not the columns and rows.
                 _ => app.set_cell(measure_cell()),
+                }
             },
             _ = sigterm.recv() => break Exit::Signal,
-            _ = sighup.recv() => break Exit::Signal,
+            _ = sighup.recv(), if !ignore_sighup => break Exit::Signal,
             }
         } else {
             std::mem::take(&mut early)
@@ -448,7 +463,11 @@ async fn run_async(mut options: Options) -> Exit {
     };
 
     stop.store(true, Ordering::Release);
-    let _ = reader.join();
+    // A reader that does not finish (a hung-up terminal can trap it inside crossterm) is left
+    // to end with the process.
+    if done_rx.recv_timeout(READER_JOIN) != Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+        let _ = reader.join();
+    }
     link.close().await;
     // The images go before the alternate screen does.
     let _ = app.delete_images(terminal.backend_mut());

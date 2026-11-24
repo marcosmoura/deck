@@ -45,7 +45,7 @@ Found by sampling a stuck client (`target/debug/deck` from `just run`) and readi
 
 | Sub-spec           | Type      | Crate          | Summary                                                                                                          | Depends | Status |
 | ------------------ | --------- | -------------- | ---------------------------------------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-hangup.md) | shippable | deck-tui, deck | Bounded reader join, a reader that never waits in crossterm, hang-up tests with a harness that can close its PTY | —       | todo   |
+| [01](01-hangup.md) | shippable | deck-tui, deck | Bounded reader join, a reader that never waits in crossterm, hang-up tests with a harness that can close its PTY | —       | done   |
 
 ## Affected docs
 

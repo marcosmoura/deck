@@ -61,6 +61,8 @@ A session stays until it is killed; when its last terminal exits, the space stay
 | `deck: terminal exited at once (status N); see <log>` | 1    | the shell failed to start; the log has details                       |
 | `deck: <text>`                                        | 1    | any other error from the daemon                                      |
 
+Closing the terminal deck runs in (the tab or window, a dropped ssh connection) detaches the client within a second and leaves nothing running; the session stays, and `deck ls` from another terminal still lists it.
+
 A deck and a daemon of different versions refuse to talk: `the daemon speaks protocol N, this deck speaks M; run "deck upgrade" to hand it over to this deck; what runs in it keeps running` when the daemon is older and can be upgraded in place, else `...; run "deck kill-server" to restart it; sessions are restored when the daemon saved them`. `deck` and `deck attach` do not stop there: they upgrade an older daemon themselves.
 
 ## Upgrading

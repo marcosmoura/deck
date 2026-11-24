@@ -198,7 +198,8 @@ fn main() -> ExitCode {
         Some(Command::Probe { session }) => control::probe(session),
     };
     result.unwrap_or_else(|e| {
-        eprintln!("deck: {e:#}");
+        // The terminal may be gone (a closed tab); `eprintln!` would panic on it.
+        let _ = std::io::Write::write_fmt(&mut std::io::stderr(), format_args!("deck: {e:#}\n"));
         ExitCode::FAILURE
     })
 }

@@ -1,15 +1,18 @@
-//! The `unsafe` of the binary: process identity, liveness, signals, detaching and reading stdin. Everything else is safe code.
+//! The `unsafe` of the binary: process identity, liveness, signals, detaching, reading stdin and
+//! telling when it is gone. Everything else is safe code.
 
 #![allow(unsafe_code)]
 
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+use deck_tui::StdinState;
 
 /// The effective user id of this process.
 pub fn effective_uid() -> u32 {
@@ -108,5 +111,72 @@ pub fn read_stdin(timeout: Duration) -> Option<Vec<u8>> {
     match usize::try_from(n) {
         Ok(0) | Err(_) => None,
         Ok(n) => buf.get(..n).map(<[u8]>::to_vec),
+    }
+}
+
+/// Waits up to `timeout` for input on stdin without reading it, or for `wake` to be readable
+/// (that is `Ready` too), and tells when the terminal is gone: `POLLHUP` or `POLLERR`;
+/// `POLLIN` with nothing queued (`FIONREAD` 0 or failing: a revoked tty reads as end of file);
+/// or, after a quiet wait, a failing `tcgetattr`. Stdin that is not a terminal is never
+/// reported gone: this sleeps for `timeout`.
+pub fn wait_stdin(timeout: Duration, wake: BorrowedFd<'_>) -> StdinState {
+    // SAFETY: `isatty` only looks at a descriptor number.
+    if unsafe { libc::isatty(libc::STDIN_FILENO) } != 1 {
+        std::thread::sleep(timeout);
+        return StdinState::Idle;
+    }
+    let mut fds = [
+        libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: wake.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    let millis = i32::try_from(timeout.as_millis()).unwrap_or(i32::MAX);
+    // SAFETY: `fds` is two valid `pollfd`s and the count says so; `wake` is open for the call.
+    let ready = unsafe { libc::poll(fds.as_mut_ptr(), 2, millis) };
+    if ready < 0 {
+        let interrupted = io::Error::last_os_error().kind() == io::ErrorKind::Interrupted;
+        return if interrupted {
+            StdinState::Idle
+        } else {
+            StdinState::HungUp
+        };
+    }
+    let [stdin, woken] = fds;
+    if ready > 0 {
+        if stdin.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return StdinState::HungUp;
+        }
+        if stdin.revents & libc::POLLIN != 0 {
+            let mut queued: libc::c_int = 0;
+            // SAFETY: `FIONREAD` writes one `c_int` through the pointer, which is valid.
+            let rc = unsafe { libc::ioctl(libc::STDIN_FILENO, libc::FIONREAD, &raw mut queued) };
+            return if rc == 0 && queued > 0 {
+                StdinState::Ready
+            } else {
+                StdinState::HungUp
+            };
+        }
+        // The main loop dropped its end: the client is leaving.
+        if woken.revents & (libc::POLLHUP | libc::POLLERR) != 0 {
+            return StdinState::HungUp;
+        }
+        if woken.revents & libc::POLLIN != 0 {
+            return StdinState::Ready;
+        }
+    }
+    let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
+    // SAFETY: `termios` is writable memory of the right type; `tcgetattr` only fills it.
+    let rc = unsafe { libc::tcgetattr(libc::STDIN_FILENO, termios.as_mut_ptr()) };
+    if rc == 0 {
+        StdinState::Idle
+    } else {
+        StdinState::HungUp
     }
 }

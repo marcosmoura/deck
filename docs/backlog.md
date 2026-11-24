@@ -9,9 +9,8 @@ Every task has an ID, a status and the tasks it depends on. A task is either a *
 Every open task, in the order the user set on 22 Nov 2026. "The next task" is picked from here ([Picking the next task](#picking-the-next-task)). The list order is the priority; adding or removing an item needs no renumbering.
 
 7. DECK-40 List OpenCode sessions without loading repositories
-8. DECK-39 Client exits when its terminal closes
-9. DECK-26 Security, privacy and performance reviews
-10. DECK-28 Stress suite follow-ups
+8. DECK-26 Security, privacy and performance reviews
+9. DECK-28 Stress suite follow-ups
 
 ### Not ordered yet
 
@@ -66,7 +65,7 @@ Open tasks the user has not placed in the queue:
 | DECK-36 | Setting for kitty file mediums                      | todo        | DECK-26                                                       | —                                                                            |
 | DECK-37 | Fuzz target for the emulator feed                   | todo        | —                                                             | —                                                                            |
 | DECK-38 | Daemon not dumpable on Linux                        | todo        | —                                                             | —                                                                            |
-| DECK-39 | Client exits when its terminal closes               | in-progress | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
+| DECK-39 | Client exits when its terminal closes               | done        | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
 | DECK-40 | List OpenCode sessions without loading repositories | todo        | DECK-26                                                       | —                                                                            |
 
 ### Withdrawn

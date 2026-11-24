@@ -18,7 +18,9 @@ use std::fs::{self, File, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event, EventListener};
@@ -443,9 +445,13 @@ impl Builder {
 
 /// A program in a PTY of a fixed size, with its output mirrored in an emulator.
 pub struct Harness {
-    master: Box<dyn MasterPty + Send>,
+    /// `None` after [`Harness::close_master`].
+    master: Option<Box<dyn MasterPty + Send>>,
     child: Box<dyn Child + Send + Sync>,
     writer: Writer,
+    /// Stops the PTY reader thread; see [`Harness::close_master`].
+    stop_reader: Arc<AtomicBool>,
+    reader: Option<JoinHandle<()>>,
     mirror: Arc<Mutex<Mirror>>,
     size: (u16, u16),
     cell_px: (u16, u16),
@@ -543,12 +549,23 @@ impl Harness {
         }));
         let writer: Writer = Arc::new(Mutex::new(pty.master.take_writer().expect("PTY writer")));
         let mut reader = pty.master.try_clone_reader().expect("PTY reader");
-        {
+        let master_fd = pty.master.as_raw_fd().expect("the PTY's descriptor");
+        let stop_reader = Arc::new(AtomicBool::new(false));
+        let reader_thread = {
             let (mirror, writer) = (Arc::clone(&mirror), Arc::clone(&writer));
+            let stop = Arc::clone(&stop_reader);
             std::thread::spawn(move || {
                 let mut parser: Processor = Processor::new();
                 let mut buf = [0u8; 16 * 1024];
                 loop {
+                    // The master stays open until this thread is joined, so its descriptor
+                    // number is safe to poll; a stop flag is looked at every 50 ms.
+                    if stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    if !sys::wait_readable(master_fd, 50) {
+                        continue;
+                    }
                     let n = match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => n,
@@ -601,12 +618,14 @@ impl Harness {
                     }
                 }
                 lock(&mirror).eof = true;
-            });
-        }
+            })
+        };
         Self {
-            master: pty.master,
+            master: Some(pty.master),
             child,
             writer,
+            stop_reader,
+            reader: Some(reader_thread),
             mirror,
             size,
             cell_px,
@@ -648,6 +667,8 @@ impl Harness {
             rows: usize::from(rows),
         });
         self.master
+            .as_ref()
+            .expect("the PTY is open")
             .resize(pty_size(self.size, self.cell_px))
             .expect("resize");
     }
@@ -849,12 +870,30 @@ impl Harness {
 
     /// Cooked while the terminal is in canonical mode, raw otherwise.
     pub fn tty_mode(&self) -> TtyMode {
-        let fd = self.master.as_raw_fd().expect("the PTY's descriptor");
+        let fd = self
+            .master
+            .as_ref()
+            .expect("the PTY is open")
+            .as_raw_fd()
+            .expect("the PTY's descriptor");
         if sys::canonical(fd).expect("tcgetattr") {
             TtyMode::Cooked
         } else {
             TtyMode::Raw
         }
+    }
+
+    /// Closes the PTY master, as closing a terminal's tab does: the program's terminal hangs
+    /// up. The PTY reader thread (which holds a clone of the master and the writer) is
+    /// stopped and joined first, and then the harness's master and writer go. The child
+    /// handle stays, for `pid` and `wait_for_exit`.
+    pub fn close_master(&mut self) {
+        self.stop_reader.store(true, Ordering::Release);
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+        *lock(&self.writer) = Box::new(std::io::sink());
+        self.master = None;
     }
 
     /// Runs `deck <args>` on this harness's `DECK_HOME`.
@@ -896,6 +935,7 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
+        // The reader keeps draining the PTY: an exiting program waits for its output to be read.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

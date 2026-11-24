@@ -82,7 +82,10 @@ fn upgrade_older_daemon(paths: &DaemonPaths) -> anyhow::Result<()> {
     if !upgrade_cmd::can_upgrade(&paths, daemon) {
         return Ok(());
     }
-    eprintln!("upgrading the deck daemon (protocol {daemon} → {PROTOCOL_VERSION})");
+    let _ = writeln!(
+        io::stderr(),
+        "upgrading the deck daemon (protocol {daemon} → {PROTOCOL_VERSION})"
+    );
     match upgrade_cmd::perform(&paths)? {
         Done::Upgraded { .. } | Done::NoDaemon | Done::NotUpgradable => Ok(()),
         Done::Refused(why) => bail!("{why}"),
@@ -104,6 +107,7 @@ fn run_client(
         create,
         session,
         read_stdin: Box::new(platform::read_stdin),
+        wait_stdin: Box::new(platform::wait_stdin),
     });
     finish(exit)
 }
@@ -172,12 +176,20 @@ pub fn rename_session(old: String, new: String) -> anyhow::Result<ExitCode> {
 /// the exit code.
 fn finish(exit: deck_tui::Exit) -> anyhow::Result<ExitCode> {
     use deck_tui::Exit;
+    // The terminal may be gone by now: a write that fails is not an error worth a panic.
+    let mut out = std::io::stdout();
     match exit {
-        Exit::Detached(name) => println!("[detached from {name}]"),
-        Exit::SessionEnded(name) => println!("[session {name} ended]"),
-        Exit::DaemonStopped => println!("[deck daemon stopped]"),
+        Exit::Detached(name) => {
+            let _ = writeln!(out, "[detached from {name}]");
+        }
+        Exit::SessionEnded(name) => {
+            let _ = writeln!(out, "[session {name} ended]");
+        }
+        Exit::DaemonStopped => {
+            let _ = writeln!(out, "[deck daemon stopped]");
+        }
         Exit::Lost => {
-            eprintln!("[lost connection to the deck daemon]");
+            let _ = writeln!(std::io::stderr(), "[lost connection to the deck daemon]");
             return Ok(ExitCode::FAILURE);
         }
         Exit::Mismatch(daemon) => bail!("{}", mismatch_text(daemon)),
@@ -185,7 +197,7 @@ fn finish(exit: deck_tui::Exit) -> anyhow::Result<ExitCode> {
         Exit::Signal => return Ok(ExitCode::FAILURE),
         // The client executes the new binary itself; this is when it could not.
         Exit::Upgrading { .. } | Exit::Upgraded => {
-            println!("[deck was upgraded; run \"deck\" to reattach]");
+            let _ = writeln!(out, "[deck was upgraded; run \"deck\" to reattach]");
         }
     }
     Ok(ExitCode::SUCCESS)
