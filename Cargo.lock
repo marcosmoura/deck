@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "deck"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "deck-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "postcard",
  "serde",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "deck-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deck-core",
  "ghostty-vt",
@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "deck-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deck-core",
  "ratatui",
