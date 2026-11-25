@@ -1268,9 +1268,13 @@ mod tests {
         let h = &t.handle;
         until("the start", || lines(h).first().is_some_and(|l| l == "R"));
         h.write(b"a\n".to_vec());
-        until("the first part", || {
-            h.bytes_read() == 1 + first.len() as u64
-        });
+        // The reader gives what it holds to the emulator after `READ_POLL` of quiet, so the
+        // pause has to follow the read at once: this wait does not sleep.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while h.bytes_read() != 1 + first.len() as u64 {
+            assert!(std::time::Instant::now() < deadline, "the first part");
+            std::thread::yield_now();
+        }
         let pending = h.pause_reader().expect("paused");
         assert_eq!(pending, held, "held bytes");
         let snapshot = h.with_emu(|e| e.snapshot()).expect("snapshot");
