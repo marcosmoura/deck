@@ -301,9 +301,21 @@ impl Conn {
             self.hello(Role::Control)
         };
         let sent = hello.and_then(|()| self.send(&ClientMsg::Request(request)));
-        if let Err(e) = sent {
-            return Outcome::Other(e);
-        }
+        // A daemon that refuses the hello says why and hangs up, which can fail the write of
+        // the request: what it said is still there to read.
+        let hung_up = |e: &anyhow::Error| {
+            e.downcast_ref::<io::Error>().is_some_and(|e| {
+                matches!(
+                    e.kind(),
+                    io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+                )
+            })
+        };
+        let unsent = match sent {
+            Ok(()) => None,
+            Err(e) if hung_up(&e) => Some(e),
+            Err(e) => return Outcome::Other(e),
+        };
         loop {
             match self.recv() {
                 Ok(Some(ServerMsg::Response(r))) => return Outcome::Response(r),
@@ -314,8 +326,12 @@ impl Conn {
                     return Outcome::Other(anyhow!(bye_text(&reason)));
                 }
                 Ok(Some(_)) => {}
-                Ok(None) => return Outcome::Other(anyhow!("the daemon closed the connection")),
-                Err(e) => return Outcome::Other(e),
+                Ok(None) => {
+                    return Outcome::Other(
+                        unsent.unwrap_or_else(|| anyhow!("the daemon closed the connection")),
+                    );
+                }
+                Err(e) => return Outcome::Other(unsent.unwrap_or(e)),
             }
         }
     }
@@ -663,5 +679,24 @@ mod tests {
         assert!(!lock_held(&lock));
         file.lock().unwrap();
         assert!(lock_held(&lock));
+    }
+
+    #[test]
+    fn a_mismatch_is_read_from_a_daemon_that_already_hung_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("s");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let mut conn = Conn::open(&socket, Duration::from_secs(5)).unwrap();
+        // The daemon refuses and hangs up before the client has written anything.
+        let (mut stream, _) = listener.accept().unwrap();
+        let bye = ServerMsg::Bye {
+            reason: ByeReason::VersionMismatch { daemon: 3 },
+        };
+        stream.write_all(&encode(&bye).unwrap()).unwrap();
+        drop(stream);
+        assert!(matches!(
+            conn.control(Request::KillServer),
+            Outcome::Mismatch(3)
+        ));
     }
 }
