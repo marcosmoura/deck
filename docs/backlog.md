@@ -30,6 +30,7 @@ Open tasks the user has not placed in the queue:
 - DECK-45 Images kept across a panel switch
 - DECK-46 Terminal output read while the emulator works
 - DECK-47 Queued frames merged for a slow client
+- DECK-48 Collapsed sidebar
 
 ## Tasks
 
@@ -81,6 +82,7 @@ Open tasks the user has not placed in the queue:
 | DECK-45 | Images kept across a panel switch                   | todo        | DECK-26                                                       | —                                                                            |
 | DECK-46 | Terminal output read while the emulator works       | todo        | DECK-26                                                       | —                                                                            |
 | DECK-47 | Queued frames merged for a slow client              | todo        | DECK-26                                                       | —                                                                            |
+| DECK-48 | Collapsed sidebar                                   | draft spec  | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
 
 ### Withdrawn
 
