@@ -405,7 +405,8 @@ fn settle(reference: &Harness, deck: &Harness) -> (Snapshot, Snapshot) {
     loop {
         let quiet = since.elapsed();
         let equal = differing_cells(&last.0, &last.1, &[]).is_empty()
-            && cursor_of(&last.0) == cursor_of(&last.1);
+            && cursor_of(&last.0) == cursor_of(&last.1)
+            && style_of(&last.0) == style_of(&last.1);
         let needed = if equal { STABLE } else { STABLE_APART };
         if quiet >= needed || Instant::now() >= deadline {
             return last;
@@ -474,7 +475,9 @@ fn style_of(s: &Snapshot) -> Option<&str> {
 
 /// Whether two snapshots of the same side are equal, for the settle loop.
 fn same(a: &Snapshot, b: &Snapshot, ignore: &[Ignore]) -> bool {
-    differing_cells(a, b, ignore).is_empty() && cursor_of(a) == cursor_of(b)
+    differing_cells(a, b, ignore).is_empty()
+        && cursor_of(a) == cursor_of(b)
+        && style_of(a) == style_of(b)
 }
 
 type Key = (String, Norm, Norm, Flags, Option<Norm>);

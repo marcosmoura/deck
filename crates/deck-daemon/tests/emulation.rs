@@ -15,7 +15,10 @@ async fn wide_and_combining_characters_come_out_as_runs_at_the_right_columns() {
     let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
     // 日本 🙂 e + combining acute, x (octal escapes keep the shell portable).
     client
-        .type_line("printf '\\346\\227\\245\\346\\234\\254 \\360\\237\\231\\202 e\\314\\201x\\n'")
+        // From the left edge (`\r`): a line typed before the prompt prints after it.
+        .type_line(
+            "printf '\\r\\346\\227\\245\\346\\234\\254 \\360\\237\\231\\202 e\\314\\201x\\n'",
+        )
         .await;
     client
         .wait(|c| {

@@ -346,10 +346,18 @@ async fn interactive_and_full_screen_programs_are_never_busy() {
     client
         .send(&ClientMsg::Input {
             terminal,
-            bytes: b"printf '\\033[?1049h'; sleep 100\r".to_vec(),
+            bytes: b"printf '\\033[?1049h'; echo on-alt; sleep 100\r".to_vec(),
         })
         .await;
-    pause().await;
+    // On the alternate screen before `sleep` shows in the foreground: a fixed pause is not
+    // always long enough, and `sleep` on the main screen is a command.
+    client
+        .wait(|c| {
+            c.screens
+                .get(&terminal)
+                .is_some_and(|rows| rows.iter().any(|r| r.trim() == "on-alt"))
+        })
+        .await;
     *foreground.lock().unwrap() = Some((false, vec!["sleep".to_string(), "100".into()]));
     for _ in 0..5 {
         clock.advance(Duration::from_secs(1));

@@ -476,6 +476,25 @@ fn kill_server_during_the_handoff_is_answered_by_the_new_daemon_which_then_stops
 }
 
 #[test]
+fn deck_kill_server_during_a_long_handoff_stops_the_new_daemon_with_sigterm() {
+    // Frozen past the second `deck kill-server` waits for an answer: it sends `SIGTERM`,
+    // which the handoff records and the new image acts on.
+    let home = slow_home(0, 2500);
+    started(&home);
+    let (_, hup) = hup_trap(&home);
+    let next = copy_of_deck(&home, "deck-next");
+    upgrade_to(&home, &next);
+    upgrading(&home);
+    ok(&home, &["kill-server"]);
+    wait_until("the daemon to stop", LIMIT, || !home.daemon_running());
+    assert!(!marker_file(&home).exists());
+    let log = log(&home);
+    let adopted_at = after(&log, 0, "adopted ");
+    after(&log, adopted_at, "shutting down: SIGTERM");
+    assert!(hup.exists(), "the terminal was not hung up normally");
+}
+
+#[test]
 fn a_shutdown_asked_over_an_open_connection_during_the_handoff_is_not_lost() {
     let home = slow_home(2000, 0);
     started(&home);

@@ -77,10 +77,11 @@ impl Fixture {
 }
 
 async fn run(c: &mut Client, terminal: TerminalId, line: &str, tag: &str) {
-    // The tag is computed by the shell, so the echoed command line does not contain it.
+    // The tag is computed by the shell, so the echoed command line does not contain it. The
+    // line starts at the left edge: one typed before the prompt would print after it.
     c.send(&ClientMsg::Input {
         terminal,
-        bytes: format!("\x15{line}; echo {tag}-$((1+1))\n").into_bytes(),
+        bytes: format!("\x15printf '\\r'; {line}; echo {tag}-$((1+1))\n").into_bytes(),
     })
     .await;
     let done = format!("{tag}-2");

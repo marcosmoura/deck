@@ -111,6 +111,9 @@ pub struct TermHandle {
     pub(crate) agent_rt: Mutex<AgentRt>,
     /// Pauses the `pty-reader` thread.
     reader_gate: Gate,
+    /// How long (nanoseconds) the reader holds an unfinished sequence back when no more
+    /// output comes before it feeds it anyway: [`READ_POLL`], longer in tests.
+    hold_quiet: AtomicU64,
     /// Pauses the `pty-wait` thread.
     waiter_gate: Gate,
     /// The exit status the waiter reaped, kept for `pause_waiter`.
@@ -354,6 +357,13 @@ impl TermHandle {
 
     pub fn resume_reader(&self) {
         self.reader_gate.resume();
+    }
+
+    /// Holds an unfinished sequence back for `time` of quiet instead of [`READ_POLL`], so a
+    /// test can pause the reader after a read without racing the quiet flush.
+    #[cfg(test)]
+    fn hold_unfinished_for(&self, time: Duration) {
+        self.hold_quiet.store(nanos(time), Ordering::Relaxed);
     }
 
     /// Stops the wait thread from calling `waitpid`, and returns the exit status it had
@@ -769,6 +779,7 @@ fn start_with(
         reports_cwd: AtomicBool::new(seed.as_ref().is_some_and(|s| s.reports_cwd)),
         agent_rt: Mutex::new(AgentRt::default()),
         reader_gate: Gate::default(),
+        hold_quiet: AtomicU64::new(nanos(READ_POLL)),
         waiter_gate: Gate::default(),
         reaped: Mutex::new(None),
     });
@@ -879,6 +890,7 @@ fn spawn_reader(
             // An unfinished escape sequence or character at the end of the last chunk, which
             // waits for the rest of it.
             let mut carry: Vec<u8> = Vec::new();
+            let mut last_read = std::time::Instant::now();
             loop {
                 // Everything read so far is in the emulator here, bar what the carry and the
                 // scanner hold, so this is where a pause takes effect; the poll bounds how
@@ -893,7 +905,8 @@ fn spawn_reader(
                 {
                     // Quiet: the rest of a held sequence is not coming soon. Unless a pause
                     // began meanwhile, which takes the carry as it is.
-                    if !carry.is_empty() {
+                    let held_for = nanos(last_read.elapsed());
+                    if !carry.is_empty() && held_for >= h.hold_quiet.load(Ordering::Relaxed) {
                         h.reader_gate.unless_requested(|| {
                             pump.feed(&s, &h, &carry);
                             carry.clear();
@@ -904,6 +917,7 @@ fn spawn_reader(
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        last_read = std::time::Instant::now();
                         let Some(bytes) = buf.get(..n) else {
                             break;
                         };
@@ -1266,15 +1280,14 @@ mod tests {
             octal(second)
         ));
         let h = &t.handle;
+        // Without this, the reader feeds what it holds after `READ_POLL` of quiet, and a
+        // pause that comes later on a loaded machine finds nothing held.
+        h.hold_unfinished_for(Duration::from_secs(60));
         until("the start", || lines(h).first().is_some_and(|l| l == "R"));
         h.write(b"a\n".to_vec());
-        // The reader gives what it holds to the emulator after `READ_POLL` of quiet, so the
-        // pause has to follow the read at once: this wait does not sleep.
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        while h.bytes_read() != 1 + first.len() as u64 {
-            assert!(std::time::Instant::now() < deadline, "the first part");
-            std::thread::yield_now();
-        }
+        until("the first part", || {
+            h.bytes_read() == 1 + first.len() as u64
+        });
         let pending = h.pause_reader().expect("paused");
         assert_eq!(pending, held, "held bytes");
         let snapshot = h.with_emu(|e| e.snapshot()).expect("snapshot");

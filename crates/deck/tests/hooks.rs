@@ -424,7 +424,12 @@ fn agent_event_sets_the_state_inside_deck_and_is_silent_outside() {
         bin.path().display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let mut h = Harness::builder((100, 24)).env("PATH", &path).deck();
+    // A fast detection tick, as in `agents.rs`: the production one (1 s) leaves a slow
+    // machine little of the wait below.
+    let mut h = Harness::builder((100, 24))
+        .env("PATH", &path)
+        .env("DECK_TEST_AGENT_POLL_MS", "100")
+        .deck();
     h.wait_for_text("$", TIMEOUT);
     h.send_keys("claude\r");
     h.wait_for_text("agent-ready", TIMEOUT);
@@ -666,7 +671,12 @@ fn an_opencode_event_piped_into_agent_event_sets_the_state() {
         dir.path().display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let mut h = Harness::builder((100, 24)).env("PATH", &path).deck();
+    // A fast detection tick, as in `agents.rs`: the production one (1 s) leaves a slow
+    // machine little of the wait below.
+    let mut h = Harness::builder((100, 24))
+        .env("PATH", &path)
+        .env("DECK_TEST_AGENT_POLL_MS", "100")
+        .deck();
     h.wait_for_text("$", TIMEOUT);
     h.send_keys("opencode\r");
     h.wait_for_text("agent-ready", TIMEOUT);

@@ -189,13 +189,24 @@ async fn a_shell_terminal_resumes_the_agent_then_runs_the_shell_with_its_args() 
 
     // The agent quits: the user's shell takes its place with its configured arguments.
     let mut control = Client::control(&daemon.paths.socket).await;
-    let sent = control
-        .request(Request::Send {
-            terminal: TerminalId(4),
-            bytes: b"\n".to_vec(),
-            paste: false,
-        })
-        .await;
+    // The agent runs before the daemon has registered its terminal: until then a send gets
+    // `no terminal 4`.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let sent = loop {
+        let sent = control
+            .request(Request::Send {
+                terminal: TerminalId(4),
+                bytes: b"\n".to_vec(),
+                paste: false,
+            })
+            .await;
+        match sent {
+            Response::Error(e) if e == "no terminal 4" && Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            other => break other,
+        }
+    };
     assert!(matches!(sent, Response::Ok), "{sent:?}");
     assert_eq!(
         fakes.recorded("shell").await,

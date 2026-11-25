@@ -214,9 +214,13 @@ async fn a_new_terminal_starts_in_the_projects_root() {
     .await;
     let want = format!("CWD={}", root.display());
     c.wait(|c| {
-        c.screens
-            .get(&t)
-            .is_some_and(|s| s.iter().any(|r| r.trim_end() == want))
+        c.screens.get(&t).is_some_and(|s| {
+            s.iter().any(|r| {
+                // After the prompt too: dash prints the answer to a line typed ahead there.
+                let r = r.trim_end();
+                r == want || r.strip_prefix("$ ") == Some(want.as_str())
+            })
+        })
     })
     .await;
     daemon.stop().await.unwrap();
@@ -246,8 +250,14 @@ async fn focus_moves_by_direction_and_typing_reaches_only_the_focused_terminal()
     step(&mut c, Direction::Right, t[1]).await;
 
     c.type_line("echo ONLY-HERE").await;
-    c.wait(|c| c.screens[&t[1]].iter().any(|r| r.trim_end() == "ONLY-HERE"))
-        .await;
+    // After the prompt too: dash prints the answer to a line typed ahead there.
+    c.wait(|c| {
+        c.screens[&t[1]].iter().any(|r| {
+            let r = r.trim_end();
+            r == "ONLY-HERE" || r.strip_prefix("$ ") == Some("ONLY-HERE")
+        })
+    })
+    .await;
     for other in [t[0], t[2]] {
         assert!(!c.screens[&other].iter().any(|r| r.contains("ONLY-HERE")));
     }
