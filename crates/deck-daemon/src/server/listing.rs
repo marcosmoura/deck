@@ -20,7 +20,7 @@ use deck_core::agents::{AgentKind, check_template, render_template};
 use deck_core::protocol::{Response, ServerMsg};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -331,6 +331,8 @@ async fn opencode(
     if dirs.is_empty() {
         return (Vec::new(), None);
     }
+    // Each run stops at the deadline; its child is reaped by `Reaped`, not left to tokio.
+    let deadline = tokio::time::Instant::now() + OPENCODE_TIMEOUT;
     let mut children = JoinSet::new();
     for dir in &dirs {
         children.spawn(run_opencode(
@@ -338,24 +340,23 @@ async fn opencode(
             input.env.clone(),
             dir.clone(),
             limit,
+            deadline,
             Arc::clone(permits),
             Arc::clone(stats),
         ));
     }
     let mut outputs: Vec<Vec<u8>> = Vec::new();
-    let finished = tokio::time::timeout(OPENCODE_TIMEOUT, async {
-        while let Some(done) = children.join_next().await {
-            if let Ok(Some(output)) = done {
-                outputs.push(output);
-            }
+    let mut timed_out = false;
+    while let Some(done) = children.join_next().await {
+        match done {
+            Ok(Run::Done(Some(output))) => outputs.push(output),
+            Ok(Run::TimedOut) => timed_out = true,
+            Ok(Run::Done(None)) | Err(_) => {}
         }
-    })
-    .await;
-    // Children still running are killed with their tasks.
-    drop(children);
+    }
     let error = if !outputs.is_empty() {
         None
-    } else if finished.is_err() {
+    } else if timed_out {
         Some(OPENCODE_TIMED_OUT.to_string())
     } else {
         Some(OPENCODE_FAILED.to_string())
@@ -384,17 +385,54 @@ impl Drop for Running<'_> {
     }
 }
 
-/// One listing: the output of the command when it exited well and printed a JSON array.
+/// How one listing ended.
+enum Run {
+    /// The output of the command when it exited well and printed a JSON array.
+    Done(Option<Vec<u8>>),
+    /// The deadline came first; a child that was started is killed and reaped by [`Reaped`].
+    TimedOut,
+}
+
+/// A listing's child. Dropped before it was waited for (the deadline came, or the request's
+/// task was aborted with its connection), it is killed and reaped in a task of its own: a
+/// dropped `Child` is killed but may stay a zombie until another child exits.
+struct Reaped(Option<Child>);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        let Some(mut child) = self.0.take() else {
+            return;
+        };
+        let _ = child.start_kill();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = child.wait().await;
+            });
+        }
+    }
+}
+
+/// One listing, stopped at `deadline`.
 async fn run_opencode(
     program: String,
     env: Env,
     dir: PathBuf,
     limit: usize,
+    deadline: tokio::time::Instant,
     permits: Arc<Semaphore>,
     stats: Arc<ListingStats>,
-) -> Option<Vec<u8>> {
-    let _permit = permits.acquire_owned().await.ok()?;
-    let mut child = Command::new(&program)
+) -> Run {
+    let Ok(permit) = tokio::time::timeout_at(deadline, permits.acquire_owned()).await else {
+        return Run::TimedOut;
+    };
+    let Ok(_permit) = permit else {
+        return Run::Done(None);
+    };
+    // A slot handed over right at the deadline starts nothing.
+    if tokio::time::Instant::now() >= deadline {
+        return Run::TimedOut;
+    }
+    let spawned = Command::new(&program)
         .args(["session", "list", "--max-count"])
         .arg(limit.to_string())
         .args(["--format", "json"])
@@ -405,18 +443,36 @@ async fn run_opencode(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
-        .spawn()
-        .ok()?;
+        .spawn();
+    let Ok(child) = spawned else {
+        return Run::Done(None);
+    };
+    let mut reaped = Reaped(Some(child));
     let _running = Running::start(&stats);
-    let mut output = Vec::new();
-    let mut stdout = child.stdout.take()?.take(OUTPUT_MAX);
-    let read = stdout.read_to_end(&mut output).await;
-    drop(stdout);
-    let complete = read.is_ok() && (output.len() as u64) < OUTPUT_MAX;
-    if !complete {
-        let _ = child.start_kill();
-    }
-    let status = child.wait().await.ok()?;
+    let Some(child) = reaped.0.as_mut() else {
+        return Run::Done(None);
+    };
+    let Some(stdout) = child.stdout.take() else {
+        return Run::Done(None);
+    };
+    let work = async {
+        let mut output = Vec::new();
+        let mut stdout = stdout.take(OUTPUT_MAX);
+        let read = stdout.read_to_end(&mut output).await;
+        drop(stdout);
+        let complete = read.is_ok() && (output.len() as u64) < OUTPUT_MAX;
+        if !complete {
+            let _ = child.start_kill();
+        }
+        let status = child.wait().await.ok();
+        (output, complete, status)
+    };
+    let Ok((output, complete, status)) = tokio::time::timeout_at(deadline, work).await else {
+        return Run::TimedOut;
+    };
+    // Waited for: nothing is left to reap.
+    reaped.0 = None;
+    let success = status.is_some_and(|s| s.success());
     let is_array = serde_json::from_slice::<Value>(&output).is_ok_and(|v| v.is_array());
-    (complete && status.success() && is_array).then_some(output)
+    Run::Done((complete && success && is_array).then_some(output))
 }
