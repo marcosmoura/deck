@@ -82,7 +82,7 @@ Open tasks the user has not placed in the queue:
 | DECK-45 | Images kept across a panel switch                   | todo        | DECK-26                                                       | —                                                                            |
 | DECK-46 | Terminal output read while the emulator works       | todo        | DECK-26                                                       | —                                                                            |
 | DECK-47 | Queued frames merged for a slow client              | todo        | DECK-26                                                       | —                                                                            |
-| DECK-48 | Collapsed sidebar                                   | ready       | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
+| DECK-48 | Collapsed sidebar                                   | in-progress | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
 
 ### Withdrawn
 
