@@ -407,15 +407,15 @@ fn sidebar_app(name: &str, view: SessionView) -> App {
 fn the_header_shows_the_session_name_and_a_rename_updates_it_at_once() {
     let mut a = sidebar_app("work", mockup());
     let (_, buf, rows) = render(&a);
-    assert!(rows[0].starts_with(" work "), "{}", rows[0]);
-    assert_eq!(buf[(1, 0)].fg, color(a.theme.accent));
-    assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
+    assert!(rows[0].starts_with(" «  work "), "{}", rows[0]);
+    assert_eq!(buf[(4, 0)].fg, color(a.theme.accent));
+    assert!(buf[(4, 0)].modifier.contains(Modifier::BOLD));
     assert!(rows[0].contains("+  New space"));
     let mut view = mockup();
     view.name = "play".into();
     a.on_server(ServerMsg::SessionView(view));
     let (_, _, rows) = render(&a);
-    assert!(rows[0].starts_with(" play "), "{}", rows[0]);
+    assert!(rows[0].starts_with(" «  play "), "{}", rows[0]);
     // A long name is cut before the chip.
     let a = sidebar_app(
         "a-session-name-that-is-far-too-long-for-the-header",

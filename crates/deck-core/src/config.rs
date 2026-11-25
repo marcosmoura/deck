@@ -214,6 +214,12 @@ pub const DEFAULT_BINDINGS: &[ActionDef] = &[
         "Show or hide the sidebar",
     ),
     def(
+        "collapse_sidebar",
+        &[],
+        HelpGroup::Sidebar,
+        "Collapse or expand the sidebar",
+    ),
+    def(
         "focus_sidebar",
         &["Tab"],
         HelpGroup::Sidebar,
@@ -236,6 +242,7 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "scrollback_lines",
     "sidebar",
     "sidebar_width",
+    "sidebar_collapsed",
     "sidebar_space_gap",
     "notify",
     "resume_agents",
@@ -284,6 +291,8 @@ pub struct Config {
     /// Whether the sidebar is shown (unless the window is too narrow).
     pub sidebar: bool,
     pub sidebar_width: u16,
+    /// Whether each client starts with the sidebar collapsed to its narrow strip.
+    pub sidebar_collapsed: bool,
     /// Blank rows between two spaces in the sidebar.
     pub sidebar_space_gap: u8,
     pub notify: NotifyMode,
@@ -385,6 +394,7 @@ impl Default for Config {
             scrollback_lines: 10_000,
             sidebar: true,
             sidebar_width: 28,
+            sidebar_collapsed: false,
             sidebar_space_gap: 0,
             notify: NotifyMode::default(),
             resume_agents: true,
@@ -530,6 +540,11 @@ fn apply(
         }
         "sidebar" => {
             config.sidebar = value
+                .as_bool()
+                .ok_or_else(|| bad(key, "expected true or false"))?;
+        }
+        "sidebar_collapsed" => {
+            config.sidebar_collapsed = value
                 .as_bool()
                 .ok_or_else(|| bad(key, "expected true or false"))?;
         }
@@ -974,6 +989,7 @@ mod tests {
             ("[keys]\ndetach = [\"d\", 2]", "keys.detach"),
             ("keys = 1", "keys"),
             ("sidebar = 1", "sidebar"),
+            ("sidebar_collapsed = 1", "sidebar_collapsed"),
             ("sidebar_width = 19", "sidebar_width"),
             ("sidebar_width = 61", "sidebar_width"),
             ("sidebar_width = -3", "sidebar_width"),
@@ -1004,6 +1020,16 @@ mod tests {
             assert!(p.warnings.is_empty());
             assert_eq!(p.config.sidebar_space_gap, n);
         }
+    }
+
+    #[test]
+    fn sidebar_collapsed_defaults_to_false_and_parses() {
+        assert!(!Config::default().sidebar_collapsed);
+        let p = Config::parse("sidebar_collapsed = true").unwrap();
+        assert!(p.warnings.is_empty());
+        assert!(p.config.sidebar_collapsed);
+        let p = Config::parse("[keys]\ncollapse_sidebar = \"B\"").unwrap();
+        assert_eq!(p.config.keys["collapse_sidebar"], [spec("B")]);
     }
 
     #[test]
@@ -1043,6 +1069,13 @@ mod tests {
         ] {
             assert_eq!(c.keys[action], [spec(key)], "{action}");
         }
+        assert!(c.keys["collapse_sidebar"].is_empty());
+        let def = DEFAULT_BINDINGS
+            .iter()
+            .find(|d| d.name == "collapse_sidebar")
+            .unwrap();
+        assert_eq!(def.group, HelpGroup::Sidebar);
+        assert_eq!(def.help, "Collapse or expand the sidebar");
         for def in DEFAULT_BINDINGS {
             assert!(!def.help.is_empty(), "{} has no help text", def.name);
         }

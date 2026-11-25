@@ -129,8 +129,10 @@ impl App {
                 _ => return Some(Vec::new()),
             }
         }
-        let on_separator =
-            self.sidebar_visible() && event.column == self.sidebar_width && event.row < self.size.1;
+        let on_separator = self.sidebar_visible()
+            && !self.sidebar_collapsed
+            && event.column == self.sidebar_width
+            && event.row < self.size.1;
         if event.kind == Kind::Down(Left) && on_separator {
             self.sidebar_drag = Some(SidebarDrag { applied: None });
             self.dirty = true;

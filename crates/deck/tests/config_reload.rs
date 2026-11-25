@@ -69,7 +69,7 @@ fn prefixed(h: &mut Harness, key: &str) {
 
 /// The first cell of the session name in the sidebar header, which takes the accent colour.
 fn accent(h: &Harness) -> Color {
-    h.cell(0, 1).fg
+    h.cell(0, 4).fg
 }
 
 #[expect(clippy::panic, reason = "missing text fails the integration test")]
@@ -92,7 +92,7 @@ fn a_new_accent_applies_without_reattaching_and_reloaded_flashes() {
     assert_eq!(accent(&h), BLUE);
     write(&h, "[theme]\naccent = \"red\"\n");
     wait_accent(&h, RED);
-    assert_eq!(h.cell(0, 1).fg, RED, "the session name");
+    assert_eq!(h.cell(0, 4).fg, RED, "the session name");
     h.wait_for_text("config reloaded", TIMEOUT);
     h.capture("reloaded");
 }

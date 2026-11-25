@@ -81,6 +81,10 @@ pub enum Icon {
     New,
     /// The `Resume` chip of the sidebar.
     Resume,
+    /// The chip that collapses the sidebar.
+    CollapseSidebar,
+    /// The chip that expands the collapsed sidebar.
+    ExpandSidebar,
 }
 
 /// The frames of the spinner in the Unicode tier.
@@ -93,7 +97,7 @@ const NERD_SPINNER: [&str; 6] = [
 
 impl Icon {
     /// Every icon.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::Kind(IconKind::Claude),
         Self::Kind(IconKind::Codex),
         Self::Kind(IconKind::OpenCode),
@@ -115,6 +119,8 @@ impl Icon {
         Self::Unseen,
         Self::New,
         Self::Resume,
+        Self::CollapseSidebar,
+        Self::ExpandSidebar,
     ];
 
     /// How many spinner frames the Unicode glyphs have.
@@ -153,6 +159,8 @@ pub fn unicode(icon: Icon, frame: usize) -> &'static str {
         Icon::Unseen => "•",
         Icon::New => "+",
         Icon::Resume => "↻",
+        Icon::CollapseSidebar => "«",
+        Icon::ExpandSidebar => "»",
     }
 }
 
@@ -181,12 +189,14 @@ pub fn nerd(icon: Icon, frame: usize) -> &'static str {
             .get(frame % NERD_SPINNER.len())
             .copied()
             .unwrap_or_default(),
-        Icon::Waiting => "\u{f06a}", // nf-fa-circle_exclamation
-        Icon::Idle => "\u{f058}",    // nf-fa-check_circle
-        Icon::Quiet => "\u{f10c}",   // nf-fa-circle_o
-        Icon::Unseen => "\u{f444}",  // nf-oct-dot_fill
-        Icon::New => "\u{ea60}",     // nf-cod-add
-        Icon::Resume => "\u{ea82}",  // nf-cod-history
+        Icon::Waiting => "\u{f06a}",         // nf-fa-circle_exclamation
+        Icon::Idle => "\u{f058}",            // nf-fa-check_circle
+        Icon::Quiet => "\u{f10c}",           // nf-fa-circle_o
+        Icon::Unseen => "\u{f444}",          // nf-oct-dot_fill
+        Icon::New => "\u{ea60}",             // nf-cod-add
+        Icon::Resume => "\u{ea82}",          // nf-cod-history
+        Icon::CollapseSidebar => "\u{f100}", // nf-fa-angles_left
+        Icon::ExpandSidebar => "\u{f101}",   // nf-fa-angles_right
     }
 }
 
@@ -346,6 +356,10 @@ mod tests {
         assert_eq!(nerd(Icon::New, 0), "\u{ea60}");
         assert_eq!(unicode(Icon::Resume, 0), "↻");
         assert_eq!(nerd(Icon::Resume, 0), "\u{ea82}");
+        assert_eq!(unicode(Icon::CollapseSidebar, 0), "«");
+        assert_eq!(nerd(Icon::CollapseSidebar, 0), "\u{f100}");
+        assert_eq!(unicode(Icon::ExpandSidebar, 0), "»");
+        assert_eq!(nerd(Icon::ExpandSidebar, 0), "\u{f101}");
         assert_eq!(nerd(Icon::Waiting, 0), "\u{f06a}");
         assert_eq!(nerd(Icon::Idle, 0), "\u{f058}");
         assert_eq!(nerd(Icon::Quiet, 0), "\u{f10c}");

@@ -60,8 +60,8 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
     h.wait_for_active_row(" ❯  sh", TIMEOUT);
     // The active panel row is a bold band; the session name is in the accent.
     assert!(h.cell(3, 4).bold() && h.cell(3, 4).inverse());
-    assert_eq!(h.cell(0, 1).fg, ACCENT, "the session name");
-    assert_eq!(h.cell(0, 3).fg, ACCENT, "the sidebar header");
+    assert_eq!(h.cell(0, 4).fg, ACCENT, "the session name");
+    assert_eq!(h.cell(0, 5).fg, ACCENT, "the sidebar header");
     // The sidebar's background, on empty cells of its rows.
     for row in [1, 8, 15] {
         assert_eq!(h.cell(row, 20).bg, Color::Indexed(236), "row {row}");
@@ -84,7 +84,7 @@ fn the_screen_config_colours_the_sidebar_and_the_overlays() {
 fn without_truecolor_the_theme_and_the_programs_use_the_palette() {
     let mut h = themed(THEMED, &[("COLORTERM", None)]);
     h.wait_for_active_row(" ❯  sh", TIMEOUT);
-    assert!(is_palette(h.cell(0, 1).fg));
+    assert!(is_palette(h.cell(0, 4).fg));
     assert_eq!(h.cell(1, 20).bg, Color::Indexed(236));
 
     h.send_keys("printf '\\033[38;2;203;166;247mQ\\033[0m\\n'\r");

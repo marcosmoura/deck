@@ -131,7 +131,7 @@ fn the_sidebar_shows_the_session_project_and_first_panel() {
     let path = h.capture("sidebar");
     assert!(path.is_file());
     let rows = rows(&h);
-    assert!(rows[0].starts_with(" main "), "{}", rows[0]);
+    assert!(rows[0].starts_with(" «  main "), "{}", rows[0]);
     assert!(
         rows[2].starts_with(" dk") && rows[2].contains("▾  │"),
         "{}",

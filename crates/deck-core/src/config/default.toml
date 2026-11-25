@@ -12,10 +12,12 @@ shell_args = ["-l"]
 # How many lines of history each terminal keeps.
 scrollback_lines = 10000
 
-# The sidebar: shown or hidden, its width (20 to 60 columns),
+# The sidebar: shown or hidden, its width (20 to 60 columns), whether each client starts
+# with it collapsed to a narrow strip of terminal numbers and statuses,
 # and the blank rows between spaces (0 to 3).
 sidebar = true
 sidebar_width = 28
+sidebar_collapsed = false
 sidebar_space_gap = 0
 
 # How deck alerts you when an agent needs you: "osc9" (desktop notification), "bell" or "none".
@@ -61,6 +63,7 @@ new_menu = "N" # New panel menu: shell or agent
 rename_space = "." # Rename the space
 close_space = "Q" # Close the space
 toggle_sidebar = "b" # Show or hide the sidebar
+collapse_sidebar = [] # Collapse or expand the sidebar
 focus_sidebar = "Tab" # Move focus into the sidebar
 next_attention = "a" # Jump to the next agent that needs you
 help = "?" # This help

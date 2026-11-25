@@ -14,6 +14,9 @@ mod tests;
 /// The panel area keeps at least this many columns, or the sidebar is hidden.
 pub const MIN_PANEL_COLS: u16 = 20;
 
+/// The width of the collapsed sidebar, in columns, without its separator.
+pub const COLLAPSED_SIDEBAR_WIDTH: u16 = 8;
+
 /// Columns the sidebar and its separator take in a window `cols` wide: none when the user
 /// hid it (`shown` false) or when the panel area would be narrower than [`MIN_PANEL_COLS`].
 pub fn sidebar_cols(cols: u16, sidebar_width: u16, shown: bool) -> u16 {

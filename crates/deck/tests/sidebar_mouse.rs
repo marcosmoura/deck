@@ -143,7 +143,7 @@ fn dragging_the_separator_resizes_the_shell_and_back() {
     sleep(Duration::from_millis(50));
     motion(&mut h, 40);
     h.wait_for_text("SIDEBAR 40", TIMEOUT);
-    let accent = h.cell(0, 3).fg;
+    let accent = h.cell(0, 5).fg;
     wait_until("the accent separator", TIMEOUT, || {
         h.cell(5, 40).ch == '┃' && h.cell(5, 40).fg == accent
     });
@@ -374,7 +374,7 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip() {
     wait_bar(&h);
     let header = rows(&h)[0].clone();
     let sidebar: String = header.chars().take(28).collect();
-    assert_eq!(sidebar, " main         +  New space  ", "{header:?}");
+    assert_eq!(sidebar, " «  main      +  New space  ", "{header:?}");
     h.capture("header");
 }
 

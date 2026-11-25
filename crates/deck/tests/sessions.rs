@@ -42,10 +42,13 @@ fn rows(h: &Harness) -> Vec<String> {
 /// Waits until the sidebar header (the first row) names the session.
 fn wait_for_session(h: &Harness, name: &str) {
     wait_until(&format!("the session {name}"), TIMEOUT, || {
-        // The sidebar header starts with the session's name.
-        rows(h)
-            .first()
-            .is_some_and(|r| r.trim_start().split(' ').next() == Some(name))
+        // The sidebar header has the session's name after the collapse chip.
+        rows(h).first().is_some_and(|r| {
+            r.trim_start()
+                .strip_prefix('«')
+                .and_then(|r| r.split_whitespace().next())
+                == Some(name)
+        })
     });
 }
 

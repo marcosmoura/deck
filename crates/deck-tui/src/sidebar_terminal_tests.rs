@@ -146,6 +146,7 @@ fn kinds(rows: &[Row]) -> String {
             Row::Terminal(_, _, t) => format!("t{}", t.0),
             Row::NoPanels => "n".into(),
             Row::Gap => "_".into(),
+            Row::Rule => "-".into(),
         })
         .collect::<Vec<_>>()
         .join(" ")

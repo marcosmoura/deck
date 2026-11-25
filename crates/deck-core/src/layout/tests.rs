@@ -71,6 +71,27 @@ fn a_narrow_window_hides_the_sidebar() {
 }
 
 #[test]
+fn the_collapsed_width_fits_where_the_full_sidebar_does_not() {
+    assert_eq!(COLLAPSED_SIDEBAR_WIDTH, 8);
+    assert_eq!(sidebar_cols(28, COLLAPSED_SIDEBAR_WIDTH, true), 0);
+    assert_eq!(sidebar_cols(29, COLLAPSED_SIDEBAR_WIDTH, true), 9);
+    assert_eq!(sidebar_cols(80, COLLAPSED_SIDEBAR_WIDTH, true), 9);
+    assert_eq!(
+        panel_area((28, 24), COLLAPSED_SIDEBAR_WIDTH, true),
+        (28, 24)
+    );
+    assert_eq!(
+        panel_area((29, 24), COLLAPSED_SIDEBAR_WIDTH, true),
+        (20, 24)
+    );
+    assert_eq!(
+        panel_area((80, 24), COLLAPSED_SIDEBAR_WIDTH, true),
+        (71, 24)
+    );
+    assert_eq!(sidebar_cols(40, 20, true), 0, "20 + 1 + 20 = 41");
+}
+
+#[test]
 fn sidebar_cols_takes_the_width() {
     assert_eq!(sidebar_cols(100, 40, true), 41);
     assert_eq!(sidebar_cols(100, 40, false), 0);

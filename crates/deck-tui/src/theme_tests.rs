@@ -84,7 +84,7 @@ fn alt_space() -> ct::Event {
 fn the_sidebar_follows_the_theme() {
     let buf = render(&app(THEME));
     // The session name is in the accent; the active row is a band of the selection colours.
-    assert_eq!(buf[(1, 0)].fg, Color::Rgb(0xcb, 0xa6, 0xf7));
+    assert_eq!(buf[(4, 0)].fg, Color::Rgb(0xcb, 0xa6, 0xf7));
     assert_eq!(buf[(0, 3)].symbol(), " ");
     for x in [0, 3, 27] {
         assert_eq!(
@@ -205,7 +205,7 @@ fn without_truecolor_rgb_becomes_the_nearest_palette_colour() {
     let mut a = app(THEME);
     a.truecolor = false;
     let buf = render(&a);
-    assert!(matches!(buf[(1, 0)].fg, Color::Indexed(n) if n >= 16));
+    assert!(matches!(buf[(4, 0)].fg, Color::Indexed(n) if n >= 16));
     send(&mut a, &[alt_space()]);
     let buf = render(&a);
     let (x, y) = find(&buf, "PREFIX");

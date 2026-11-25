@@ -5,7 +5,7 @@ A session holds spaces, a space holds panels, and a panel shows one or more term
 ## The sidebar
 
 ```text
- main         +  New space  │
+ «  main      +  New space  │
                             │
  terminal-multiplexer    ▾  │
  ✎  editor                  │
@@ -21,11 +21,11 @@ A session holds spaces, a space holds panels, and a panel shows one or more term
   +  New         ↻  Resume  │
 ```
 
-- The header reads the session's name (accent, bold) with a `+ New space` chip at the right, with one cell of clickable padding on each side and a one-cell margin at the right edge. The chip is an icon (`+`, two cells, like every icon: an image where images are on) and the label; it shows only the icon when the sidebar is under 26 columns wide. The name is cut with `…` to leave room for the chip, and a rename of the session shows at once. Each space is a row with its name and, at the right, `▾` (expanded) or `▸` (collapsed) in a two-cell slot before the one-cell margin and, when collapsed, its panel count before it. Each panel of an expanded space is a row with its name; a panel with two or more terminals is followed by one [terminal row](#terminal-rows) per terminal. A space with no panels shows a muted `no panels`. Names that do not fit end in `…`.
+- The header starts with a `«` chip that [collapses the sidebar](#collapsed-sidebar): the icon (two cells) with one cell of clickable padding on each side, columns 0 to 3. The session's name (accent, bold) starts at column 4, with a `+ New space` chip at the right, with one cell of clickable padding on each side and a one-cell margin at the right edge. The chip is an icon (`+`, two cells, like every icon: an image where images are on) and the label; it shows only the icon when the sidebar is under 26 columns wide. The name is cut with `…` to leave room for the chip, and a rename of the session shows at once. Each space is a row with its name and, at the right, `▾` (expanded) or `▸` (collapsed) in a two-cell slot before the one-cell margin and, when collapsed, its panel count before it. Each panel of an expanded space is a row with its name; a panel with two or more terminals is followed by one [terminal row](#terminal-rows) per terminal. A space with no panels shows a muted `no panels`. Names that do not fit end in `…`.
 - The active panel's row is a band across the sidebar's full width in the selection colours (`selection_fg` and `selection_bg`, reversed while both are `default`), bold, with the status glyph, counts and notes in the row's text colour while the selection colours are the default reversed pair; the active space's name is bold. In sidebar focus only the selected row has the band, and the active panel's row is drawn in the accent colour, bold, with no band. The row or chip under the pointer gets the `hover` background (a row across the full width, a chip over its own cells), and muted text on it turns `sidebar_fg`; the `no panels` row, blank rows and the header's session name do not hover, and a row with the band keeps it under the pointer. The status slot at the right of a row shows the agent status of the panel's most urgent terminal (see [agents](agents.md)). A panel whose agent needed you while you were not looking is bold with a `•` after its name, and a collapsed space shows `!<n>` (always the Unicode `!`) for its waiting panels ([attention](agents.md#attention)).
 - With more rows than fit, the list scrolls to keep the active panel (or, in sidebar focus, the selection) in view. The wheel scrolls it too, three rows a notch.
 - The last row of the sidebar is a bottom bar with a `+ New` chip at the left (the `+` icon alone when the sidebar is under 26 columns wide), and the row above it is blank, so the list is two rows shorter. A sidebar under 8 rows tall draws neither. The right-hand end has the `Resume` button (the `↻` icon and `Resume`, or the icon alone under 26 columns), which opens the [restore dialog](agents.md#the-restore-dialog). All chips, the header's included, are muted and get the `hover` background under the pointer; a click is a press and a release on the same chip. With no space, `+ New` flashes `no space` and `Resume` flashes `no space to restore into`.
-- The sidebar takes `sidebar_width` columns (default 28) and a separator; the panels get the rest. When the window is narrower than 41 columns the sidebar hides, and it comes back when the window grows, unless you hid it with `toggle_sidebar`. A shrinking window narrows a wide sidebar so the panel area keeps its 20 columns (a sidebar at 60 in an 81-column window becomes 59 in an 80-column one); a growing window does not widen it again.
+- The sidebar takes `sidebar_width` columns (default 28) and a separator; the panels get the rest. When the window is narrower than 41 columns the sidebar hides, and it comes back when the window grows, unless you hid it with `toggle_sidebar` (the [collapsed sidebar](#collapsed-sidebar) fits from 29 columns). A shrinking window narrows a wide sidebar so the panel area keeps its 20 columns (a sidebar at 60 in an 81-column window becomes 59 in an 80-column one); a growing window does not widen it again.
 - The active space, active panel and which spaces are collapsed are shared by every client attached to the session. The selection, sidebar focus, prompts and overlays are each client's own.
 
 ## Bindings
@@ -46,6 +46,31 @@ After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previo
 A panel with two or more terminals is followed, while its space is expanded, by one row per terminal in grid order; a panel with one terminal has none, and the rows come and go as terminals are added and closed. A terminal row starts with a muted tree glyph in column 2, under the panel's icon (`├`, or `└` for the last terminal), a space, the terminal's icon in the column of the panel names (from its own agent or program, two cells), a space and its label from column 7. The label is the terminal's title without its spinner and status glyphs, else its program; a kept terminal that exited adds ` · exited <code>` (muted), and the label is cut before the note. The status slot at the right shows that terminal's own agent status. A terminal row has no number, count or unseen marker. Collapsing the space hides the rows.
 
 The focused terminal of the active panel is drawn in the accent colour, bold; the band stays on the active panel's row, and in sidebar focus it goes to the selected row, which may be a terminal row. The terminal rows of a dragged panel are dimmed with it.
+
+## Collapsed sidebar
+
+The `«` chip at the left of the header (or the `collapse_sidebar` binding, unbound by default) collapses the sidebar to a strip of 8 columns and the separator, which lists every terminal of the session as one entry: its status and a number. The panel area gets the columns the sidebar gives up, and the terminals are resized. The state is the client's own, like a hidden sidebar: other clients, and the state file, do not see it. `sidebar_collapsed = true` starts each client collapsed.
+
+```text
+   »    │   the expand chip (muted; the hover background under the pointer)
+        │
+ ⠹  1   │   claude: its agent's status mark, in the status colour
+ ❯  2   │   zsh: no agent, so its program icon
+ !  3   │   the focused terminal of the active panel: the band
+ ────── │   a muted rule between two spaces
+ ✎  4   │   dotfiles' only terminal (the space is folded, its terminal still shows)
+        │
+   +    │   the New chip
+```
+
+- One entry per terminal, in the sidebar's order: spaces in order, panels in order, terminals in grid order. Folded spaces count: collapsing shows every terminal. A panel with one terminal has one entry. A space with no terminals adds nothing, and no rule.
+- An entry is a blank column, the mark (two cells: an image where images are on), a blank, and the number from column 4 (`1` to `999`). The mark is the terminal's agent status (spinner, `!`, `●`, `○`) in its status colour, else the terminal's program icon. The number is the entry's place in the list, counting entries only, not rules. A kept terminal that exited has its mark and number muted; the entries of a panel with unseen attention are bold. The numbers exist only here: the grid borders keep `<number> · <title>`.
+- The focused terminal of the active panel has the band. In sidebar focus the band is on the selected entry, and the focused terminal is drawn in the accent colour, bold. Entries get the `hover` background under the pointer.
+- With more entries than fit, the list scrolls to keep the focused terminal (or, in sidebar focus, the selection) in view, and the wheel scrolls it three rows a notch.
+- The header has only the `»` chip (its icon in columns 3 and 4, with a column of clickable padding on each side, so the chip is centred in the strip with two columns on each side), which expands the sidebar again at its previous width (clamped to the window). The bottom bar has only the `+` chip, in the same columns, which opens the [New menu](#the-new-button-and-menu); there is no `Resume` chip (`Option+Space R` still opens the restore dialog).
+- A click on an entry makes its panel and space active and focuses that terminal; a right click opens the terminal menu. A press on an entry never starts a drag, and a press on the separator does nothing while collapsed.
+- The strip fits a window of at least 29 columns (8 + 1 + 20), so in a window of 29 to 40 columns the full sidebar does not fit: there the `»` chip and `collapse_sidebar` leave it collapsed and flash `window too narrow to expand`, and so does a config reload that sets `sidebar_collapsed = false` there. Under 29 columns the sidebar hides, and it comes back when the window grows. `collapse_sidebar` also shows a sidebar hidden with `toggle_sidebar`.
+- In sidebar focus the selection moves over entries only (`Up`/`Down`), and `Enter`, `x`, `r`, `c`, `n` and `R` do what they do on a terminal row; `Left`/`h` and `Right`/`l` do nothing. Focus starts on the focused terminal of the active panel. Collapsing or expanding keeps the selection on the same terminal, or on its panel's or space's row once expanded.
 
 ## Sidebar focus
 
@@ -126,6 +151,7 @@ When the daemon refuses a name or a directory (empty, too long, a duplicate spac
 ```toml
 sidebar = true # false hides it until toggled
 sidebar_width = 28 # 20 to 60
+sidebar_collapsed = false # true starts each client with the sidebar collapsed
 sidebar_space_gap = 0 # 0 to 3 blank rows between spaces
 ```
 

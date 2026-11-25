@@ -118,7 +118,11 @@ impl App {
         if self.sidebar_focus {
             return Some(Mode {
                 badge: " SIDEBAR ".into(),
-                hints: pairs(SIDEBAR_HINTS),
+                // Left and right fold spaces, which the collapsed sidebar does not show.
+                hints: pairs(SIDEBAR_HINTS)
+                    .into_iter()
+                    .filter(|(k, _)| !(self.sidebar_collapsed && k == "←→"))
+                    .collect(),
                 ..Mode::default()
             });
         }

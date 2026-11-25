@@ -115,6 +115,8 @@ pub fn mask(icon: Icon) -> Option<&'static [u8; MASK_LEN]> {
         Icon::Unseen => include_bytes!("../assets/icons/unseen.mask"),
         Icon::New => include_bytes!("../assets/icons/new.mask"),
         Icon::Resume => include_bytes!("../assets/icons/resume.mask"),
+        Icon::CollapseSidebar => include_bytes!("../assets/icons/collapse_sidebar.mask"),
+        Icon::ExpandSidebar => include_bytes!("../assets/icons/expand_sidebar.mask"),
         Icon::DropTarget => return None,
     })
 }

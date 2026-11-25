@@ -790,7 +790,11 @@ impl Shared {
         let config = self.config();
         let viewport = panel_area(
             (a.cols, a.rows),
-            layout::clamp_sidebar_width(a.cols, config.sidebar_width),
+            if config.sidebar_collapsed {
+                layout::COLLAPSED_SIDEBAR_WIDTH
+            } else {
+                layout::clamp_sidebar_width(a.cols, config.sidebar_width)
+            },
             config.sidebar,
         );
         let plan = {
@@ -845,7 +849,11 @@ impl Shared {
         client.outer_name = a.outer_name.clone();
         client.viewport = Some(panel_area(
             (a.cols, a.rows),
-            config.sidebar_width,
+            if config.sidebar_collapsed {
+                layout::COLLAPSED_SIDEBAR_WIDTH
+            } else {
+                config.sidebar_width
+            },
             config.sidebar,
         ));
         client.active = active;

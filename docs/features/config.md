@@ -24,9 +24,9 @@ deck config default > ~/.config/deck/config.toml
 
 ## Live reload
 
-Save the file and, within about a second, the colours, border style, key bindings, prefix, sidebar, sidebar width and sidebar space gap change in every attached client, with `config reloaded` in the floating bar. Editors that save through a temporary file and a rename work, and deleting the file returns everything to the defaults.
+Save the file and, within about a second, the colours, border style, key bindings, prefix, sidebar, sidebar width, collapsed sidebar and sidebar space gap change in every attached client, with `config reloaded` in the floating bar. Editors that save through a temporary file and a rename work, and deleting the file returns everything to the defaults.
 
-- Only what changed in the file changes on screen: a sidebar you hid with the `toggle_sidebar` key stays hidden unless `sidebar` itself changed. An armed prefix or an open prompt is kept.
+- Only what changed in the file changes on screen: a sidebar you hid with the `toggle_sidebar` key stays hidden unless `sidebar` itself changed, and one you collapsed stays collapsed unless `sidebar_collapsed` itself changed. An armed prefix or an open prompt is kept.
 - `shell`, `shell_args` and `scrollback_lines` apply to terminals started afterwards; running terminals are not touched.
 - A mistake changes nothing: the floating bar shows `config.toml:<line>:<col>: <message> (kept the previous config)` for 6 seconds. If the file is still being written the daemon looks again before reporting. Warnings (an unknown key, a key that replaces another action's default) do not block the reload and show as one warning.
 - A file that is invalid when the daemon starts means the defaults, with the same error shown to the first client that attaches. Messages with no client attached wait for the next one: the last 20 are kept, and a message identical to an earlier one replaces it, so many reloads show `config reloaded` once.

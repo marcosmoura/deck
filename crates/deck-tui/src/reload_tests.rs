@@ -70,14 +70,14 @@ fn notice(level: NoticeLevel, text: &str) -> ServerMsg {
 fn a_new_theme_applies_at_once() {
     let mut a = app();
     let before = render(&a);
-    let accent = before[(1, 0)].fg;
+    let accent = before[(4, 0)].fg;
     let outs = a.on_server(ServerMsg::Config(Box::new(parse(
         "[theme]\naccent = \"#ff0000\"",
     ))));
     assert!(outs.is_empty(), "a theme changes no size: {outs:?}");
     let after = render(&a);
-    assert_ne!(after[(1, 0)].fg, accent);
-    assert_eq!(after[(1, 0)].fg, Color::Rgb(255, 0, 0));
+    assert_ne!(after[(4, 0)].fg, accent);
+    assert_eq!(after[(4, 0)].fg, Color::Rgb(255, 0, 0));
 }
 
 #[test]

@@ -84,12 +84,12 @@ const CHIP: u16 = 14;
 fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right() {
     // (sidebar width, the left part as shown, the chip's glyph text)
     for (width, left, chip) in [
-        (40, " main", " +  New space "),
-        (30, " main", " +  New space "),
-        (28, " main", " +  New space "),
-        (26, " main", " +  New space "),
-        (25, " main", " +  "),
-        (20, " main", " +  "),
+        (40, " «  main", " +  New space "),
+        (30, " «  main", " +  New space "),
+        (28, " «  main", " +  New space "),
+        (26, " «  main", " +  New space "),
+        (25, " «  main", " +  "),
+        (20, " «  main", " +  "),
     ] {
         let a = app_at((100, 24), width, mockup());
         let buf = draw_app(&a);
@@ -101,8 +101,8 @@ fn the_header_reads_the_session_name_and_holds_the_new_space_chip_at_the_right()
     }
     let a = app();
     let buf = draw_app(&a);
-    assert_eq!(buf[(1, 0)].fg, color(a.theme.accent));
-    assert!(buf[(1, 0)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(4, 0)].fg, color(a.theme.accent));
+    assert!(buf[(4, 0)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(CHIP, 0)].fg, color(a.theme.muted));
 }
 
@@ -569,7 +569,7 @@ fn rows_and_chips_under_the_pointer_have_the_hover_background() {
 #[test]
 fn no_panels_the_header_title_and_blank_rows_do_not_hover() {
     let mut a = app();
-    for (x, y) in [(5, 9), (2, 0), (5, 1), (5, 15), (5, BAR - 1)] {
+    for (x, y) in [(5, 9), (5, 0), (5, 1), (5, 15), (5, BAR - 1)] {
         moved(&mut a, x, y);
         assert_eq!(a.hover, None, "({x}, {y})");
     }

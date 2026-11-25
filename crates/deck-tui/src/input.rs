@@ -39,6 +39,8 @@ pub enum Action {
     RenameProject,
     CloseProject,
     ToggleSidebar,
+    /// Collapses the sidebar to its narrow strip, or expands it.
+    CollapseSidebar,
     FocusSidebar,
     /// Jumps to the next agent that needs the user.
     NextAttention,
@@ -74,6 +76,7 @@ impl Action {
             "rename_space" => Self::RenameProject,
             "close_space" => Self::CloseProject,
             "toggle_sidebar" => Self::ToggleSidebar,
+            "collapse_sidebar" => Self::CollapseSidebar,
             "focus_sidebar" => Self::FocusSidebar,
             "next_attention" => Self::NextAttention,
             "help" => Self::Help,

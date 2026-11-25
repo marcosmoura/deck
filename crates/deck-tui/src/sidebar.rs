@@ -5,6 +5,7 @@ use deck_core::action::Action as Act;
 use deck_core::agents::AgentStatus;
 use deck_core::icons::{Icon, IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
+use deck_core::layout::{self, COLLAPSED_SIDEBAR_WIDTH};
 use deck_core::model::{PanelId, PanelView, ProjectId, SessionView, TerminalId, TerminalView};
 use deck_core::naming::{source_terminal_view, title_core};
 use deck_core::theme::Theme;
@@ -66,6 +67,10 @@ pub enum Hover {
     Row(Sel),
     /// The `+ New space` chip of the header.
     NewProject,
+    /// The chip before the session name that collapses the sidebar.
+    CollapseSidebar,
+    /// The chip of the collapsed sidebar's header that expands it.
+    ExpandSidebar,
     /// The `+ New` chip of the bottom bar.
     New,
     Restore,
@@ -137,10 +142,31 @@ fn new_project_span(w: u16) -> std::ops::Range<u16> {
     x..x + cells
 }
 
-/// The columns the `New` chip takes: from the second column.
-fn new_span(w: u16) -> std::ops::Range<u16> {
-    1..1 + chip_cells(w, NEW_LABEL)
+/// The columns the `New` chip takes: from the second column; at `COLLAPSED_CHIP_X` in the
+/// collapsed sidebar, where it is only its icon.
+fn new_span(w: u16, collapsed: bool) -> std::ops::Range<u16> {
+    if collapsed {
+        COLLAPSED_CHIP_X..COLLAPSED_CHIP_X + chip_cells(0, NEW_LABEL)
+    } else {
+        1..1 + chip_cells(w, NEW_LABEL)
+    }
 }
+
+/// The first column of the collapsed sidebar's chips: four cells centred in the strip, two
+/// columns on each side, so their icons take columns 3 and 4.
+const COLLAPSED_CHIP_X: u16 = (COLLAPSED_SIDEBAR_WIDTH - 4) / 2;
+
+/// The columns of the header's collapse (expanded) or expand (collapsed) chip: an icon and a
+/// column of padding on each side.
+fn corner_span(collapsed: bool) -> std::ops::Range<u16> {
+    let x = if collapsed { COLLAPSED_CHIP_X } else { 0 };
+    x..x + chip_cells(0, "")
+}
+
+/// The column the session name starts at, after the collapse chip.
+const TITLE_X: u16 = 4;
+/// The column the number of a collapsed entry starts at.
+const NUMBER_X: u16 = 4;
 
 /// The columns the `Resume` chip takes in a sidebar `w` columns wide: right-aligned, with a
 /// margin of one column.
@@ -169,6 +195,8 @@ pub enum Row {
     NoPanels,
     /// A blank row between two spaces (`sidebar_space_gap`).
     Gap,
+    /// The muted rule between the entries of two spaces in the collapsed sidebar.
+    Rule,
 }
 
 impl Row {
@@ -177,7 +205,7 @@ impl Row {
             Self::Project(p) => Some(Sel::Project(p)),
             Self::Panel(p, panel) => Some(Sel::Panel(p, panel)),
             Self::Terminal(p, panel, t) => Some(Sel::Terminal(p, panel, t)),
-            Self::NoPanels | Self::Gap => None,
+            Self::NoPanels | Self::Gap | Self::Rule => None,
         }
     }
 }
@@ -252,12 +280,48 @@ pub fn rows_with(view: &SessionView, gap: u8, reorder: Option<Reorder>) -> Vec<R
     rows
 }
 
+/// The rows of the collapsed sidebar: a terminal row for every terminal of every space, folds
+/// ignored, and a rule between two spaces that have terminals.
+pub fn collapsed_rows(view: &SessionView) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for project in &view.projects {
+        let before = rows.len();
+        for panel in &project.panels {
+            rows.extend(
+                panel
+                    .terminals
+                    .iter()
+                    .map(|t| Row::Terminal(project.id, panel.id, t.id)),
+            );
+        }
+        if before > 0 && rows.len() > before {
+            rows.insert(before, Row::Rule);
+        }
+    }
+    rows
+}
+
 impl App {
+    /// The width the sidebar is drawn with, without its separator: the collapsed strip's or
+    /// the full width.
+    pub fn side_width(&self) -> u16 {
+        if self.sidebar_collapsed {
+            COLLAPSED_SIDEBAR_WIDTH
+        } else {
+            self.sidebar_width
+        }
+    }
+
     pub(crate) fn sidebar_rows(&self) -> Vec<Row> {
         let gap = self.config.sidebar_space_gap;
-        self.mirror
-            .view()
-            .map_or_else(Vec::new, |view| rows(view, gap))
+        let collapsed = self.sidebar_collapsed;
+        self.mirror.view().map_or_else(Vec::new, |view| {
+            if collapsed {
+                collapsed_rows(view)
+            } else {
+                rows(view, gap)
+            }
+        })
     }
 
     fn selectable(&self) -> Vec<Sel> {
@@ -277,11 +341,21 @@ impl App {
     /// chips of the bottom bar when it is drawn.
     pub(crate) fn hover_at(&self, column: u16, row: u16) -> Option<Hover> {
         let height = self.size.1;
-        let w = self.sidebar_width;
+        let w = self.side_width();
         if column >= w.min(self.sidebar_cols()) {
             return None;
         }
         if row == 0 {
+            if corner_span(self.sidebar_collapsed).contains(&column) {
+                return Some(if self.sidebar_collapsed {
+                    Hover::ExpandSidebar
+                } else {
+                    Hover::CollapseSidebar
+                });
+            }
+            if self.sidebar_collapsed {
+                return None;
+            }
             return new_project_span(w)
                 .contains(&column)
                 .then_some(Hover::NewProject);
@@ -298,9 +372,9 @@ impl App {
                 .and_then(|r| r.sel())
                 .map(Hover::Row);
         }
-        if new_span(w).contains(&column) {
+        if new_span(w, self.sidebar_collapsed).contains(&column) {
             Some(Hover::New)
-        } else if restore_span(w).contains(&column) {
+        } else if !self.sidebar_collapsed && restore_span(w).contains(&column) {
             Some(Hover::Restore)
         } else {
             None
@@ -343,6 +417,13 @@ impl App {
     /// project's.
     fn default_selection(&self) -> Option<Sel> {
         let project = self.mirror.active_project()?;
+        if self.sidebar_collapsed {
+            let panel = self.mirror.active_panel()?;
+            let terminal = panel
+                .focused_terminal
+                .or_else(|| panel.terminals.first().map(|t| t.id))?;
+            return Some(Sel::Terminal(project.id, panel.id, terminal));
+        }
         match self.mirror.active_panel() {
             Some(panel) if !project.collapsed => Some(Sel::Panel(project.id, panel.id)),
             _ => Some(Sel::Project(project.id)),
@@ -362,6 +443,14 @@ impl App {
         let Some(sel) = self.selection else { return };
         let rows = self.selectable();
         if rows.contains(&sel) {
+            return;
+        }
+        if self.sidebar_collapsed {
+            self.selection = rows
+                .iter()
+                .find(|s| s.project() == sel.project())
+                .copied()
+                .or_else(|| self.default_selection());
             return;
         }
         let project = Sel::Project(sel.project());
@@ -405,6 +494,87 @@ impl App {
     pub(crate) fn clamp_offset(&mut self) {
         let max = self.sidebar_rows().len().saturating_sub(self.list_height());
         self.sidebar_offset = self.sidebar_offset.min(max);
+    }
+
+    /// Where the sidebar-focus selection goes when the sidebar collapses (`collapsing`) or
+    /// expands, so it stays on the same terminal or its panel's or space's row.
+    fn selection_across_toggle(&self, sel: Sel, collapsing: bool) -> Option<Sel> {
+        let (project, panel) = match sel {
+            Sel::Project(p) => (self.mirror.find_project(p)?, None),
+            Sel::Panel(p, id) | Sel::Terminal(p, id, _) => {
+                let project = self.mirror.find_project(p)?;
+                (project, project.panels.iter().find(|x| x.id == id))
+            }
+        };
+        let entry = |panel: &PanelView| {
+            let t = panel
+                .focused_terminal
+                .or_else(|| panel.terminals.first().map(|t| t.id))?;
+            Some(Sel::Terminal(project.id, panel.id, t))
+        };
+        if collapsing {
+            match sel {
+                Sel::Terminal(..) => Some(sel),
+                Sel::Panel(..) => entry(panel?),
+                Sel::Project(_) => project
+                    .active_panel
+                    .and_then(|id| project.panels.iter().find(|p| p.id == id))
+                    .and_then(entry)
+                    .or_else(|| project.panels.iter().find_map(entry)),
+            }
+        } else {
+            match sel {
+                _ if project.collapsed => Some(Sel::Project(project.id)),
+                Sel::Terminal(..) if panel?.terminals.len() > 1 => Some(sel),
+                Sel::Terminal(p, id, _) => Some(Sel::Panel(p, id)),
+                other => Some(other),
+            }
+        }
+    }
+
+    /// Collapses or expands the sidebar, moving the sidebar-focus selection with it.
+    pub(crate) fn set_sidebar_collapsed(&mut self, collapsed: bool) {
+        if self.sidebar_collapsed == collapsed {
+            return;
+        }
+        let moved = self
+            .selection
+            .filter(|_| self.sidebar_focus)
+            .map(|sel| self.selection_across_toggle(sel, collapsed));
+        self.sidebar_collapsed = collapsed;
+        if let Some(moved) = moved {
+            self.selection = moved.or_else(|| self.default_selection());
+        }
+        self.dirty = true;
+    }
+
+    /// The `collapse_sidebar` action and a click on either header chip: flips the collapsed
+    /// state and shows a hidden sidebar. The full sidebar needs more room than the collapsed
+    /// one: where only the collapsed one fits, expanding is refused.
+    pub(crate) fn toggle_sidebar_collapsed(&mut self, now: std::time::Instant) -> Vec<Out> {
+        let was_hidden = std::mem::take(&mut self.sidebar_hidden);
+        let expanding = self.sidebar_collapsed;
+        let fits = |width| layout::sidebar_cols(self.size.0, width, true) > 0;
+        if expanding && !fits(self.sidebar_width) && fits(COLLAPSED_SIDEBAR_WIDTH) {
+            self.set_flash("window too narrow to expand".into(), now, false);
+            if !was_hidden {
+                return Vec::new();
+            }
+        } else {
+            self.set_sidebar_collapsed(!self.sidebar_collapsed);
+        }
+        if !self.sidebar_visible() {
+            self.sidebar_focus = false;
+            self.set_flash("sidebar hidden (window too narrow)".into(), now, false);
+        }
+        self.dirty = true;
+        self.check_row_gesture();
+        self.ensure_visible();
+        self.refresh_hover();
+        if too_small(self.size) {
+            return Vec::new();
+        }
+        vec![self.viewport_msg()]
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -472,6 +642,9 @@ impl App {
                 Some(Sel::Project(project)) => self.toggle_collapsed(project),
                 None => Vec::new(),
             },
+            KeyCode::Left | KeyCode::Char('h' | 'l') | KeyCode::Right if self.sidebar_collapsed => {
+                Vec::new()
+            }
             KeyCode::Left | KeyCode::Char('h') => {
                 sel.map_or_else(Vec::new, |s| self.set_collapsed(s.project(), true))
             }
@@ -573,6 +746,9 @@ impl App {
     /// The rows as they are drawn: the daemon's, with the item just dropped at its new place until
     /// the daemon answers.
     pub(crate) fn preview_rows(&self) -> Vec<Row> {
+        if self.sidebar_collapsed {
+            return self.sidebar_rows();
+        }
         // The list stays still while dragging; a move just dropped shows until its answer.
         let reorder = self.row_drop.map(|(r, _)| r);
         let gap = self.config.sidebar_space_gap;
@@ -623,7 +799,7 @@ impl App {
                 // A blank row or `no panels` belongs to the space above it.
                 let owner = rows.get(..=at)?.iter().rev().find_map(|r| match r {
                     Row::Project(p) | Row::Panel(p, _) | Row::Terminal(p, _, _) => Some(*p),
-                    Row::NoPanels | Row::Gap => None,
+                    Row::NoPanels | Row::Gap | Row::Rule => None,
                 })?;
                 view.projects.iter().position(|p| p.id == owner)
             }
@@ -689,7 +865,7 @@ impl App {
     /// The release of a drag: the move, when the item ends at another place. A release over
     /// the panel area drops nothing.
     fn drop_row(&mut self, drag: RowDrag, event: ct::MouseEvent) -> Vec<Out> {
-        if event.column >= self.sidebar_width || self.place_of(drag.item) == Some(drag.to) {
+        if event.column >= self.side_width() || self.place_of(drag.item) == Some(drag.to) {
             return Vec::new();
         }
         self.row_drop = Some((
@@ -715,7 +891,7 @@ impl App {
     fn row_drag_to(&mut self, event: ct::MouseEvent) {
         let rows = self.sidebar_rows();
         let height = self.list_height();
-        let in_list = event.column < self.sidebar_width;
+        let in_list = event.column < self.side_width();
         let line = event
             .row
             .checked_sub(HEADER_ROWS)
@@ -769,7 +945,7 @@ impl App {
 
     /// A mouse event over the sidebar or its separator.
     pub(crate) fn sidebar_mouse(&mut self, event: ct::MouseEvent) -> Vec<Out> {
-        if event.column >= self.sidebar_width {
+        if event.column >= self.side_width() {
             return Vec::new();
         }
         let rows = self.sidebar_rows();
@@ -955,6 +1131,10 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             Style::new().fg(color(bar_color)),
         );
     }
+    if app.sidebar_collapsed {
+        draw_collapsed(buf, area, app, theme);
+        return;
+    }
     let muted = base.fg(color(theme.muted));
     let accent = base.fg(color(theme.accent));
     // Foreground-only patches for the cells of a row, which keep the row's background.
@@ -974,13 +1154,34 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             muted
         }
     };
+    let corner = corner_span(false);
+    let style = style_of(Hover::CollapseSidebar);
+    buf.set_style(
+        Rect::new(area.x, area.y, corner.end - corner.start, 1),
+        style,
+    );
+    draw_chip(
+        app,
+        buf,
+        (area.x, area.y),
+        0,
+        Icon::CollapseSidebar,
+        "",
+        style,
+    );
     // The title, cut before the `New space` chip, which it gives way to.
     let span = new_project_span(w);
     let header = truncate(
         app.mirror.session_name().unwrap_or(""),
-        span.start.saturating_sub(2),
+        span.start.saturating_sub(TITLE_X + 1),
     );
-    put(buf, area.y, 1, &header, accent.add_modifier(Modifier::BOLD));
+    put(
+        buf,
+        area.y,
+        TITLE_X,
+        &header,
+        accent.add_modifier(Modifier::BOLD),
+    );
     let style = style_of(Hover::NewProject);
     buf.set_style(
         Rect::new(area.x + span.start, area.y, span.end - span.start, 1),
@@ -1270,7 +1471,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 );
             }
             Row::NoPanels => put(buf, y, 3, "no panels", keep(row_style.patch(muted))),
-            Row::Gap => {}
+            Row::Gap | Row::Rule => {}
         }
     }
     if bar_rows(area.height) > 0 {
@@ -1294,5 +1495,154 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             RESUME_LABEL,
             style,
         );
+    }
+}
+
+/// Draws the collapsed sidebar in `area`: the expand chip, one entry per terminal (its mark and
+/// its number) with a rule between spaces, and the `+` chip. The background and the separator
+/// are drawn.
+fn draw_collapsed(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+    let Some(view) = app.mirror.view() else {
+        return;
+    };
+    let base = base_style(theme);
+    let w = area.width;
+    let fg = |c| Style::new().fg(color(c));
+    let hover_bg = color(theme.hover);
+    let chip_style = |hover| {
+        if app.hover == Some(hover) {
+            base.bg(hover_bg).fg(color(theme.sidebar_fg))
+        } else {
+            base.fg(color(theme.muted))
+        }
+    };
+    let corner = corner_span(true);
+    let style = chip_style(Hover::ExpandSidebar);
+    buf.set_style(
+        Rect::new(area.x + corner.start, area.y, corner.end - corner.start, 1),
+        style,
+    );
+    draw_chip(
+        app,
+        buf,
+        (area.x + corner.start, area.y),
+        0,
+        Icon::ExpandSidebar,
+        "",
+        style,
+    );
+
+    let rows = app.preview_rows();
+    let height = usize::from(
+        area.height
+            .saturating_sub(HEADER_ROWS + bar_rows(area.height)),
+    );
+    let menu_row = app.context.as_ref().and_then(|menu| menu.row());
+    let selected = if app.sidebar_focus {
+        app.selection
+    } else {
+        None
+    };
+    // The number of the first shown entry: the entries before it, plus one.
+    let mut number = rows
+        .iter()
+        .take(app.sidebar_offset)
+        .filter(|r| matches!(r, Row::Terminal(..)))
+        .count();
+    for (line, row) in rows
+        .iter()
+        .skip(app.sidebar_offset)
+        .take(height)
+        .enumerate()
+    {
+        let y = area.y + HEADER_ROWS + u16::try_from(line).unwrap_or(0);
+        let put = |buf: &mut Buffer, x: u16, text: &str, style: Style| {
+            buf.set_stringn(area.x + x, y, text, usize::from(w.saturating_sub(x)), style);
+        };
+        let Row::Terminal(_, panel, id) = *row else {
+            if *row == Row::Rule {
+                put(
+                    buf,
+                    1,
+                    &"─".repeat(usize::from(w.saturating_sub(2))),
+                    base.fg(color(theme.muted)),
+                );
+            }
+            continue;
+        };
+        number += 1;
+        let Some((_, p)) = app.mirror.find_panel(panel) else {
+            continue;
+        };
+        let Some(t) = p.terminals.iter().find(|t| t.id == id) else {
+            continue;
+        };
+        let focused = view.active_panel == Some(panel) && p.focused_terminal == Some(id);
+        let sel = row.sel();
+        let band = (sel.is_some() && sel == selected) || (focused && !app.sidebar_focus);
+        let hovered = !band && (app.hover == sel.map(Hover::Row) || menu_row == sel);
+        let mut row_style = base;
+        if band {
+            row_style = selection(theme, row_style);
+            buf.set_style(Rect::new(area.x, y, w, 1), row_style);
+        } else if hovered {
+            row_style = row_style.bg(hover_bg);
+            buf.set_style(Rect::new(area.x, y, w, 1), row_style);
+        }
+        // The accent and muted patches must not replace a custom selection colour.
+        let keep = |style: Style| {
+            let none = Default::default();
+            if band && theme.selection_fg != none {
+                style.fg(color(theme.selection_fg))
+            } else if band && theme.selection_bg == none {
+                style.fg(color(theme.sidebar_fg))
+            } else {
+                style
+            }
+        };
+        let muted = if hovered {
+            fg(theme.sidebar_fg)
+        } else {
+            fg(theme.muted)
+        };
+        let exited = t.exit_status.is_some();
+        let bold = |style: Style| {
+            if p.unseen {
+                style.add_modifier(Modifier::BOLD)
+            } else {
+                style
+            }
+        };
+        let mut style = panel_style(theme, base, band, focused);
+        if hovered {
+            style = style.bg(hover_bg);
+        }
+        if exited {
+            style = keep(row_style.patch(muted));
+        }
+        let style = bold(style);
+        let (text, mark_style) = match agent::status_icon(terminal_status(t), theme) {
+            Some((icon, glyph_style)) if !exited => {
+                let glyph_style = if hovered && glyph_style.fg == Some(color(theme.muted)) {
+                    fg(theme.sidebar_fg)
+                } else {
+                    glyph_style
+                };
+                icon_slot(app, icon, bold(keep(row_style.patch(glyph_style))))
+            }
+            _ => icon_slot(app, Icon::Kind(terminal_icon_kind(t)), style),
+        };
+        put(buf, ICON_X, &text, mark_style);
+        put(buf, NUMBER_X, &number.to_string(), style);
+    }
+    if bar_rows(area.height) > 0 {
+        let y = area.y + area.height - 1;
+        let style = chip_style(Hover::New);
+        let span = new_span(w, true);
+        buf.set_style(
+            Rect::new(area.x + span.start, y, span.end - span.start, 1),
+            style,
+        );
+        draw_chip(app, buf, (area.x + span.start, y), 0, Icon::New, "", style);
     }
 }

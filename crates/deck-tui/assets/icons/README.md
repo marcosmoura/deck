@@ -50,28 +50,30 @@ endorsed by, any of them.
 
 ## Sources
 
-| File        | Hugeicons name                |
-| ----------- | ----------------------------- |
-| `claude`    | `Claude`                      |
-| `openai`    | `ChatGpt` (OpenAI's mark)     |
-| `terminal`  | `ComputerTerminal01`          |
-| `editor`    | `PencilEdit02`                |
-| `git`       | `GitBranch`                   |
-| `monitor`   | `DashboardSpeed02`            |
-| `remote`    | `ArrowDataTransferHorizontal` |
-| `build`     | `Wrench01`                    |
-| `pager`     | `BookOpen01`                  |
-| `repl`      | `CodeSquare`                  |
-| `expanded`  | `ArrowDown01`                 |
-| `collapsed` | `ArrowRight01`                |
-| `spinner`   | `LoaderCircle`                |
-| `waiting`   | `AlertCircle`                 |
-| `idle`      | `CheckmarkCircle02`           |
-| `quiet`     | `Circle`                      |
-| `unseen`    | `Circle`, with a `fill`       |
-| `new`       | `PlusSign`                    |
-| `resume`    | `RotateClockwise`             |
-| `opencode`  | none: the file above          |
+| File               | Hugeicons name                |
+| ------------------ | ----------------------------- |
+| `claude`           | `Claude`                      |
+| `openai`           | `ChatGpt` (OpenAI's mark)     |
+| `terminal`         | `ComputerTerminal01`          |
+| `editor`           | `PencilEdit02`                |
+| `git`              | `GitBranch`                   |
+| `monitor`          | `DashboardSpeed02`            |
+| `remote`           | `ArrowDataTransferHorizontal` |
+| `build`            | `Wrench01`                    |
+| `pager`            | `BookOpen01`                  |
+| `repl`             | `CodeSquare`                  |
+| `expanded`         | `ArrowDown01`                 |
+| `collapsed`        | `ArrowRight01`                |
+| `spinner`          | `LoaderCircle`                |
+| `waiting`          | `AlertCircle`                 |
+| `idle`             | `CheckmarkCircle02`           |
+| `quiet`            | `Circle`                      |
+| `unseen`           | `Circle`, with a `fill`       |
+| `new`              | `PlusSign`                    |
+| `resume`           | `RotateClockwise`             |
+| `collapse_sidebar` | `ArrowLeftDouble`             |
+| `expand_sidebar`   | `ArrowRightDouble`            |
+| `opencode`         | none: the file above          |
 
 Changes to the package's icons:
 
@@ -94,7 +96,7 @@ npm pack @hugeicons/core-free-icons@4.4.0 && tar xzf hugeicons-core-free-icons-4
 cd -
 python3 -I convert.py /tmp/hugeicons/package . 2
 
-for name in claude openai terminal editor git monitor remote build pager repl expanded collapsed spinner waiting idle quiet unseen new resume opencode; do
+for name in claude openai terminal editor git monitor remote build pager repl expanded collapsed spinner waiting idle quiet unseen new resume collapse_sidebar expand_sidebar opencode; do
   rsvg-convert -w 64 -h 64 --keep-aspect-ratio "$name.svg" -o "/tmp/$name.png"
   python3 -I mask.py "/tmp/$name.png" "$name.mask"
 done
@@ -119,6 +121,7 @@ ICONS = {
     "collapsed": "ArrowRight01", "spinner": "LoaderCircle", "waiting": "AlertCircle",
     "idle": "CheckmarkCircle02", "quiet": "Circle", "unseen": "Circle",
     "new": "PlusSign", "resume": "RotateClockwise",
+    "collapse_sidebar": "ArrowLeftDouble", "expand_sidebar": "ArrowRightDouble",
 }
 ATTR = {"strokeLinecap": "stroke-linecap", "strokeLinejoin": "stroke-linejoin",
         "strokeWidth": "stroke-width", "fillRule": "fill-rule", "clipRule": "clip-rule"}

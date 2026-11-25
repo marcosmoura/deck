@@ -62,6 +62,8 @@ mod sidebar;
 #[cfg(test)]
 mod sidebar_bar_tests;
 #[cfg(test)]
+mod sidebar_collapsed_tests;
+#[cfg(test)]
 mod sidebar_drag_tests;
 #[cfg(test)]
 mod sidebar_reorder_tests;

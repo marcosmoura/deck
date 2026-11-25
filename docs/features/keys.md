@@ -71,6 +71,7 @@ Pressed after the prefix.
 | `rename_space`       | `.`         | Rename the active space                                                                             |
 | `close_space`        | `Q`         | Close the active space, after a confirmation                                                        |
 | `toggle_sidebar`     | `b`         | Show or hide the sidebar                                                                            |
+| `collapse_sidebar`   | unbound     | Collapse or expand the sidebar ([collapsed sidebar](sidebar.md#collapsed-sidebar))                  |
 | `focus_sidebar`      | `Tab`       | Move the keyboard into the sidebar                                                                  |
 | `next_attention`     | `a`         | Jump to the next agent that needs you ([agents](agents.md#attention))                               |
 | `help`               | `?`         | Show the help overlay                                                                               |
@@ -171,6 +172,7 @@ In `config.toml` (`~/.config/deck/config.toml`, or `$DECK_HOME/config.toml`), ev
 prefix = "M-Space"
 sidebar = true
 sidebar_width = 28
+sidebar_collapsed = false
 
 [keys]
 detach = "d" # one key

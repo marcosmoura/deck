@@ -373,10 +373,10 @@ fn images_are_sent_once_before_the_frame_and_follow_a_reload() {
     let mut out = Vec::new();
     a.send_images(&mut out).unwrap();
     // Claude in its colour (both rows), then in `sidebar_fg` the editor, Codex and git, the
-    // waiting and idle marks and the caret, and the two bar chips in `muted`: nine pairs, none twice, and the 60 frames of the
-    // loader in its one colour.
+    // waiting and idle marks and the caret, and the two bar chips and the collapse chip in
+    // `muted`: ten pairs, none twice, and the 60 frames of the loader in its one colour.
     let first = a.images.as_ref().unwrap().order.len();
-    assert_eq!(first, 9 + 60);
+    assert_eq!(first, 10 + 60);
     assert!(out.starts_with(b"\x1b_Ga=T,U=1,f=32,s=64,v=64,c=2,r=1,i=14598145,q=2,m=1;"));
     let len = out.len();
     for _ in 0..3 {
@@ -571,13 +571,13 @@ fn a_frame_sends_its_new_images_before_its_cells_and_then_draws_once() {
     assert!(sent < cell);
     // The glyph was never shown first.
     assert!(!first.contains('\u{f040}'), "the editor glyph was drawn");
-    assert_eq!(a.images.as_ref().unwrap().order.len(), 9 + 60);
+    assert_eq!(a.images.as_ref().unwrap().order.len(), 10 + 60);
     // The same state again: nothing is sent.
     let len = sink.0.borrow().len();
     a.draw_frame(&mut t).unwrap();
     let again = String::from_utf8_lossy(&sink.0.borrow()[len..]).into_owned();
     assert!(!again.contains("\x1b_G"));
-    assert_eq!(a.images.as_ref().unwrap().order.len(), 9 + 60);
+    assert_eq!(a.images.as_ref().unwrap().order.len(), 10 + 60);
 }
 
 #[test]

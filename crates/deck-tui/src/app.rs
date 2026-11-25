@@ -152,6 +152,8 @@ pub struct App {
     pub(crate) drag: Option<Drag>,
     /// The user hid the sidebar (it also hides when the window is narrow).
     pub sidebar_hidden: bool,
+    /// The sidebar is collapsed to its narrow strip: client state, like `sidebar_hidden`.
+    pub sidebar_collapsed: bool,
     /// The sidebar's width: client state, set by a drag and by a config that changes it.
     pub sidebar_width: u16,
     /// The sidebar's separator being dragged with the mouse.
@@ -258,6 +260,7 @@ impl App {
             resize_until: None,
             drag: None,
             sidebar_hidden: !config.sidebar,
+            sidebar_collapsed: config.sidebar_collapsed,
             sidebar_width: layout::clamp_sidebar_width(size.0, config.sidebar_width),
             sidebar_drag: None,
             row_press: None,
@@ -299,12 +302,12 @@ impl App {
 
     /// Columns the sidebar and its separator take.
     pub fn sidebar_cols(&self) -> u16 {
-        layout::sidebar_cols(self.size.0, self.sidebar_width, !self.sidebar_hidden)
+        layout::sidebar_cols(self.size.0, self.side_width(), !self.sidebar_hidden)
     }
 
     /// The panel area, in columns and rows: what the daemon sizes terminals for.
     pub fn viewport(&self) -> (u16, u16) {
-        layout::panel_area(self.size, self.sidebar_width, !self.sidebar_hidden)
+        layout::panel_area(self.size, self.side_width(), !self.sidebar_hidden)
     }
 
     /// Takes in the daemon's config, changing only what differs from the one in force (a
@@ -329,11 +332,26 @@ impl App {
             self.sidebar_hidden = !new.sidebar;
             sized = true;
         }
+        let collapsed =
+            (new.sidebar_collapsed != old.sidebar_collapsed).then_some(new.sidebar_collapsed);
         if new.sidebar_width != old.sidebar_width {
             self.sidebar_width = layout::clamp_sidebar_width(self.size.0, new.sidebar_width);
             sized = true;
         }
-        if new.sidebar_space_gap != old.sidebar_space_gap {
+        if let Some(collapsed) = collapsed {
+            // Where only the collapsed strip fits, a reload cannot expand it (as the chip and
+            // the action cannot).
+            let full_fits = layout::sidebar_cols(self.size.0, self.sidebar_width, true) > 0;
+            let strip_fits =
+                layout::sidebar_cols(self.size.0, layout::COLLAPSED_SIDEBAR_WIDTH, true) > 0;
+            if !collapsed && !full_fits && strip_fits {
+                self.set_flash("window too narrow to expand".into(), Instant::now(), false);
+            } else {
+                self.set_sidebar_collapsed(collapsed);
+                sized = true;
+            }
+        }
+        if self.config.sidebar_space_gap != old.sidebar_space_gap {
             self.ensure_visible();
             self.refresh_hover();
         }
@@ -736,6 +754,9 @@ impl App {
                     self.hover = None;
                     match chip_down {
                         Some(Hover::Restore) => return self.open_restore(now),
+                        Some(Hover::CollapseSidebar | Hover::ExpandSidebar) => {
+                            return self.toggle_sidebar_collapsed(now);
+                        }
                         Some(Hover::New) => match self.new_target() {
                             Some(project) => self.open_new_menu(project),
                             None => self.set_flash(NO_PROJECT_FOR_NEW.into(), now, false),
@@ -1427,6 +1448,7 @@ impl App {
                 }
                 vec![self.viewport_msg()]
             }
+            Action::CollapseSidebar => self.toggle_sidebar_collapsed(now),
             Action::FocusSidebar => {
                 if self.sidebar_visible() {
                     self.enter_sidebar()
@@ -1688,7 +1710,11 @@ impl App {
                 // (a width dragged before a switch, a sidebar hidden with the prefix).
                 let mut outs = Vec::new();
                 if std::mem::take(&mut self.check_viewport) && !too_small(self.size) {
-                    let width = layout::clamp_sidebar_width(self.size.0, self.config.sidebar_width);
+                    let width = if self.config.sidebar_collapsed {
+                        layout::COLLAPSED_SIDEBAR_WIDTH
+                    } else {
+                        layout::clamp_sidebar_width(self.size.0, self.config.sidebar_width)
+                    };
                     let shown = self.config.sidebar;
                     if self.viewport() != layout::panel_area(self.size, width, shown) {
                         outs.push(self.viewport_msg());

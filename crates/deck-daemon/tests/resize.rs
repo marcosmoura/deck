@@ -13,6 +13,7 @@ use deck_core::action::{Action, ActionError};
 use deck_core::layout::{self, Ratios, Rect};
 use deck_core::model::{PanelId, PanelView, TerminalId};
 use deck_core::protocol::ClientMsg;
+use deck_daemon::Options;
 use support::{Attach, Client, TestDaemon};
 
 async fn attach(daemon: &TestDaemon, cols: u16, rows: u16) -> Client {
@@ -257,5 +258,22 @@ async fn a_narrow_window_gets_a_clamped_copy_and_the_exact_sizes_return() {
     assert_eq!(panel(&c).ratios, lopsided);
     assert_eq!(expected(&c, (200, 24)), wide);
     assert_sizes(&mut c, (200, 24), "C").await;
+    daemon.stop().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_collapsed_sidebar_sizes_the_attach_viewport_with_the_narrow_strip() {
+    let config = deck_core::config::Config {
+        sidebar: true,
+        sidebar_collapsed: true,
+        ..support::config()
+    };
+    let daemon = TestDaemon::start_with(config, Options::default()).await;
+    let c = attach(&daemon, 100, 24).await;
+    let strip = layout::COLLAPSED_SIDEBAR_WIDTH + 1;
+    assert_eq!(
+        c.view.as_ref().unwrap().layout_viewport,
+        Some((100 - strip, 24))
+    );
     daemon.stop().await.unwrap();
 }
