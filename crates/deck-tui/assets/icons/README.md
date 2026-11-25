@@ -64,7 +64,7 @@ endorsed by, any of them.
 | `repl`             | `CodeSquare`                  |
 | `expanded`         | `ArrowDown01`                 |
 | `collapsed`        | `ArrowRight01`                |
-| `spinner`          | `LoaderCircle`                |
+| `spinner`          | `Loader`, with opacities      |
 | `waiting`          | `AlertCircle`                 |
 | `idle`             | `CheckmarkCircle02`           |
 | `quiet`            | `Circle`                      |
@@ -78,6 +78,9 @@ endorsed by, any of them.
 Changes to the package's icons:
 
 - `unseen` is `Circle` with `fill="currentColor"` added: the free set is stroke only.
+- `spinner` is `Loader` (eight spokes) with an `opacity` on each spoke: 1 at the top, then
+  fading counter-clockwise down to 0.2. The eight spokes are alike, so turning the plain icon
+  shows no motion; with the fade, each 45 degree step moves the bright spoke on by one.
 - The stroke width is 2, not the 1.5 of the package: at the 16 to 20 pixels an icon takes in a
   terminal cell pair, 1.5 units are about one device pixel and `git`, the checkmarks and the
   carets come out faint; 2 reads clearly. The masks keep only the alpha channel, so the SVGs'
@@ -118,18 +121,21 @@ ICONS = {
     "claude": "Claude", "openai": "ChatGpt", "terminal": "ComputerTerminal01", "editor": "PencilEdit02",
     "git": "GitBranch", "monitor": "DashboardSpeed02", "remote": "ArrowDataTransferHorizontal",
     "build": "Wrench01", "pager": "BookOpen01", "repl": "CodeSquare", "expanded": "ArrowDown01",
-    "collapsed": "ArrowRight01", "spinner": "LoaderCircle", "waiting": "AlertCircle",
+    "collapsed": "ArrowRight01", "spinner": "Loader", "waiting": "AlertCircle",
     "idle": "CheckmarkCircle02", "quiet": "Circle", "unseen": "Circle",
     "new": "PlusSign", "resume": "RotateClockwise",
     "collapse_sidebar": "ArrowLeftDouble", "expand_sidebar": "ArrowRightDouble",
 }
+# The spinner's spokes in the order of the package's file (top, bottom, right, left, upper
+# right, lower left, lower right, upper left).
+SPOKES = ["1", "0.4", "0.25", "0.65", "0.2", "0.5", "0.3", "0.8"]
 ATTR = {"strokeLinecap": "stroke-linecap", "strokeLinejoin": "stroke-linejoin",
         "strokeWidth": "stroke-width", "fillRule": "fill-rule", "clipRule": "clip-rule"}
 package, out, width = sys.argv[1:4]
 for file, name in ICONS.items():
     src = open(f"{package}/dist/esm/{name}Icon.js").read()
     shapes = []
-    for tag, attrs in re.findall(r'\["(\w+)", \{(.*?)\}\]', src):
+    for n, (tag, attrs) in enumerate(re.findall(r'\["(\w+)", \{(.*?)\}\]', src)):
         parts = []
         for key, value in re.findall(r'(\w+): "([^"]*)"', attrs):
             if key == "key":
@@ -139,6 +145,8 @@ for file, name in ICONS.items():
             parts.append(f'{ATTR.get(key, key)}="{value}"')
         if file == "unseen":
             parts.append('fill="currentColor"')
+        if file == "spinner":
+            parts.append(f'opacity="{SPOKES[n]}"')
         shapes.append(f"  <{tag} {' '.join(parts)}/>")
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="1 1 22 22" '
            'fill="none">\n' + "\n".join(shapes) + "\n</svg>\n")

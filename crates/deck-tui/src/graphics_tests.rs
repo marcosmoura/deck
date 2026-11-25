@@ -374,9 +374,9 @@ fn images_are_sent_once_before_the_frame_and_follow_a_reload() {
     a.send_images(&mut out).unwrap();
     // Claude in its colour (both rows), then in `sidebar_fg` the editor, Codex and git, the
     // waiting and idle marks and the caret, and the two bar chips and the collapse chip in
-    // `muted`: ten pairs, none twice, and the 60 frames of the loader in its one colour.
+    // `muted`: ten pairs, none twice, and the 8 frames of the loader in its one colour.
     let first = a.images.as_ref().unwrap().order.len();
-    assert_eq!(first, 10 + 60);
+    assert_eq!(first, 10 + 8);
     assert!(out.starts_with(b"\x1b_Ga=T,U=1,f=32,s=64,v=64,c=2,r=1,i=14598145,q=2,m=1;"));
     let len = out.len();
     for _ in 0..3 {
@@ -571,13 +571,13 @@ fn a_frame_sends_its_new_images_before_its_cells_and_then_draws_once() {
     assert!(sent < cell);
     // The glyph was never shown first.
     assert!(!first.contains('\u{f040}'), "the editor glyph was drawn");
-    assert_eq!(a.images.as_ref().unwrap().order.len(), 10 + 60);
+    assert_eq!(a.images.as_ref().unwrap().order.len(), 10 + 8);
     // The same state again: nothing is sent.
     let len = sink.0.borrow().len();
     a.draw_frame(&mut t).unwrap();
     let again = String::from_utf8_lossy(&sink.0.borrow()[len..]).into_owned();
     assert!(!again.contains("\x1b_G"));
-    assert_eq!(a.images.as_ref().unwrap().order.len(), 10 + 60);
+    assert_eq!(a.images.as_ref().unwrap().order.len(), 10 + 8);
 }
 
 #[test]
@@ -597,16 +597,16 @@ fn a_frame_is_one_synchronized_update() {
 }
 
 #[test]
-fn spinner_frames_are_the_mask_turned_by_six_degrees_each() {
+fn spinner_frames_are_the_mask_turned_by_45_degrees_each() {
     use crate::graphics::{SPINNER_FRAMES, spinner_frame};
     let source = mask(Icon::Spinner).unwrap();
     assert_eq!(&spinner_frame(0), source);
-    // A quarter turn clockwise: the pixel at (x, y) comes from (y, 63 - x).
-    let quarter = spinner_frame(15);
+    // A half turn: the pixel at (x, y) comes from (63 - x, 63 - y).
+    let half = spinner_frame(4);
     for y in 0..64usize {
         for x in 0..64usize {
-            let want = i32::from(source[(63 - x) * 64 + y]);
-            let got = i32::from(quarter[y * 64 + x]);
+            let want = i32::from(source[(63 - y) * 64 + (63 - x)]);
+            let got = i32::from(half[y * 64 + x]);
             assert!((want - got).abs() <= 2, "({x}, {y}): {got} vs {want}");
         }
     }
@@ -645,12 +645,13 @@ fn the_frame_comes_from_the_clock() {
         a.spin_frame
     };
     assert_eq!(at(&mut a, Duration::ZERO), 0);
-    assert_eq!(at(&mut a, Duration::from_micros(16_700)), 1);
+    assert_eq!(at(&mut a, Duration::from_millis(124)), 0);
+    assert_eq!(at(&mut a, Duration::from_millis(125)), 1);
     assert_eq!(at(&mut a, Duration::from_secs(1)), 0);
-    assert_eq!(at(&mut a, Duration::from_millis(1500)), 30);
+    assert_eq!(at(&mut a, Duration::from_millis(1500)), 4);
     // A late tick shows the frame for its time: no frame is owed.
-    assert_eq!(at(&mut a, Duration::from_millis(500)), 30);
-    assert_eq!(at(&mut a, Duration::from_millis(2_000 + 100)), 6);
+    assert_eq!(at(&mut a, Duration::from_millis(500)), 4);
+    assert_eq!(at(&mut a, Duration::from_millis(2_000 + 125)), 1);
 }
 
 #[test]
@@ -682,17 +683,17 @@ fn every_spinner_shows_the_same_frame() {
 }
 
 #[test]
-fn the_timer_runs_at_60_hz_only_in_the_image_tier() {
+fn the_timer_follows_the_clock_at_8_hz_in_the_image_tier() {
     use std::time::Duration;
-    let third = Duration::from_nanos(1_000_000_000 / 60 + 1);
+    let step = Duration::from_nanos(1_000_000_000 / 8 + 1);
     let a = spinning();
     let d = a.wake_deadline().expect("a deadline");
     let now = std::time::Instant::now();
-    assert!(d <= now + third, "{:?}", d.saturating_duration_since(now));
-    // On a boundary of 1/60 s since the start.
+    assert!(d <= now + step, "{:?}", d.saturating_duration_since(now));
+    // On a boundary of 1/8 s since the start.
     let nanos = d.duration_since(a.started).as_nanos();
-    let rest = (nanos * 60) % 1_000_000_000;
-    assert!(rest < 60, "{rest}");
+    let rest = (nanos * 8) % 1_000_000_000;
+    assert!(rest < 8, "{rest}");
     // The other tiers keep 100 ms.
     for tier in [Tier::Nerd, Tier::Unicode] {
         let mut a = spinning();
@@ -718,11 +719,11 @@ fn the_deadline_moves_on_from_a_late_tick_without_drifting() {
     use std::time::Duration;
     let mut a = spinning();
     a.spin_at = Some(a.started);
-    let late = a.started + Duration::from_millis(100);
+    let late = a.started + Duration::from_millis(700);
     a.tick(late);
     let d = a.wake_deadline().expect("next");
-    assert!(d > late && d <= late + Duration::from_millis(17));
-    assert_eq!(a.spin_frame, 6);
+    assert_eq!(d, a.started + Duration::from_millis(750));
+    assert_eq!(a.spin_frame, 5);
 }
 
 #[test]
@@ -741,7 +742,7 @@ fn all_frames_of_a_colour_go_out_before_the_first_is_drawn_and_never_again() {
         .filter(|(_, p)| p.icon == Icon::Spinner)
         .map(|(id, _)| *id)
         .collect();
-    assert_eq!(spinner_ids.len(), 60);
+    assert_eq!(spinner_ids.len(), 8);
     let first_cell = out.find('\u{10EEEE}').unwrap();
     for id in &spinner_ids {
         let at = out
@@ -751,11 +752,11 @@ fn all_frames_of_a_colour_go_out_before_the_first_is_drawn_and_never_again() {
     }
     // A later frame of the loader sends nothing.
     let len = sink.0.borrow().len();
-    a.spin_frame = 31;
+    a.spin_frame = 7;
     a.draw_frame(&mut t).unwrap();
     let again = String::from_utf8_lossy(&sink.0.borrow()[len..]).into_owned();
     assert!(!again.contains("\x1b_G"));
-    // A second colour sends its own 60, once.
+    // A second colour sends its own 8, once.
     reload(
         &mut a,
         "[theme]\nsidebar_fg = \"#ff0000\"\nsidebar_bg = \"#00ff00\"",
@@ -771,8 +772,8 @@ fn all_frames_of_a_colour_go_out_before_the_first_is_drawn_and_never_again() {
         .iter()
         .filter(|(_, p)| p.icon == Icon::Spinner)
         .count();
-    assert_eq!(sent_after, 120);
-    assert!(more.matches("a=T").count() >= 60);
+    assert_eq!(sent_after, 16);
+    assert!(more.matches("a=T").count() >= 8);
     // Exit deletes them all.
     let mut gone = Vec::new();
     a.delete_images(&mut gone).unwrap();
@@ -810,7 +811,7 @@ fn two_draws_one_frame_apart_differ_only_in_the_spinner_cells() {
 }
 
 #[test]
-fn the_glyph_fallback_of_the_loader_steps_every_100_ms_in_the_image_tier() {
+fn the_glyph_fallback_of_the_loader_steps_with_the_frame_in_the_image_tier() {
     let mut a = app_with("", titled());
     a.tier = Tier::Image;
     a.truecolor = true;
@@ -819,8 +820,7 @@ fn the_glyph_fallback_of_the_loader_steps_every_100_ms_in_the_image_tier() {
         render(a).0[(25, 3)].symbol().to_string()
     };
     let first = glyph(&mut a, 0);
-    assert_eq!(glyph(&mut a, 5), first);
-    assert_ne!(glyph(&mut a, 6), first);
+    assert_ne!(glyph(&mut a, 1), first);
 }
 
 #[test]

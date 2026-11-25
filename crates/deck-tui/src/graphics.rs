@@ -129,14 +129,15 @@ pub fn has_image(icon: Icon) -> bool {
     !matches!(icon, Icon::DropTarget)
 }
 
-/// How many frames one revolution of the loader has: one per degree step of 6.
-pub const SPINNER_FRAMES: usize = 60;
+/// How many frames one revolution of the loader has: one per spoke, a step of 45 degrees. A
+/// revolution takes a second, so the loader redraws 8 times a second.
+pub const SPINNER_FRAMES: usize = 8;
 
 /// The centre of a mask, in pixel coordinates.
 const CENTRE: f32 = (SIDE as f32 - 1.0) / 2.0;
 
-/// The `spinner` mask turned clockwise by `6 * k` degrees around its centre, sampled bilinearly,
-/// pixels outside the source transparent. `k` wraps at 60. Computed once and cached.
+/// The `spinner` mask turned clockwise by `45 * k` degrees around its centre, sampled bilinearly,
+/// pixels outside the source transparent. `k` wraps at 8. Computed once and cached.
 pub fn spinner_frame(k: usize) -> [u8; MASK_LEN] {
     static FRAMES: OnceLock<Vec<[u8; MASK_LEN]>> = OnceLock::new();
     let frames = FRAMES.get_or_init(|| {
@@ -149,7 +150,7 @@ pub fn spinner_frame(k: usize) -> [u8; MASK_LEN] {
         .unwrap_or([0; MASK_LEN])
 }
 
-/// Frame `k` of the loader: `source` turned clockwise by `6 * k` degrees.
+/// Frame `k` of the loader: `source` turned clockwise by `45 * k` degrees.
 fn rotate(source: &[u8; MASK_LEN], k: usize) -> [u8; MASK_LEN] {
     let angle = (k * 360 / SPINNER_FRAMES) as f32 * std::f32::consts::PI / 180.0;
     let (sin, cos) = angle.sin_cos();
@@ -190,7 +191,7 @@ fn rotate(source: &[u8; MASK_LEN], k: usize) -> [u8; MASK_LEN] {
 pub struct Pair {
     pub icon: Icon,
     pub rgb: Rgb,
-    /// The loader's frame (0..60); 0 for every other icon.
+    /// The loader's frame (0..8); 0 for every other icon.
     pub frame: u8,
 }
 
@@ -464,7 +465,7 @@ impl App {
         let mut fresh = false;
         for pair in pairs {
             if pair.icon == Icon::Spinner {
-                // All 60 frames of a colour go out together, before the first one is drawn.
+                // All 8 frames of a colour go out together, before the first one is drawn.
                 for frame in 0..SPINNER_FRAMES {
                     let frame = Pair {
                         frame: u8::try_from(frame).unwrap_or(0),

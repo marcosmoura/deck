@@ -188,7 +188,7 @@ pub struct App {
     pub(crate) spin_at: Option<Instant>,
     /// When the client started: the loader's frame is picked from the time since.
     pub(crate) started: Instant,
-    /// The loader image's frame (0..60) as of the last tick; every spinner shows it.
+    /// The loader image's frame (0..8) as of the last tick; every spinner shows it.
     pub(crate) spin_frame: u8,
     /// The outer terminal has focus, as far as its focus events told.
     focused: bool,
@@ -550,14 +550,14 @@ impl App {
         }
     }
 
-    /// The loader image's frame at `now`: `floor(elapsed * 60) mod 60`.
+    /// The loader image's frame at `now`: `floor(elapsed * 8) mod 8`.
     fn frame_at(&self, now: Instant) -> u8 {
         let elapsed = now.saturating_duration_since(self.started).as_nanos();
         let frame = elapsed * SPINNER_FRAMES as u128 / 1_000_000_000 % SPINNER_FRAMES as u128;
         u8::try_from(frame).unwrap_or(0)
     }
 
-    /// The next 1/60 s boundary of the time since the start, after `now`.
+    /// The next 1/8 s boundary of the time since the start, after `now`.
     fn next_frame_at(&self, now: Instant) -> Instant {
         let frames = SPINNER_FRAMES as u128;
         let elapsed = now.saturating_duration_since(self.started).as_nanos();

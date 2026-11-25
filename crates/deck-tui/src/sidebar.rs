@@ -1056,9 +1056,9 @@ pub fn icon_slot(app: &App, icon: Icon, style: Style) -> (String, Style) {
     match image {
         Some(cell) => (placeholder(), cell),
         None => {
-            // `spin` steps at 60 Hz in the image tier: its glyph frame follows the clock at 100 ms.
+            // In the image tier the glyph frame follows the clock, like the image's.
             let frame = if app.tier == Tier::Image {
-                usize::from(app.spin_frame) / 6
+                usize::from(app.spin_frame)
             } else {
                 app.spin
             };

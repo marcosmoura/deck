@@ -9,7 +9,7 @@ A terminal that runs an agent has an agent state: its kind, a status and a sourc
 | Status    | Glyph | Meaning                                                                               |
 | --------- | ----- | ------------------------------------------------------------------------------------- |
 | `waiting` | `!`   | The agent needs you (warning colour, bold).                                           |
-| `working` | `⠋`…  | The agent works: a spinner (glyph tiers: one frame every 100 ms; images: 60 fps).     |
+| `working` | `⠋`…  | The agent works: a spinner (glyph tiers: one frame every 100 ms; images: 8 fps).      |
 | `active`  | `⠋`…  | Found by its process, and it printed in the last 2 s (accent colour, like `working`). |
 | `idle`    | `●`   | The agent is done and waits for a prompt.                                             |
 | `quiet`   | `○`   | Found by its process, and it printed nothing for 2 s.                                 |
@@ -17,7 +17,7 @@ A terminal that runs an agent has an agent state: its kind, a status and a sourc
 
 Urgency, most to least: `waiting`, `working`, `active`, `idle`, `quiet`, none. The sidebar shows, in the status slot at the right end of a panel row, the icon of the panel's most urgent terminal, in a two-cell slot (the glyph, then a blank cell). The icons are fixed (see [config](config.md#icons)); the spinner has 10 frames in Unicode and 6 in Nerd Font glyphs, one frame every 100 ms in either, and the colours come from the theme: the spinner `accent`, `waiting` `warning` and bold, `idle` `ok`, `quiet` `muted`.
 
-A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<status slot> <kind> · <name>` in place of the number (`╭─ ⠹  claude · Fix login bug ──╮`, the slot two cells wide). There is no status icon without an agent. In Ghostty and kitty the spinner is Hugeicons' `LoaderCircle` turning once a second at 60 frames per second (the same frame on every spinner); in other terminals it keeps its glyph frames. The client redraws the spinner only while one spins.
+A panel with an agent is named after it in the sidebar: the agent's title without its spinner, else the first line of its first prompt (see [sidebar](sidebar.md#the-sidebar)). A grid border title for an agent terminal reads `<status slot> <kind> · <name>` in place of the number (`╭─ ⠹  claude · Fix login bug ──╮`, the slot two cells wide). There is no status icon without an agent. In Ghostty and kitty the spinner is Hugeicons' `Loader`, eight spokes that fade behind the brightest one, turning once a second, one spoke at a time (the same frame on every spinner); in other terminals it keeps its glyph frames. The client redraws the spinner only while one spins.
 
 ## Detection by process
 
