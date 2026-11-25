@@ -18,13 +18,13 @@ pub fn spins(status: AgentStatus) -> bool {
     matches!(status, AgentStatus::Working | AgentStatus::Active)
 }
 
-/// Whether any terminal of the session shows a spinner.
+/// Whether any terminal of the session shows a spinner: a working agent or a command.
 pub fn view_spins(view: &SessionView) -> bool {
     view.projects
         .iter()
         .flat_map(|p| &p.panels)
         .flat_map(|p| &p.terminals)
-        .any(|t| t.agent.as_ref().is_some_and(|a| spins(a.status)))
+        .any(|t| t.busy || t.agent.as_ref().is_some_and(|a| spins(a.status)))
 }
 
 /// A panel shows its most urgent terminal.
@@ -50,6 +50,31 @@ pub fn status_icon(status: AgentStatus, theme: &Theme) -> Option<(Icon, Style)> 
         AgentStatus::Idle => Some((Icon::Idle, plain(theme.ok))),
         AgentStatus::Quiet => Some((Icon::Quiet, plain(theme.muted))),
     }
+}
+
+/// The mark of a running command: the spinner, muted so a working agent stands out.
+fn busy_icon(theme: &Theme) -> (Icon, Style) {
+    (Icon::Spinner, Style::new().fg(color(theme.muted)))
+}
+
+/// What a terminal's status slot shows: its agent's status, else the muted spinner while a
+/// command runs. `None` for neither.
+pub fn terminal_icon(terminal: &TerminalView, theme: &Theme) -> Option<(Icon, Style)> {
+    match &terminal.agent {
+        Some(agent) => status_icon(agent.status, theme),
+        None if terminal.busy => Some(busy_icon(theme)),
+        None => None,
+    }
+}
+
+/// What a panel's status slot shows: its most urgent agent, except that a running command
+/// comes before an idle or quiet one.
+pub fn panel_icon(panel: &PanelView, theme: &Theme) -> Option<(Icon, Style)> {
+    let status = panel_status(panel);
+    if status.urgency() < AgentStatus::Active.urgency() && panel.terminals.iter().any(|t| t.busy) {
+        return Some(busy_icon(theme));
+    }
+    status_icon(status, theme)
 }
 
 /// What a terminal's title starts with when an agent runs in it: its status icon, style and

@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 27;
+pub const PROTOCOL_VERSION: u32 = 28;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -804,6 +804,7 @@ mod tests {
                             first_prompt: Some("fix".into()),
                             since: std::time::Duration::from_millis(1500),
                         }),
+                        busy: true,
                     }],
                 }],
             }],

@@ -336,11 +336,14 @@ impl State {
                     .map(|m| m.launch.cwd.clone())
                     .filter(|c| !c.as_os_str().is_empty());
             }
-            t.pid = sess
-                .terminals
-                .get(&t.id)
+            let handle = sess.terminals.get(&t.id);
+            t.pid = handle
                 .and_then(|h| h.pid)
                 .filter(|_| t.exit_status.is_none());
+            // An agent's own status wins over a command's.
+            t.busy = t.agent.is_none()
+                && t.exit_status.is_none()
+                && handle.is_some_and(|h| lock(&h.agent_rt).busy);
         }
         view
     }

@@ -147,8 +147,8 @@ pub struct PanelView {
     pub terminals: Vec<TerminalView>,
     pub focused_terminal: Option<TerminalId>,
     pub ratios: Ratios,
-    /// An agent in the panel needed the user or finished while nobody looked at it (filled
-    /// by the daemon).
+    /// An agent in the panel needed the user or finished, or a command in it ended, while
+    /// nobody looked at it (filled by the daemon).
     pub unseen: bool,
 }
 
@@ -166,6 +166,10 @@ pub struct TerminalView {
     pub pid: Option<u32>,
     pub keep: bool,
     pub agent: Option<AgentState>,
+    /// A command runs in the terminal and has for a second: a program other than the
+    /// terminal's own process is in the foreground, not an agent, not on the alternate screen
+    /// and not an interactive session (filled by the daemon).
+    pub busy: bool,
 }
 
 impl Terminal {
@@ -179,6 +183,7 @@ impl Terminal {
             pid: None,
             keep: self.keep,
             agent: self.agent.clone(),
+            busy: false,
         }
     }
 }

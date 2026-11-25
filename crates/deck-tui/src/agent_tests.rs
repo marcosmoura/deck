@@ -232,6 +232,42 @@ fn a_process_detected_agent_spins_in_the_accent_colour() {
     assert!(a.wake_deadline().is_some());
 }
 
+fn set_busy(view: &mut SessionView, terminal: u64) {
+    let found = view
+        .projects
+        .iter_mut()
+        .flat_map(|p| &mut p.panels)
+        .flat_map(|p| &mut p.terminals)
+        .find(|t| t.id == TerminalId(terminal))
+        .unwrap();
+    found.busy = true;
+}
+
+#[test]
+fn a_running_command_spins_in_the_muted_colour() {
+    let mut view = mockup();
+    set_busy(&mut view, 51);
+    let a = app_with(view);
+    let buf = render(&a);
+    assert_eq!(buf[(25, 5)].symbol(), "⠋");
+    assert_eq!(buf[(25, 5)].fg, color(a.theme.muted));
+    assert!(a.wake_deadline().is_some(), "the spinner's timer runs");
+}
+
+#[test]
+fn a_panel_shows_a_running_command_before_an_idle_or_quiet_agent() {
+    let theme = deck_core::theme::Theme::default();
+    let icon = |p: &deck_core::model::PanelView| agent::panel_icon(p, &theme).map(|(i, _)| i);
+    let mut p = panel(3, "mixed", 2);
+    assert_eq!(icon(&p), None);
+    p.terminals[1].busy = true;
+    assert_eq!(icon(&p), Some(deck_core::icons::Icon::Spinner));
+    p.terminals[0].agent = Some(state(AgentKind::Codex, AgentStatus::Idle));
+    assert_eq!(icon(&p), Some(deck_core::icons::Icon::Spinner));
+    p.terminals[0].agent = Some(state(AgentKind::Codex, AgentStatus::Waiting));
+    assert_eq!(icon(&p), Some(deck_core::icons::Icon::Waiting));
+}
+
 #[test]
 fn an_unseen_panel_is_bold_with_the_glyph_after_its_name() {
     let mut view = mockup();

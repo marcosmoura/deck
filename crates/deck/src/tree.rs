@@ -721,6 +721,7 @@ mod tests {
             pid: Some(100 + u32::try_from(id).unwrap()),
             keep: false,
             agent: None,
+            busy: false,
         }
     }
 

@@ -104,22 +104,34 @@ pub const TEST_LEAK_FD_VAR: &str = "DECK_TEST_LEAK_FD";
 /// How often the foreground process of every terminal is looked at.
 const AGENT_POLL: Duration = Duration::from_secs(1);
 
-/// How the daemon asks for the argv of a terminal's foreground process: the operating
-/// system, unless a test puts something else in its place.
+/// How the daemon asks for the argv of a terminal's foreground process, and whether it is
+/// the terminal's own process: the operating system, unless a test puts something else in
+/// its place.
 #[derive(Clone, Default)]
 pub struct ForegroundQuery(Option<Arc<ArgvFn>>);
 
-type ArgvFn = dyn Fn(TerminalId) -> Option<Vec<String>> + Send + Sync;
+type ArgvFn = dyn Fn(TerminalId) -> Option<(bool, Vec<String>)> + Send + Sync;
 
 impl ForegroundQuery {
+    /// A query whose process always counts as the terminal's own.
     pub fn new(query: impl Fn(TerminalId) -> Option<Vec<String>> + Send + Sync + 'static) -> Self {
+        Self(Some(Arc::new(move |id| query(id).map(|argv| (true, argv)))))
+    }
+
+    /// A query that also says whether the process is the terminal's own (`true`) or a
+    /// command it started (`false`).
+    pub fn with_owner(
+        query: impl Fn(TerminalId) -> Option<(bool, Vec<String>)> + Send + Sync + 'static,
+    ) -> Self {
         Self(Some(Arc::new(query)))
     }
 
-    pub(crate) fn ask(&self, terminal: &terminal::TermHandle) -> Option<Vec<String>> {
+    pub(crate) fn ask(&self, terminal: &terminal::TermHandle) -> Option<(bool, Vec<String>)> {
         match &self.0 {
             Some(query) => query(terminal.id),
-            None => terminal.foreground().map(|(_, argv)| argv),
+            None => terminal
+                .foreground()
+                .map(|(pid, argv)| (Some(pid) == terminal.pid, argv)),
         }
     }
 }

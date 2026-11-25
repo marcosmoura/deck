@@ -232,6 +232,7 @@ pub(crate) mod tests {
                     pid: None,
                     keep: false,
                     agent: None,
+                    busy: false,
                 })
                 .collect(),
         }
@@ -310,6 +311,7 @@ pub(crate) mod tests {
                         pid: None,
                         keep: false,
                         agent: None,
+                        busy: false,
                     }],
                 }],
             }],

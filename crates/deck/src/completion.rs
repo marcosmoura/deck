@@ -152,6 +152,7 @@ mod tests {
                         pid: None,
                         keep: false,
                         agent: None,
+                        busy: false,
                     }],
                 }],
             }],

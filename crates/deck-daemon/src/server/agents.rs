@@ -1,5 +1,6 @@
 //! The status of the coding agents in terminals: detection by the PTY's foreground process
-//! on a 1 s tick, and the hook events that sharpen it (the rules are in `crate::agents`).
+//! on a 1 s tick, and the hook events that sharpen it (the rules are in `crate::agents`). The
+//! same tick tells which terminals run a command (`busy`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +8,8 @@ use std::time::Duration;
 use deck_core::agents::{
     AgentKind, AgentResume, AgentSource, AgentState, AgentStatus, match_argv, program_name,
 };
-use deck_core::model::{SessionId, TerminalId};
+use deck_core::icons::is_interactive;
+use deck_core::model::{PanelId, SessionId, TerminalId};
 use deck_core::protocol::{Response, ServerMsg};
 
 use super::{Shared, State, terminal_model};
@@ -25,8 +27,8 @@ fn resume_of(agent: Option<&AgentState>) -> Option<AgentResume> {
 
 impl Shared {
     /// Every `every`, asks the operating system for the foreground process of each terminal
-    /// and updates its agent state. One blocking call covers all of them, off the async
-    /// workers.
+    /// and updates its agent state and whether it runs a command. One blocking call covers
+    /// all of them, off the async workers.
     pub async fn track_agents(self: Arc<Self>, every: Duration) {
         let mut ticks = tokio::time::interval(every);
         ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -56,8 +58,11 @@ impl Shared {
                 targets
                     .into_iter()
                     .map(|h| {
-                        let argv = query.ask(&h);
-                        (h, argv)
+                        let found = query.ask(&h);
+                        // Only a command's screen matters: a full-screen program is not busy.
+                        let alternate = found.as_ref().is_some_and(|(own, _)| !own)
+                            && h.with_emu(|e| e.alternate_screen()).unwrap_or(false);
+                        (h, found, alternate)
                     })
                     .collect::<Vec<_>>()
             })
@@ -82,21 +87,24 @@ impl Shared {
             let mut changed: Vec<SessionId> = Vec::new();
             let mut moved_terminals: Vec<(SessionId, TerminalId)> = Vec::new();
             let mut resume_changed = false;
-            for (h, argv) in found {
+            let mut ended: Vec<Arc<TermHandle>> = Vec::new();
+            for (h, found, alternate) in found {
                 // It may have exited during the lookup, after its exit cleared its agent.
                 if h.has_exited() {
                     continue;
                 }
-                let kind = argv.as_deref().and_then(|a| match_argv(a, &config.agents));
+                let kind = found
+                    .as_ref()
+                    .and_then(|(_, a)| match_argv(a, &config.agents));
                 let Some(sess) = st.session_mut(h.session) else {
                     continue;
                 };
                 let Some(model) = terminal_model(&mut sess.model, h.id) else {
                     continue;
                 };
-                // A process that could not be read leaves the program and the agent as
-                // they were.
-                let Some(argv) = argv else {
+                // A process that could not be read leaves the program, the agent and
+                // `busy` as they were.
+                let Some((own, argv)) = found else {
                     continue;
                 };
                 let mut moved = false;
@@ -115,6 +123,18 @@ impl Shared {
                     now,
                 );
                 resume_changed |= before != resume_of(model.agent.as_ref());
+                let running = !own && model.agent.is_none() && !alternate && !is_interactive(&argv);
+                let busy_moved = {
+                    let mut rt = lock(&h.agent_rt);
+                    let moved = agents::detect_busy(&mut rt, running, now);
+                    if moved && !rt.busy {
+                        ended.push(Arc::clone(&h));
+                    }
+                    moved
+                };
+                if busy_moved && !changed.contains(&h.session) {
+                    changed.push(h.session);
+                }
                 if moved {
                     moved_terminals.push((h.session, h.id));
                     if !changed.contains(&h.session) {
@@ -125,6 +145,10 @@ impl Shared {
             // A program or an agent that moved can rename its panel.
             for (sid, tid) in moved_terminals {
                 self.refresh_name_of(&mut st, sid, tid);
+            }
+            // A command that ended while nobody looked leaves its panel unseen.
+            for h in ended {
+                self.mark_unseen(&mut st, &h);
             }
             for sid in changed {
                 self.agents_changed(&mut st, sid);
@@ -232,26 +256,10 @@ impl Shared {
         {
             return;
         }
-        let sid = handle.session;
-        let focused = st.session_focused(sid);
-        let Some(sess) = st.session_mut(sid) else {
+        let Some((project, name)) = self.mark_unseen(st, handle) else {
             return;
         };
-        let found = sess.model.projects.iter().find_map(|project| {
-            let panel = project
-                .panels
-                .iter()
-                .find(|p| p.terminals.iter().any(|t| t.id == handle.id))?;
-            Some((project.name.clone(), panel.id, panel.name.clone()))
-        });
-        let Some((project, panel, name)) = found else {
-            return;
-        };
-        if focused && sess.model.active_panel() == Some(panel) {
-            return;
-        }
-        sess.unseen.insert(panel);
-        if let Some(client) = st.active_client(sid) {
+        if let Some(client) = st.active_client(handle.session) {
             client.queue.push_msg(ServerMsg::AgentAlert {
                 kind: after.kind,
                 status: after.status,
@@ -259,6 +267,26 @@ impl Shared {
                 panel: name,
             });
         }
+    }
+
+    /// Marks the panel of a terminal unseen, unless a focused client shows it. Returns its
+    /// project's name and its own when it marked it.
+    fn mark_unseen(&self, st: &mut State, handle: &TermHandle) -> Option<(String, String)> {
+        let focused = st.session_focused(handle.session);
+        let sess = st.session_mut(handle.session)?;
+        let (project, panel, name): (String, PanelId, String) =
+            sess.model.projects.iter().find_map(|project| {
+                let panel = project
+                    .panels
+                    .iter()
+                    .find(|p| p.terminals.iter().any(|t| t.id == handle.id))?;
+                Some((project.name.clone(), panel.id, panel.name.clone()))
+            })?;
+        if focused && sess.model.active_panel() == Some(panel) {
+            return None;
+        }
+        sess.unseen.insert(panel);
+        Some((project, name))
     }
 
     /// Runs `f` on a terminal's agent state and what the daemon remembers beside it.

@@ -226,6 +226,11 @@ impl Emu {
         self.term.set_xtversion(self.xtversion.clone());
     }
 
+    /// Whether the program shows the alternate screen (a full-screen program).
+    pub fn alternate_screen(&self) -> bool {
+        self.term.active_screen() == Ok(Screen::Alternate)
+    }
+
     pub fn size(&self) -> (u16, u16) {
         (self.term.cols().unwrap_or(0), self.term.rows().unwrap_or(0))
     }

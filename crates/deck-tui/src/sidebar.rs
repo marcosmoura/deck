@@ -2,7 +2,6 @@
 //! drawing.
 
 use deck_core::action::Action as Act;
-use deck_core::agents::AgentStatus;
 use deck_core::icons::{Icon, IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::layout::{self, COLLAPSED_SIDEBAR_WIDTH};
@@ -1008,11 +1007,6 @@ fn terminal_label(term: &TerminalView) -> String {
     .to_string()
 }
 
-/// The status of a terminal's agent.
-fn terminal_status(term: &TerminalView) -> AgentStatus {
-    AgentStatus::most_urgent(term.agent.iter().map(|a| a.status))
-}
-
 /// The style of an icon of `kind` in a row styled `style`: Claude's is always its orange. On
 /// a reversed row the colour goes in the background, which is what a reversed cell shows as
 /// text.
@@ -1364,8 +1358,9 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     style = row_style;
                 }
                 // The status slot closes the row before the margin: the panel's most urgent
-                // agent. Without one there is no slot and no room kept for it.
-                let status = agent::status_icon(agent::panel_status(p), theme);
+                // agent, or a running command. Without one there is no slot and no room kept
+                // for it.
+                let status = agent::panel_icon(p, theme);
                 let status_w = if status.is_some() { ICON_CELLS + 1 } else { 0 };
                 if let Some((icon, glyph_style)) = status {
                     // The muted `quiet` glyph turns to the sidebar text under the pointer.
@@ -1432,7 +1427,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 if dimmed {
                     style = row_style;
                 }
-                let status = agent::status_icon(terminal_status(t), theme);
+                let status = agent::terminal_icon(t, theme);
                 let status_w = if status.is_some() { ICON_CELLS + 1 } else { 0 };
                 if let Some((icon, glyph_style)) = status {
                     let glyph_style = if hovered && glyph_style.fg == Some(color(theme.muted)) {
@@ -1621,7 +1616,7 @@ fn draw_collapsed(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
             style = keep(row_style.patch(muted));
         }
         let style = bold(style);
-        let (text, mark_style) = match agent::status_icon(terminal_status(t), theme) {
+        let (text, mark_style) = match agent::terminal_icon(t, theme) {
             Some((icon, glyph_style)) if !exited => {
                 let glyph_style = if hovered && glyph_style.fg == Some(color(theme.muted)) {
                     fg(theme.sidebar_fg)

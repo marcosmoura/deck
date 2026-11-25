@@ -222,6 +222,21 @@ const PROGRAMS: [(IconKind, &[&str]); 7] = [
     ),
 ];
 
+/// Whether a foreground program is a session the user works in rather than a command that
+/// runs to its end: a remote shell, or a REPL started without a script (`python`, not
+/// `python build.py`). Such programs never make a terminal busy.
+pub fn is_interactive(argv: &[String]) -> bool {
+    let Some(program) = argv.first().and_then(|a| a.rsplit('/').next()) else {
+        return false;
+    };
+    let kind = icon_for(None, Some(program.trim_start_matches('-')));
+    match kind {
+        IconKind::Remote => true,
+        IconKind::Repl => argv.iter().skip(1).all(|a| a.starts_with('-')),
+        _ => false,
+    }
+}
+
 /// The icon of a terminal: its agent's own, else the one of its program (compared without
 /// regard to case), else the terminal icon.
 pub fn icon_for(agent: Option<AgentKind>, program: Option<&str>) -> IconKind {
@@ -244,6 +259,18 @@ pub fn icon_for(agent: Option<AgentKind>, program: Option<&str>) -> IconKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_shells_and_bare_repls_are_interactive_and_scripts_are_not() {
+        let argv = |a: &[&str]| a.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        assert!(is_interactive(&argv(&["ssh", "host"])));
+        assert!(is_interactive(&argv(&["/usr/bin/python3"])));
+        assert!(is_interactive(&argv(&["node", "--inspect"])));
+        assert!(!is_interactive(&argv(&["python3", "train.py"])));
+        assert!(!is_interactive(&argv(&["cargo", "build"])));
+        assert!(!is_interactive(&argv(&["topgrade"])));
+        assert!(!is_interactive(&[]));
+    }
 
     #[test]
     fn each_agent_has_its_own_icon() {

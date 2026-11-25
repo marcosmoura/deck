@@ -15,6 +15,8 @@ pub const GONE_GRACE: Duration = Duration::from_secs(3);
 /// A hook-sourced `working` without an event or output for this long falls back to the
 /// process-only state.
 pub const STUCK_WORKING: Duration = Duration::from_secs(60);
+/// A command makes its terminal busy once it has run this long, so a quick one never shows.
+pub const BUSY_AFTER: Duration = Duration::from_secs(1);
 
 /// What the daemon remembers about a terminal's agent besides the state itself.
 #[derive(Debug, Default)]
@@ -25,6 +27,10 @@ pub struct AgentRt {
     gone_since: Option<Duration>,
     /// Sorts the raw events of OpenCode's plugin.
     opencode: OpenCodeTracker,
+    /// Since when a command runs in the foreground.
+    running_since: Option<Duration>,
+    /// Whether the terminal counts as busy.
+    pub busy: bool,
 }
 
 /// One hook event.
@@ -195,9 +201,40 @@ pub fn answered(agent: &mut Option<AgentState>, rt: &mut AgentRt, now: Duration)
     }
 }
 
+/// One detection tick of a terminal's command: `running` is whether a command is in the
+/// foreground now. The terminal is busy once the command has run for [`BUSY_AFTER`].
+/// Returns whether `busy` changed.
+pub fn detect_busy(rt: &mut AgentRt, running: bool, now: Duration) -> bool {
+    let busy = if running {
+        let since = *rt.running_since.get_or_insert(now);
+        now.saturating_sub(since) >= BUSY_AFTER
+    } else {
+        rt.running_since = None;
+        false
+    };
+    std::mem::replace(&mut rt.busy, busy) != busy
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_command_is_busy_after_a_second_and_not_once_it_ends() {
+        let mut rt = AgentRt::default();
+        assert!(!detect_busy(&mut rt, true, secs(10)));
+        assert!(!rt.busy);
+        assert!(detect_busy(&mut rt, true, secs(11)));
+        assert!(rt.busy);
+        assert!(!detect_busy(&mut rt, true, secs(12)));
+        assert!(detect_busy(&mut rt, false, secs(13)));
+        assert!(!rt.busy);
+        // A command seen once and gone by the next tick never shows.
+        assert!(!detect_busy(&mut rt, true, secs(14)));
+        assert!(!detect_busy(&mut rt, false, secs(15)));
+        assert!(!detect_busy(&mut rt, true, secs(16)));
+        assert!(!rt.busy);
+    }
 
     const fn secs(n: u64) -> Duration {
         Duration::from_secs(n)

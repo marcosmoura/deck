@@ -74,7 +74,7 @@ The `session_id` of every payload is recorded. Other events and `notification_ty
 
 ## Attention
 
-Hook-sourced states only (a process-only `active` to `quiet` pause happens all the time and never counts). When a terminal goes from `working` to `waiting` or `idle` and nobody is looking at it, its panel is **unseen**, and the daemon sends one `ServerMsg::AgentAlert { kind, status, project, panel }`.
+Hook-sourced states only (a process-only `active` to `quiet` pause happens all the time and never counts). When a terminal goes from `working` to `waiting` or `idle` and nobody is looking at it, its panel is **unseen**, and the daemon sends one `ServerMsg::AgentAlert { kind, status, project, panel }`. A [running command](sidebar.md#running-commands) that ends while nobody is looking marks its panel unseen too, without an alert.
 
 - **Looking** means the panel is the session's active panel and a client of the session has its outer terminal focused. A client reports focus with `ClientMsg::Focus(bool)` from the outer terminal's focus events, and again on every attach once it saw one; a client that never reported counts as focused, so a terminal without focus reporting never notifies for the active panel.
 - **Unseen** panels are bold in the sidebar with the unseen marker (`•`, accent, a two-cell slot) after the name, until the panel is the active panel of a focused client. A collapsed space shows `!<n>` (warning) after its name when `n` of its panels wait.

@@ -452,3 +452,17 @@ fn a_collapsed_project_shows_how_many_of_its_panels_wait() {
     });
     h.capture("collapsed-badge");
 }
+
+#[test]
+fn a_running_command_spins_and_stops_when_it_ends() {
+    let bin = fake_agent("claude");
+    let mut h = attached(&bin);
+    assert_eq!(status_cell(&h), Some(' '));
+    // A command of the shell: a spinner once it has run for a second.
+    h.send_keys("sleep 30\r");
+    wait_status(&h, "the spinner of the command", is_spinner);
+    h.capture("command-busy");
+    // Interrupted: the shell is in the foreground again and the slot goes.
+    h.send_keys("\x03");
+    wait_status(&h, "no status", |c| c == ' ');
+}

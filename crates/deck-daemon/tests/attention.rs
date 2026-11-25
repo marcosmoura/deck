@@ -84,6 +84,11 @@ fn any_unseen(client: &Client) -> bool {
         .any(|p| p.unseen)
 }
 
+/// Takes in every message the daemon has sent so far.
+async fn drain(client: &mut Client) {
+    while client.recv(Duration::from_millis(50)).await.is_some() {}
+}
+
 /// Adds a panel named `other` that stays inactive; returns it and its terminal.
 async fn inactive_panel(client: &mut Client) -> (PanelId, TerminalId) {
     let view = client.view.clone().unwrap();
@@ -268,5 +273,89 @@ async fn process_only_changes_never_mark_or_alert() {
     pause().await;
     client.recv(Duration::from_millis(50)).await;
     assert!(alerts(&client).is_empty() && !any_unseen(&client));
+    daemon.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_command_makes_its_terminal_busy_and_its_end_marks_the_panel_unseen() {
+    let clock = Arc::new(ManualClock::new());
+    // `(own, argv)`: the shell itself, or a command it started.
+    let foreground = Arc::new(Mutex::new(Some((true, vec!["zsh".to_string()]))));
+    let seen = Arc::clone(&foreground);
+    let options = Options {
+        clock: clock.clone(),
+        agent_poll: Duration::from_millis(20),
+        foreground_query: ForegroundQuery::with_owner(move |_| seen.lock().unwrap().clone()),
+        ..Options::default()
+    };
+    let daemon = TestDaemon::start_with(support::config(), options).await;
+    let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
+    let (panel, terminal) = inactive_panel(&mut client).await;
+    let busy = |c: &Client| {
+        c.view
+            .as_ref()
+            .unwrap()
+            .projects
+            .iter()
+            .flat_map(|p| &p.panels)
+            .flat_map(|p| &p.terminals)
+            .any(|t| t.id == terminal && t.busy)
+    };
+    *foreground.lock().unwrap() = Some((false, vec!["cargo".into(), "build".into()]));
+    // Not before it has run for a second.
+    pause().await;
+    drain(&mut client).await;
+    assert!(!busy(&client));
+    clock.advance(Duration::from_secs(1));
+    client.wait(busy).await;
+    // It ends while nobody looks at its panel.
+    *foreground.lock().unwrap() = Some((true, vec!["zsh".to_string()]));
+    client.wait(|c| !busy(c)).await;
+    client.wait(|c| unseen(c, panel)).await;
+    assert!(alerts(&client).is_empty());
+    daemon.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn interactive_and_full_screen_programs_are_never_busy() {
+    let clock = Arc::new(ManualClock::new());
+    let foreground = Arc::new(Mutex::new(Some((
+        false,
+        vec!["ssh".to_string(), "host".into()],
+    ))));
+    let seen = Arc::clone(&foreground);
+    let options = Options {
+        clock: clock.clone(),
+        agent_poll: Duration::from_millis(20),
+        foreground_query: ForegroundQuery::with_owner(move |_| seen.lock().unwrap().clone()),
+        ..Options::default()
+    };
+    let daemon = TestDaemon::start_with(support::config(), options).await;
+    let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
+    let terminal = client.view.as_ref().unwrap().projects[0].panels[0].terminals[0].id;
+    let busy = |c: &Client| c.view.as_ref().unwrap().projects[0].panels[0].terminals[0].busy;
+    for _ in 0..5 {
+        clock.advance(Duration::from_secs(1));
+        pause().await;
+    }
+    drain(&mut client).await;
+    // `ssh` is a session the user works in.
+    assert!(!busy(&client));
+    // Then a full-screen program: the shell's terminal switches to the alternate screen.
+    *foreground.lock().unwrap() = Some((true, vec!["zsh".to_string()]));
+    client
+        .send(&ClientMsg::Input {
+            terminal,
+            bytes: b"printf '\\033[?1049h'; sleep 100\r".to_vec(),
+        })
+        .await;
+    pause().await;
+    *foreground.lock().unwrap() = Some((false, vec!["sleep".to_string(), "100".into()]));
+    for _ in 0..5 {
+        clock.advance(Duration::from_secs(1));
+        pause().await;
+    }
+    drain(&mut client).await;
+    assert!(!busy(&client));
     daemon.stop().await.unwrap();
 }
