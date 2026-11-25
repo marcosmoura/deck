@@ -28,6 +28,8 @@ Open tasks the user has not placed in the queue:
 - DECK-43 State lock never held across emulator calls
 - DECK-44 Client image memory released
 - DECK-45 Images kept across a panel switch
+- DECK-46 Terminal output read while the emulator works
+- DECK-47 Queued frames merged for a slow client
 
 ## Tasks
 
@@ -77,6 +79,8 @@ Open tasks the user has not placed in the queue:
 | DECK-43 | State lock never held across emulator calls         | todo        | DECK-26                                                       | —                                                                            |
 | DECK-44 | Client image memory released                        | todo        | DECK-26                                                       | —                                                                            |
 | DECK-45 | Images kept across a panel switch                   | todo        | DECK-26                                                       | —                                                                            |
+| DECK-46 | Terminal output read while the emulator works       | todo        | DECK-26                                                       | —                                                                            |
+| DECK-47 | Queued frames merged for a slow client              | todo        | DECK-26                                                       | —                                                                            |
 
 ### Withdrawn
 
@@ -87,6 +91,22 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-47
+
+**Queued frames merged for a slow client.** Proposed on 25 Nov 2026 by the DECK-26 performance review (F-18, low), accepted by the user.
+
+- What: the daemon queues every frame for a client one after another (`crates/deck-daemon/src/server/queue.rs`), so a client that falls behind receives each intermediate frame of a terminal instead of only its latest state. Merge queued frames of the same terminal, keeping the queue's drop and resync rules correct.
+- Why: a slow client should catch up with the screen as it is now, not replay what it missed. Not measured: no scenario showed a client falling behind.
+- Acceptance: a test with a client that stops reading shows queued frames of one terminal merged and the screen correct after it reads again; the queue's byte cap and resync still hold.
+
+### DECK-46
+
+**Terminal output read while the emulator works.** Proposed on 25 Nov 2026 by the DECK-26 performance review (F-8, medium, fixed in part), accepted by the user.
+
+- What: each PTY reader hands its bytes to the emulator and waits for the result before reading on (`crates/deck-daemon/src/terminal.rs`, `server.rs`); DECK-26 batches reads that are already waiting, up to 16 KiB. Let the reader keep reading while the emulator feeds the previous batch, without letting one slow terminal delay others.
+- Why: output through deck runs at about 0.43 of a bare PTY (82 against 190 MiB/s on macOS); most of the gap left is this wait plus the emulator's own work.
+- Acceptance: the `throughput` stress scenario shows a higher ratio to the bare PTY than DECK-26's figures; the `stall` scenario's `deck ls` times do not rise.
 
 ### DECK-45
 
