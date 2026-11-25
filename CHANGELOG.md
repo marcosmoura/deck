@@ -2,14 +2,13 @@
 
 ## [0.3.0](https://github.com/marcosmoura/deck/compare/v0.2.0...v0.3.0) (2026-11-25)
 
-
 ### Features
 
-* **cli:** add shell completion ([d002f75](https://github.com/marcosmoura/deck/commit/d002f75a01bb1c31ed37ab65f775f9389e49f959))
-* client exits when its terminal closes (DECK-39) ([802ada4](https://github.com/marcosmoura/deck/commit/802ada424869a72d1e9885a8d7d6c50cb2b065c1))
-* **cli:** install the agent skill with deck skills (DECK-31) ([02377ec](https://github.com/marcosmoura/deck/commit/02377ec49487c0cc255b3d537762b32958db93fb))
-* collapsed sidebar (DECK-48) ([b746233](https://github.com/marcosmoura/deck/commit/b746233f360347cdc96e8d9785864a0bf0a5214f))
-* live upgrade (DECK-21) ([e46b102](https://github.com/marcosmoura/deck/commit/e46b102cc0e311663fd0c17f1310eeaa8341cb2d))
+- **cli:** add shell completion ([d002f75](https://github.com/marcosmoura/deck/commit/d002f75a01bb1c31ed37ab65f775f9389e49f959))
+- client exits when its terminal closes (DECK-39) ([802ada4](https://github.com/marcosmoura/deck/commit/802ada424869a72d1e9885a8d7d6c50cb2b065c1))
+- **cli:** install the agent skill with deck skills (DECK-31) ([02377ec](https://github.com/marcosmoura/deck/commit/02377ec49487c0cc255b3d537762b32958db93fb))
+- collapsed sidebar (DECK-48) ([b746233](https://github.com/marcosmoura/deck/commit/b746233f360347cdc96e8d9785864a0bf0a5214f))
+- live upgrade (DECK-21) ([e46b102](https://github.com/marcosmoura/deck/commit/e46b102cc0e311663fd0c17f1310eeaa8341cb2d))
 
 ## [0.2.0](https://github.com/marcosmoura/deck/compare/v0.1.0...v0.2.0) (2026-11-24)
 
