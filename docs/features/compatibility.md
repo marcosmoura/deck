@@ -2,7 +2,7 @@
 
 Read when you need to know how closely deck behaves like a good terminal, or why a program looks different inside deck.
 
-A differential suite (`crates/deck/tests/compat.rs`, cases in `crates/deck/tests/compat/cases/*.vt`) shows the same bytes to a reference emulator (`alacritty_terminal`) and through deck, and compares the two screens cell by cell, with the cursor. With `#! history` it also compares the scrollback. Where they disagree, either deck is fixed or the difference is recorded in the known-differences table in `compat.rs`, with its reason.
+A differential suite (`crates/deck/tests/compat.rs`, cases in `crates/deck/tests/compat/cases/*.vt`) shows the same bytes to a reference emulator (`alacritty_terminal`) and through deck, and compares the two screens cell by cell, with the cursor (its position only while it is shown: deck leaves a hidden cursor wherever its last frame ended). With `#! history` it also compares the scrollback. Where they disagree, either deck is fixed or the difference is recorded in the known-differences table in `compat.rs`, with its reason.
 
 ## Covered
 
