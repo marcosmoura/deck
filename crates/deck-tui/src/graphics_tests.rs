@@ -581,6 +581,22 @@ fn a_frame_sends_its_new_images_before_its_cells_and_then_draws_once() {
 }
 
 #[test]
+fn a_frame_is_one_synchronized_update() {
+    let mut a = ghostty("");
+    let sink = Shared::default();
+    let mut t = byte_terminal(&a, &sink);
+    a.draw_frame(&mut t).unwrap();
+    let frame = String::from_utf8_lossy(&sink.0.borrow()).into_owned();
+    assert_eq!(frame.matches("\x1b[?2026h").count(), 1);
+    // The images go out first; every cell and the cursor are inside the update.
+    let begin = frame.find("\x1b[?2026h").unwrap();
+    assert!(frame.rfind("\x1b_G").unwrap() < begin);
+    assert!(begin < frame.find('\u{10EEEE}').unwrap());
+    assert!(frame.ends_with("\x1b[?2026l"));
+    assert!(!frame[..begin].contains("\x1b[?25"));
+}
+
+#[test]
 fn spinner_frames_are_the_mask_turned_by_six_degrees_each() {
     use crate::graphics::{SPINNER_FRAMES, spinner_frame};
     let source = mask(Icon::Spinner).unwrap();

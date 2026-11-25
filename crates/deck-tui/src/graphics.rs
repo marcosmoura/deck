@@ -31,6 +31,9 @@ use crate::diacritics::{PLACEHOLDER, diacritic};
 use crate::placed::Program;
 use crate::tier::Tier;
 
+/// Synchronized output (mode 2026) around a frame; a terminal without it ignores both.
+const BEGIN_SYNC: &[u8] = b"\x1b[?2026h";
+const END_SYNC: &[u8] = b"\x1b[?2026l";
 /// The first image id; the counter goes up from here, so an id is never 0.
 const FIRST_ID: u32 = 0xDEC001;
 /// Ids are 24 bits: they travel in the foreground colour of the placeholder cell.
@@ -439,8 +442,14 @@ impl App {
             terminal.current_buffer_mut().reset();
             cursor = crate::draw::draw_screen(&mut terminal.get_frame(), self);
         }
+        // Synchronized output: the outer terminal shows the frame at once, never the cells of
+        // half a frame or the cursor on its way through them. `apply_buffer_with_cursor`
+        // flushes several times.
+        terminal.backend_mut().write_all(BEGIN_SYNC)?;
         terminal.apply_buffer_with_cursor(cursor)?;
-        Ok(())
+        let out = terminal.backend_mut();
+        out.write_all(END_SYNC)?;
+        Write::flush(out)
     }
 
     /// Registers the pairs the last draw wanted and sends the new ones; whether there were any.
