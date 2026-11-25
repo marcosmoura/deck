@@ -349,7 +349,9 @@ fn program_placeholders(h: &mut Harness, id: u32, third: Option<usize>, (cols, r
     send(h, &format!("a=t,f=32,s=2,v=2,i={id},t=d,q=2"), RGBA_2X2);
     send(h, &format!("a=p,U=1,i={id},c={cols},r={rows},q=2"), "");
     let [_, r, g, b] = id.to_be_bytes();
-    let mut text = format!("\\033[38;2;{r};{g};{b}m");
+    // From the left edge (`\r`): a line typed before the shell printed its prompt runs
+    // after the prompt, on its row.
+    let mut text = format!("\\r\\033[38;2;{r};{g};{b}m");
     for row in 0..rows {
         let marks: Vec<usize> = [row as usize, 0].into_iter().chain(third).collect();
         text.push_str(&octal_cell(&marks));
@@ -431,7 +433,7 @@ fn claude_codes_chunked_png_thumbnail_is_drawn() {
     );
     h.send_keys(&format!("printf '\\033_Gm=0,q=2;{second}\\033\\\\'\r"));
     let [_, r, g, b] = id.to_be_bytes();
-    let mut text = format!("\\033[38;2;{r};{g};{b}m");
+    let mut text = format!("\\r\\033[38;2;{r};{g};{b}m");
     for row in 0..2 {
         text.push_str(&octal_cell(&[row, 0, 1]));
         text.push_str(&octal_cell(&[]));
@@ -496,7 +498,7 @@ fn claude_codes_file_path_png_is_drawn() {
         &encoded,
     );
     let [_, r, g, b] = id.to_be_bytes();
-    let mut text = format!("\\033[38;2;{r};{g};{b}m");
+    let mut text = format!("\\r\\033[38;2;{r};{g};{b}m");
     for row in 0..2 {
         text.push_str(&octal_cell(&[row, 0, 1]));
         text.push_str(&octal_cell(&[]));

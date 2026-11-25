@@ -688,10 +688,14 @@ impl Harness {
 
     /// Waits until a row of the screen starts with `prefix`; unlike `wait_for_text`, this
     /// skips a command line that echoes the text. A prompt before the text is allowed: a
-    /// line typed before the shell printed its prompt has its output on the prompt's row.
+    /// line typed before the shell printed its prompt has its output on the prompt's row,
+    /// which starts wherever the last command left the cursor.
     pub fn wait_for_row_start(&self, prefix: &str, limit: Duration) {
         let deadline = Instant::now() + limit;
-        let starts = |r: &str| r.strip_prefix("$ ").unwrap_or(r).starts_with(prefix);
+        let starts = |r: &str| {
+            let after_prompt = r.trim_start().strip_prefix("$ ");
+            r.starts_with(prefix) || after_prompt.is_some_and(|rest| rest.starts_with(prefix))
+        };
         while !self.screen_text().lines().any(starts) {
             assert!(
                 Instant::now() < deadline,

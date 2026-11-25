@@ -461,8 +461,10 @@ impl Run {
     }
 }
 
-fn cursor_of(s: &Snapshot) -> ((usize, usize), bool) {
-    (s.cursor, s.cursor_shown)
+/// Where the cursor is while it is shown. Deck does not move a hidden cursor: it rests where
+/// the last frame's writes ended, which depends on how the output was split into frames.
+fn cursor_of(s: &Snapshot) -> Option<(usize, usize)> {
+    s.cursor_shown.then_some(s.cursor)
 }
 
 /// The cursor's style while it is shown; a hidden cursor has none to compare.

@@ -140,7 +140,7 @@ fn upgrading(home: &Home) {
     });
 }
 
-/// A control connection the old daemon serves, to ask for things during the handoff.
+/// A control connection to the daemon, to ask for things during the handoff.
 struct Conn(UnixStream);
 
 impl Conn {
@@ -457,16 +457,16 @@ fn a_termination_during_the_handoff_is_acted_on_after_it() {
 
 #[test]
 fn kill_server_during_the_handoff_is_answered_by_the_new_daemon_which_then_stops() {
-    // Frozen for less than `kill-server` waits for an answer (1 s): past that it sends
-    // `SIGTERM`, which is the test above.
-    let home = slow_home(0, 400);
+    let home = slow_home(0, 1500);
     started(&home);
     let (_, hup) = hup_trap(&home);
     let next = copy_of_deck(&home, "deck-next");
     upgrade_to(&home, &next);
     upgrading(&home);
-    // This connection waits in the socket's queue until the new image accepts it.
-    ok(&home, &["kill-server"]);
+    // This connection waits in the socket's queue until the new image accepts it. Not
+    // `deck kill-server`: it sends `SIGTERM` after a second without an answer, which is the
+    // test above.
+    assert_eq!(Conn::open(&home).kill_server(), Response::Ok);
     wait_until("the daemon to stop", LIMIT, || !home.daemon_running());
     assert!(!marker_file(&home).exists());
     let log = log(&home);
