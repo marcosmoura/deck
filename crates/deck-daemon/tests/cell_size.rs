@@ -97,6 +97,8 @@ async fn answer(c: &mut Client, t: TerminalId, query: &str, tag: &str) -> Option
         .find(|r| printed(r))?
         .clone();
     let echoed = row.strip_suffix(tag)?;
+    // A line typed before the shell printed its prompt runs with the prompt on this row.
+    let echoed = echoed.strip_prefix("$ ").unwrap_or(echoed);
     (!echoed.is_empty()).then(|| echoed.to_string())
 }
 
