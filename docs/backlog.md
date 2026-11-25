@@ -24,6 +24,10 @@ Open tasks the user has not placed in the queue:
 - DECK-36 Setting for kitty file mediums
 - DECK-37 Fuzz target for the emulator feed
 - DECK-38 Daemon not dumpable on Linux
+- DECK-42 Terminal history sized by width
+- DECK-43 State lock never held across emulator calls
+- DECK-44 Client image memory released
+- DECK-45 Images kept across a panel switch
 
 ## Tasks
 
@@ -69,6 +73,10 @@ Open tasks the user has not placed in the queue:
 | DECK-39 | Client exits when its terminal closes               | done        | —                                                             | [client-hangup](specs/2026-11-24-client-hangup/00-overview.md)               |
 | DECK-40 | List OpenCode sessions without loading repositories | todo        | DECK-26                                                       | —                                                                            |
 | DECK-41 | Flaky test of the output pause during an upgrade    | todo        | —                                                             | —                                                                            |
+| DECK-42 | Terminal history sized by width                     | todo        | DECK-26                                                       | —                                                                            |
+| DECK-43 | State lock never held across emulator calls         | todo        | DECK-26                                                       | —                                                                            |
+| DECK-44 | Client image memory released                        | todo        | DECK-26                                                       | —                                                                            |
+| DECK-45 | Images kept across a panel switch                   | todo        | DECK-26                                                       | —                                                                            |
 
 ### Withdrawn
 
@@ -79,6 +87,38 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-07 | Auto-named panels | 22 Nov 2026 | Taken over by DECK-09 sub-spec 01, which names panels after every program, not only agents ([note](#deck-07)) |
 
 ## Notes
+
+### DECK-45
+
+**Images kept across a panel switch.** Proposed on 25 Nov 2026 by the DECK-26 performance review (G-9, low), accepted by the user.
+
+- What: the attach client deletes the outer terminal's copies of images a draw did not use (`crates/deck-tui/src/placed.rs`), so leaving a panel and coming back rebuilds, rescales and re-sends every image on it (measured: 3.1 MB re-sent for one image). Keep recently used outer images for a while, within the client's image budget.
+- Why: switching panels should not re-send images the outer terminal already holds.
+- Acceptance: the `images` stress scenario shows no bytes re-sent on a switch away and back within the budget; images beyond the budget are still released.
+
+### DECK-44
+
+**Client image memory released.** Proposed on 25 Nov 2026 by the DECK-26 performance review (G-10, info), accepted by the user.
+
+- What: the attach client keeps every received image's pixels for live terminals with no cap of its own (`crates/deck-tui/src/placed.rs`, `Program.pixels`); with 8 images of 16 MiB its footprint reached 148.7 MiB and did not fall after those terminals closed, although the code drops their pixels (`app.rs`, `placed.rs`): the cause is open. Find why the memory stays and cap what the client keeps (the daemon may need to resend on demand).
+- Why: the client's memory should follow what is on screen, not every image seen.
+- Acceptance: the cause of the retained footprint is named; the `client_memory` scenario shows the footprint falling after the image terminals close and staying under a stated cap with many images.
+
+### DECK-43
+
+**State lock never held across emulator calls.** Proposed on 25 Nov 2026 by the DECK-26 performance review (structural, low priority), accepted by the user.
+
+- What: the daemon holds its state lock while waiting on a terminal's emulator thread in several places (`crates/deck-daemon/src/server.rs`: `input`, `scroll`, `apply_sizes`, `resync`, `send_owed`, attach, and the handoff's `collect`; `pump` is fixed in DECK-26). Each wait is bounded by one feed, about 5 ms on macOS measured, possibly longer on Linux with larger PTY reads.
+- Why: one terminal with slow output should never delay keys, frames or `deck ls` in other terminals.
+- Acceptance: with one terminal's emulator blocked (a test seam), `deck ls` and a key into another terminal stay at their at-rest latency; measured on Linux too.
+
+### DECK-42
+
+**Terminal history sized by width.** Proposed on 25 Nov 2026 by the DECK-26 performance review (F-11, low), accepted by the user.
+
+- What: each terminal's history is a byte budget sized for 250 columns (`crates/deck-daemon/src/emu.rs`, about 26.6 MiB for 10,000 lines), so every long-lived terminal ends near 26.6 MiB whatever its width, and at 80 columns about two thirds of it is history that `history` hides and never shows. Size the budget from the real width without breaking "at least 10,000 lines up to 250 columns" after a terminal is widened.
+- Why: 30 terminals hold about 800 MiB of history today, most of it unreachable.
+- Acceptance: the `memory` stress scenario shows a terminal at 80 columns holding about a third of today's memory after its budget fills; widening a terminal keeps at least 10,000 lines.
 
 ### DECK-41
 
