@@ -1,21 +1,23 @@
 //! deck's own desktop notifications (`notify = "system"`): unlike the terminal's OSC 9, a
-//! click on one runs `deck focus` on the panel it is about. macOS shows them with
-//! `terminal-notifier`, Linux with `notify-send`; without either the client falls back to the
-//! terminal's notification.
+//! click on one runs `deck focus --raise` on the terminal it is about. macOS shows them with
+//! `terminal-notifier`, Linux with `notify-send`; without either, or when the notifier fails,
+//! the client falls back to the terminal's notification.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use deck_core::model::PanelId;
+use deck_core::model::{PanelId, TerminalId};
 
-/// An alert to show: its text, and the panel a click opens.
+/// An alert to show: its text, and the terminal a click focuses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemAlert {
     pub body: String,
-    /// The name of the session the panel is in, for `deck focus --session`.
+    /// The name of the session the terminal is in, for `deck focus --session`.
     pub session: String,
     pub panel: PanelId,
+    /// The terminal the agent runs in.
+    pub terminal: TerminalId,
     /// The terminal's notification (OSC 9), written when deck cannot show its own.
     pub fallback: Vec<u8>,
 }
@@ -63,20 +65,46 @@ pub(crate) fn pick(
     None
 }
 
-/// Shows `alert` with `notifier`; a click runs `deck focus` against the daemon at `socket`
-/// (the client's, which the command that a click runs could not find from its own
-/// environment). False when it could not be started, and the caller writes the fallback.
-pub fn show(notifier: &Notifier, alert: &SystemAlert, socket: &Path) -> bool {
-    let Ok(exe) = std::env::current_exe() else {
-        return false;
+/// Shows `alert` with `notifier`; a click runs `deck focus --raise` against the daemon at
+/// `socket` (the client's, which the command that a click runs could not find from its own
+/// environment). `failed` gets the reason when the notification was not shown: the notifier
+/// could not be started (at once, on this thread), or it ended with an error (later, on
+/// another thread; macOS can refuse notifications to an app: `terminal-notifier` then exits
+/// with status 3). The caller writes the terminal's notification instead.
+pub fn show(
+    notifier: &Notifier,
+    alert: &SystemAlert,
+    socket: &Path,
+    failed: impl FnOnce(String) + Send + 'static,
+) {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => return failed(format!("deck does not know its own path: {e}")),
     };
     match notifier {
         Notifier::TerminalNotifier(program) => {
             let bundle = std::env::var("__CFBundleIdentifier").ok();
             let args = terminal_notifier_args(alert, &exe, socket, bundle.as_deref());
-            spawn_reaped(Command::new(program).args(args))
+            spawn_watched(
+                "terminal-notifier",
+                Command::new(program).args(args),
+                failed,
+            );
         }
-        Notifier::NotifySend(program) => notify_send(program, alert, exe, socket.to_path_buf()),
+        Notifier::NotifySend(program) => {
+            notify_send(program, alert, exe, socket.to_path_buf(), failed);
+        }
+    }
+}
+
+/// How a notifier ended, for the log: `terminal-notifier ended with status 3`.
+fn ended(name: &str, status: std::io::Result<std::process::ExitStatus>) -> String {
+    match status {
+        Ok(status) => match status.code() {
+            Some(code) => format!("{name} ended with status {code}"),
+            None => format!("{name} was killed"),
+        },
+        Err(e) => format!("{name}: {e}"),
     }
 }
 
@@ -88,9 +116,13 @@ fn find(name: &str, path: &OsString) -> Option<PathBuf> {
         .find(|file| file.is_file())
 }
 
-/// Starts `cmd` with no input or output, and waits for it on a thread of its own so it never
-/// lingers as a zombie.
-fn spawn_reaped(cmd: &mut Command) -> bool {
+/// Starts `cmd` with no input or output, and waits for it on a thread of its own (so it never
+/// lingers as a zombie), which runs `failed` when it ends with an error.
+fn spawn_watched(
+    name: &'static str,
+    cmd: &mut Command,
+    failed: impl FnOnce(String) + Send + 'static,
+) {
     let started = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -98,31 +130,47 @@ fn spawn_reaped(cmd: &mut Command) -> bool {
         .spawn();
     match started {
         Ok(mut child) => {
-            std::thread::spawn(move || child.wait());
-            true
+            std::thread::spawn(move || {
+                let status = child.wait();
+                if !status.as_ref().is_ok_and(std::process::ExitStatus::success) {
+                    failed(ended(name, status));
+                }
+            });
         }
-        Err(_) => false,
+        Err(e) => failed(format!("{name} did not start: {e}")),
     }
 }
 
 /// `notify-send` waits for a click on its `default` action and prints the action's name;
-/// then the panel is focused. Linux has no portable way to raise the terminal's window.
-fn notify_send(notifier: &Path, alert: &SystemAlert, exe: PathBuf, socket: PathBuf) -> bool {
+/// then the terminal is focused. Linux has no portable way to raise the terminal's window.
+fn notify_send(
+    notifier: &Path,
+    alert: &SystemAlert,
+    exe: PathBuf,
+    socket: PathBuf,
+    failed: impl FnOnce(String) + Send + 'static,
+) {
     let started = Command::new(notifier)
         .args(notify_send_args(alert))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn();
-    let Ok(child) = started else {
-        return false;
+    let child = match started {
+        Ok(child) => child,
+        Err(e) => return failed(format!("notify-send did not start: {e}")),
     };
     let focus = focus_args(alert);
     std::thread::spawn(move || {
-        let clicked = child
-            .wait_with_output()
-            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "default");
-        if clicked {
+        let out = match child.wait_with_output() {
+            Ok(out) => out,
+            Err(e) => return failed(format!("notify-send: {e}")),
+        };
+        // An older libnotify rejects `--action` or `--wait` and exits with an error.
+        if !out.status.success() {
+            return failed(ended("notify-send", Ok(out.status)));
+        }
+        if String::from_utf8_lossy(&out.stdout).trim() == "default" {
             let _ = Command::new(exe)
                 .env("DECK_SOCKET", socket)
                 .args(focus)
@@ -132,16 +180,17 @@ fn notify_send(notifier: &Path, alert: &SystemAlert, exe: PathBuf, socket: PathB
                 .status();
         }
     });
-    true
 }
 
-/// `deck focus` on the alert's panel, in its session.
+/// `deck focus` on the alert's terminal, in its session; `--raise` has the client bring its
+/// window forward.
 pub(crate) fn focus_args(alert: &SystemAlert) -> Vec<String> {
     vec![
         "focus".into(),
+        "--raise".into(),
         "--session".into(),
         alert.session.clone(),
-        alert.panel.0.to_string(),
+        alert.terminal.0.to_string(),
     ]
 }
 
@@ -150,7 +199,7 @@ fn shell_quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
-/// `terminal-notifier`'s arguments: the text, one notification per panel (a newer one
+/// `terminal-notifier`'s arguments: the text, one notification per terminal (a newer one
 /// replaces it), the command a click runs (through `sh`, so every word is quoted; it runs in
 /// launchd's environment, so it names the daemon's socket) and, when known, the terminal's app
 /// to bring forward.
@@ -175,7 +224,7 @@ pub(crate) fn terminal_notifier_args(
         "-message".into(),
         alert.body.clone(),
         "-group".into(),
-        format!("deck-{}-{}", alert.session, alert.panel.0),
+        format!("deck-{}-{}", alert.session, alert.terminal.0),
         "-execute".into(),
         command,
     ];
@@ -212,6 +261,7 @@ mod tests {
             body: "claude needs you · deck › Ping".into(),
             session: session.into(),
             panel: PanelId(42),
+            terminal: TerminalId(43),
             fallback: b"\x1b]9;x\x07".to_vec(),
         }
     }
@@ -232,9 +282,9 @@ mod tests {
                 "-message",
                 "claude needs you · deck › Ping",
                 "-group",
-                "deck-main-42",
+                "deck-main-43",
                 "-execute",
-                "DECK_SOCKET='/run/deck.sock' '/opt/deck/bin/deck' 'focus' '--session' 'main' '42'",
+                "DECK_SOCKET='/run/deck.sock' '/opt/deck/bin/deck' 'focus' '--raise' '--session' 'main' '43'",
                 "-activate",
                 "com.mitchellh.ghostty",
             ]
@@ -255,7 +305,7 @@ mod tests {
         let command = &args[args.iter().position(|a| a == "-execute").unwrap() + 1];
         assert_eq!(
             command,
-            r"DECK_SOCKET='/s'\''x' '/d' 'focus' '--session' 'it'\''s; rm -rf ~' '42'"
+            r"DECK_SOCKET='/s'\''x' '/d' 'focus' '--raise' '--session' 'it'\''s; rm -rf ~' '43'"
         );
     }
 
@@ -273,8 +323,27 @@ mod tests {
         );
         assert_eq!(
             focus_args(&alert("main")),
-            ["focus", "--session", "main", "42"]
+            ["focus", "--raise", "--session", "main", "43"]
         );
+    }
+
+    #[test]
+    fn a_notifier_that_ends_with_an_error_is_reported() {
+        let run = |program: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            spawn_watched("notifier", &mut Command::new(program), move |why| {
+                let _ = tx.send(why);
+            });
+            rx.recv_timeout(std::time::Duration::from_secs(5)).ok()
+        };
+        assert_eq!(
+            run("false").as_deref(),
+            Some("notifier ended with status 1")
+        );
+        assert_eq!(run("true"), None);
+        // One that cannot be started is reported at once.
+        let why = run("/nonexistent/deck-notifier").unwrap();
+        assert!(why.starts_with("notifier did not start: "), "{why}");
     }
 
     #[test]

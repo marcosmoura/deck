@@ -78,7 +78,7 @@ enum Command {
     /// shell.
     NewTerminal(tree::NewTerminalArgs),
     /// Focuses a terminal (with its panel and space) or a panel.
-    Focus(tree::IdArgs),
+    Focus(tree::FocusArgs),
     /// Closes a terminal, a panel or a space, without asking.
     Close(tree::IdArgs),
     /// Renames a panel.

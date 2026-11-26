@@ -75,6 +75,8 @@ pub enum Out {
     SystemNotify(crate::notify::SystemAlert),
     /// Bytes for the outer terminal that notify the user (OSC 9 or a bell).
     Notify(Vec<u8>),
+    /// Bring the outer terminal's window forward (a notification was clicked).
+    Raise,
     Exit(Exit),
     /// Attach this client to another session.
     Switch(String),
@@ -219,13 +221,10 @@ pub struct App {
     /// The last press that started a selection and how many presses in a row it ends, for
     /// double and triple clicks.
     last_click: Option<(Instant, TerminalId, (u16, u16), u8)>,
-    /// The panel of the last alert written while the outer terminal was unfocused, and when:
-    /// a focus gain soon after brings the user to it.
-    alert_jump: Option<(PanelId, Instant)>,
+    /// The panel and terminal of the last alert the outer terminal showed while it was
+    /// unfocused: the next focus gain brings the user to it.
+    alert_jump: Option<(PanelId, TerminalId)>,
 }
-
-/// How long after an alert a focus gain still counts as the click on its notification.
-const ALERT_JUMP_WINDOW: Duration = Duration::from_secs(10);
 
 /// A mouse cell on a terminal of the grid.
 struct Hit {
@@ -728,8 +727,8 @@ impl App {
                 vec![self.viewport_msg()]
             }
             ct::Event::Mouse(mouse) => self.on_mouse(mouse, now),
-            ct::Event::FocusGained => self.on_focus(true, now),
-            ct::Event::FocusLost => self.on_focus(false, now),
+            ct::Event::FocusGained => self.on_focus(true),
+            ct::Event::FocusLost => self.on_focus(false),
         }
     }
 
@@ -1146,7 +1145,7 @@ impl App {
     }
 
     /// Focus-in and focus-out of the outer terminal, for programs that asked for them.
-    fn on_focus(&mut self, gained: bool, now: Instant) -> Vec<Out> {
+    fn on_focus(&mut self, gained: bool) -> Vec<Out> {
         self.focused = gained;
         self.focus_seen = true;
         if !gained && self.sidebar_drag.take().is_some() {
@@ -1159,31 +1158,83 @@ impl App {
             self.set_hover(None);
         }
         let mut outs = vec![Out::Send(ClientMsg::Focus(gained))];
-        let jump = if gained { self.alert_jump(now) } else { None };
+        let armed = if gained { self.alert_jump.take() } else { None };
+        let jump = armed.map(|(panel, terminal)| (terminal, self.alert_jump(panel, terminal)));
+        let to = jump.and_then(|(_, jump)| jump.ok());
         // The focus-in goes to the terminal the user lands on.
-        outs.extend(self.forward_focus(gained, jump.map(|(_, _, terminal)| terminal)));
-        if let Some((project, panel, terminal)) = jump {
+        outs.extend(self.forward_focus(gained, to.map(|(_, _, terminal)| terminal)));
+        if let Some((project, panel, terminal)) = to {
             outs.push(self.act(Act::FocusProject { project }, None));
             outs.push(self.act(Act::FocusPanel { panel }, None));
             outs.push(self.act(Act::FocusTerminal { terminal }, None));
         }
+        if let Some((alerted, jump)) = jump {
+            outs.push(alert_log(
+                alerted,
+                &match jump {
+                    Ok((_, _, to)) => format!("the terminal got focus back, jumped to {}", to.0),
+                    Err(why) => format!("the terminal got focus back, no jump: {why}"),
+                },
+            ));
+        }
         outs
     }
 
-    /// On a focus gain: the space, panel and terminal to show for a recent alert, if its panel
-    /// still needs the user and no prompt or overlay is open. The alert is forgotten either way.
-    fn alert_jump(&mut self, now: Instant) -> Option<(ProjectId, PanelId, TerminalId)> {
-        let (panel, at) = self.alert_jump.take()?;
-        if self.overlay_open() || now.saturating_duration_since(at) > ALERT_JUMP_WINDOW {
-            return None;
+    /// The outer terminal shows `bytes` for an alert of `terminal`: if it has no focus now,
+    /// the next focus gain jumps there. Returns the line for the log.
+    fn shown_by_terminal(&mut self, panel: PanelId, terminal: TerminalId, how: &str) -> Out {
+        let then = if self.focused {
+            "no jump, the terminal has focus"
+        } else {
+            self.alert_jump = Some((panel, terminal));
+            "the next focus gain jumps"
+        };
+        alert_log(terminal, &format!("{how}, {then}"))
+    }
+
+    /// deck's own notification could not be shown (macOS has not allowed the notifier, say):
+    /// the terminal's notification goes out instead, with its jump on focus return.
+    pub(crate) fn notification_failed(
+        &mut self,
+        alert: crate::notify::SystemAlert,
+        why: &str,
+    ) -> Vec<Out> {
+        if alert.fallback.is_empty() {
+            return vec![alert_log(alert.terminal, &format!("{why}, not shown"))];
         }
-        let view = self.mirror.view()?;
-        let project = view
-            .projects
-            .iter()
-            .find(|p| p.panels.iter().any(|x| x.id == panel))?;
-        let terminal = agent::panel_attention(project.panels.iter().find(|x| x.id == panel)?)?;
-        Some((project.id, panel, terminal))
+        let how = format!("{why}, shown by the terminal instead");
+        let log = self.shown_by_terminal(alert.panel, alert.terminal, &how);
+        vec![Out::Notify(alert.fallback), log]
+    }
+
+    /// The outer terminal's window was asked to come forward: `what` happened.
+    pub(crate) fn raised(what: &str) -> Vec<Out> {
+        vec![Out::Send(ClientMsg::AlertLog(what.to_string()))]
+    }
+
+    /// On a focus gain after an alert of `alerted` in `panel`: the space, panel and terminal
+    /// to show, or why not. The alerted terminal if it still needs the user (it waits, or it
+    /// is idle in an unseen panel), else another one of its panel that does.
+    fn alert_jump(
+        &self,
+        panel: PanelId,
+        alerted: TerminalId,
+    ) -> Result<(ProjectId, PanelId, TerminalId), &'static str> {
+        if self.overlay_open() {
+            return Err("a prompt, menu or overlay is open");
+        }
+        let found = self.mirror.view().and_then(|view| {
+            view.projects
+                .iter()
+                .find_map(|p| Some((p.id, p.panels.iter().find(|x| x.id == panel)?)))
+        });
+        let Some((project, view)) = found else {
+            return Err("its panel is gone");
+        };
+        let terminal = agent::terminal_attention(view, alerted)
+            .or_else(|| agent::panel_attention(view))
+            .ok_or("its panel no longer needs you")?;
+        Ok((project, panel, terminal))
     }
 
     /// The focus report for the focused terminal, if its program asked for them.
@@ -1732,29 +1783,42 @@ impl App {
                 project,
                 panel,
                 panel_id,
+                terminal_id,
             } => {
                 let bytes = agent::alert_bytes(self.config.notify, kind, status, &project, &panel);
-                // deck's own notification opens its panel when clicked: no jump on focus.
+                // deck's own notification opens its terminal when clicked: no jump on focus.
                 // Without a notifier here, `system` is `terminal`, the jump included.
                 let own = (self.config.notify == NotifyMode::System && self.own_notifications)
                     .then(|| agent::alert_body(kind, status, &project, &panel))
                     .flatten()
                     .zip(self.mirror.view().map(|v| v.name.clone()));
                 if let Some((body, session)) = own {
-                    vec![Out::SystemNotify(crate::notify::SystemAlert {
-                        body,
-                        session,
-                        panel: panel_id,
-                        fallback: bytes,
-                    })]
+                    vec![
+                        Out::SystemNotify(crate::notify::SystemAlert {
+                            body,
+                            session,
+                            panel: panel_id,
+                            terminal: terminal_id,
+                            fallback: bytes,
+                        }),
+                        alert_log(terminal_id, "handed to deck's own notification"),
+                    ]
                 } else if bytes.is_empty() {
-                    Vec::new()
+                    vec![alert_log(terminal_id, "not shown, notify is none")]
                 } else {
-                    if !self.focused {
-                        self.alert_jump = Some((panel_id, Instant::now()));
-                    }
-                    vec![Out::Notify(bytes)]
+                    let how = match self.config.notify {
+                        NotifyMode::Bell => "rang the terminal's bell",
+                        _ => "shown by the terminal",
+                    };
+                    let log = self.shown_by_terminal(panel_id, terminal_id, how);
+                    vec![Out::Notify(bytes), log]
                 }
+            }
+            ServerMsg::Raise => {
+                // A click chose its terminal: the focus gain it causes must not jump to the
+                // terminal of an older alert.
+                self.alert_jump = None;
+                vec![Out::Raise]
             }
             ServerMsg::Image {
                 terminal,
@@ -1885,6 +1949,14 @@ impl App {
             })],
         }
     }
+}
+
+/// A line for the daemon's log about the alert of `terminal`: ids only, never a name.
+fn alert_log(terminal: TerminalId, what: &str) -> Out {
+    Out::Send(ClientMsg::AlertLog(format!(
+        "terminal {}: {what}",
+        terminal.0
+    )))
 }
 
 /// The OSC 52 sequence that puts `text` on the outer terminal's clipboard `selection`.
@@ -2560,7 +2632,24 @@ mod tests {
             project: project.into(),
             panel: panel.into(),
             panel_id: deck_core::model::PanelId(1),
+            terminal_id: TerminalId(2),
         }
+    }
+
+    /// `outs` without the lines for the daemon's log.
+    fn shown(mut outs: Vec<Out>) -> Vec<Out> {
+        outs.retain(|o| !matches!(o, Out::Send(ClientMsg::AlertLog(_))));
+        outs
+    }
+
+    /// The lines `outs` sends to the daemon's log.
+    fn logged(outs: &[Out]) -> Vec<&str> {
+        outs.iter()
+            .filter_map(|o| match o {
+                Out::Send(ClientMsg::AlertLog(text)) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -2569,8 +2658,13 @@ mod tests {
         let waiting = alert(AgentStatus::Waiting, "proj", "review");
         let config = Config::parse("notify = \"terminal\"").unwrap().config;
         let mut a = App::new(&config, (80, 24), &[]);
+        let outs = a.on_server(waiting.clone());
         assert_eq!(
-            a.on_server(waiting.clone()),
+            logged(&outs),
+            ["terminal 2: shown by the terminal, no jump, the terminal has focus"]
+        );
+        assert_eq!(
+            shown(outs),
             [Out::Notify(
                 "\x1b]9;claude needs you · proj › review\x07"
                     .as_bytes()
@@ -2578,7 +2672,7 @@ mod tests {
             )]
         );
         assert_eq!(
-            a.on_server(alert(AgentStatus::Idle, "proj", "docs")),
+            shown(a.on_server(alert(AgentStatus::Idle, "proj", "docs"))),
             [Out::Notify(
                 "\x1b]9;claude finished · proj › docs\x07"
                     .as_bytes()
@@ -2588,20 +2682,31 @@ mod tests {
         // Control characters never reach the outer terminal: an ESC or BEL in a name would
         // end the sequence early.
         assert_eq!(
-            a.on_server(alert(AgentStatus::Waiting, "p\x07\x1b[2Jq", "a\nb\u{9b}c")),
+            shown(a.on_server(alert(AgentStatus::Waiting, "p\x07\x1b[2Jq", "a\nb\u{9b}c"))),
             [Out::Notify(
                 "\x1b]9;claude needs you · p[2Jq › abc\x07"
                     .as_bytes()
                     .to_vec()
             )]
         );
-        for (text, bytes) in [("bell", Some(b"\x07".to_vec())), ("none", None)] {
+        for (text, bytes, line) in [
+            (
+                "bell",
+                Some(b"\x07".to_vec()),
+                "terminal 2: rang the terminal's bell, no jump, the terminal has focus",
+            ),
+            ("none", None, "terminal 2: not shown, notify is none"),
+        ] {
             let config = Config::parse(&format!("notify = \"{text}\""))
                 .unwrap()
                 .config;
             let mut a = App::new(&config, (80, 24), &[]);
             let outs = a.on_server(waiting.clone());
-            assert_eq!(outs, bytes.map(Out::Notify).into_iter().collect::<Vec<_>>());
+            assert_eq!(logged(&outs), [line]);
+            assert_eq!(
+                shown(outs),
+                bytes.map(Out::Notify).into_iter().collect::<Vec<_>>()
+            );
         }
     }
 
@@ -2637,23 +2742,19 @@ mod tests {
         (a, v)
     }
 
+    /// An alert of the one terminal of `panel` in the mockup (panel 4 has terminal 41).
     fn alert_for(panel: u64, status: deck_core::agents::AgentStatus) -> ServerMsg {
-        let ServerMsg::AgentAlert {
-            kind,
-            status,
-            project,
-            panel: name,
-            ..
-        } = alert(status, "proj", "p")
-        else {
-            unreachable!()
-        };
+        alert_of(panel, panel * 10 + 1, status)
+    }
+
+    fn alert_of(panel: u64, terminal: u64, status: deck_core::agents::AgentStatus) -> ServerMsg {
         ServerMsg::AgentAlert {
-            kind,
+            kind: deck_core::agents::AgentKind::Claude,
             status,
-            project,
-            panel: name,
+            project: "proj".into(),
+            panel: "p".into(),
             panel_id: PanelId(panel),
+            terminal_id: TerminalId(terminal),
         }
     }
 
@@ -2676,6 +2777,11 @@ mod tests {
         a.on_server(alert_for(panel, status));
     }
 
+    /// The outer terminal gets focus back: what the client sends, without the log's lines.
+    fn come_back(a: &mut App) -> Vec<Out> {
+        shown(a.on_event(ct::Event::FocusGained, Instant::now()))
+    }
+
     #[test]
     fn a_system_alert_is_decks_own_notification_and_needs_no_jump() {
         use deck_core::agents::AgentStatus;
@@ -2684,22 +2790,48 @@ mod tests {
         a.on_event(ct::Event::FocusLost, Instant::now());
         let outs = a.on_server(alert_for(4, AgentStatus::Waiting));
         assert_eq!(
-            outs,
+            logged(&outs),
+            ["terminal 41: handed to deck's own notification"]
+        );
+        assert_eq!(
+            shown(outs),
             [Out::SystemNotify(crate::notify::SystemAlert {
                 body: "claude needs you · proj › p".into(),
                 session: v.name.clone(),
                 panel: PanelId(4),
+                terminal: TerminalId(41),
                 fallback: "\x1b]9;claude needs you · proj › p\x07".as_bytes().to_vec(),
             })]
         );
-        // A click opens the panel: coming back to the terminal does not jump.
-        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
-        assert!(
-            !outs
-                .iter()
-                .any(|o| matches!(o, Out::Send(ClientMsg::Action(_)))),
-            "{outs:?}"
+        // A click focuses the terminal: coming back to the outer terminal does not jump.
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
         );
+    }
+
+    #[test]
+    fn a_notification_the_notifier_failed_to_show_goes_to_the_terminal_with_its_jump() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, v) = jump_app("system");
+        a.own_notifications = true;
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        let outs = shown(a.on_server(alert_for(4, AgentStatus::Waiting)));
+        let [Out::SystemNotify(alert)] = &outs[..] else {
+            panic!("deck's own notification first")
+        };
+        assert_eq!(alert.session, v.name);
+        let fallback = alert.fallback.clone();
+        let outs = a.notification_failed(alert.clone(), "terminal-notifier ended with status 3");
+        assert_eq!(
+            logged(&outs),
+            [
+                "terminal 41: terminal-notifier ended with status 3, shown by the terminal \
+              instead, the next focus gain jumps"
+            ]
+        );
+        assert_eq!(shown(outs), [Out::Notify(fallback)]);
+        assert_eq!(come_back(&mut a)[1..], jump_to(1, 4, 41));
     }
 
     #[test]
@@ -2708,26 +2840,31 @@ mod tests {
         let (mut a, _) = jump_app("system");
         assert!(!a.own_notifications);
         a.on_event(ct::Event::FocusLost, Instant::now());
+        let outs = a.on_server(alert_for(4, AgentStatus::Waiting));
         assert_eq!(
-            a.on_server(alert_for(4, AgentStatus::Waiting)),
+            logged(&outs),
+            ["terminal 41: shown by the terminal, the next focus gain jumps"]
+        );
+        assert_eq!(
+            shown(outs),
             [Out::Notify(
                 "\x1b]9;claude needs you · proj › p\x07".as_bytes().to_vec()
             )]
         );
-        let mut outs = a.on_event(ct::Event::FocusGained, Instant::now());
-        outs.retain(|o| matches!(o, Out::Send(ClientMsg::Action(_))));
-        assert_eq!(outs, jump_to(1, 4, 41));
+        assert_eq!(come_back(&mut a)[1..], jump_to(1, 4, 41));
     }
 
     #[test]
-    fn a_focus_gain_soon_after_an_alert_jumps_to_its_panel() {
+    fn the_first_focus_gain_after_an_alert_jumps_to_its_terminal() {
         use deck_core::agents::AgentStatus;
         let (mut a, _) = jump_app("osc9");
         unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
-        let mut outs = a.on_event(
-            ct::Event::FocusGained,
-            Instant::now() + Duration::from_secs(3),
+        let mut outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        assert_eq!(
+            logged(&outs),
+            ["terminal 41: the terminal got focus back, jumped to 41"]
         );
+        outs = shown(outs);
         assert_eq!(outs.remove(0), focus(true));
         assert_eq!(outs, jump_to(1, 4, 41));
         // Forgotten: the next focus gain does nothing.
@@ -2739,24 +2876,42 @@ mod tests {
     }
 
     #[test]
+    fn the_jump_has_no_time_limit() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        // A click on the notification an hour later is still a click on it.
+        let later = Instant::now() + Duration::from_secs(3600);
+        let outs = shown(a.on_event(ct::Event::FocusGained, later));
+        assert_eq!(outs[1..], jump_to(1, 4, 41));
+    }
+
+    #[test]
+    fn the_jump_lands_on_the_terminal_that_alerted() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, mut v) = jump_app("osc9");
+        // A second waiting agent in panel 4, after the first.
+        let mut second = v.projects[0].panels[1].terminals[0].clone();
+        second.id = TerminalId(42);
+        v.projects[0].panels[1].terminals.push(second);
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        a.on_server(alert_of(4, 42, AgentStatus::Waiting));
+        assert_eq!(come_back(&mut a)[1..], jump_to(1, 4, 42));
+        // It was answered meanwhile: the one of its panel that still waits.
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        a.on_server(alert_of(4, 42, AgentStatus::Waiting));
+        v.projects[0].panels[1].terminals[1].agent = None;
+        a.on_server(ServerMsg::SessionView(v));
+        assert_eq!(come_back(&mut a)[1..], jump_to(1, 4, 41));
+    }
+
+    #[test]
     fn an_unseen_idle_panel_is_jumped_to_too() {
         use deck_core::agents::AgentStatus;
         let (mut a, _) = jump_app("osc9");
         unfocus_and_alert(&mut a, 9, AgentStatus::Idle);
-        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
-        assert_eq!(outs[1..], jump_to(8, 9, 91));
-    }
-
-    #[test]
-    fn a_late_focus_gain_does_not_jump() {
-        use deck_core::agents::AgentStatus;
-        let (mut a, _) = jump_app("osc9");
-        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
-        let outs = a.on_event(
-            ct::Event::FocusGained,
-            Instant::now() + Duration::from_secs(11),
-        );
-        assert_eq!(outs, [focus(true)]);
+        assert_eq!(come_back(&mut a)[1..], jump_to(8, 9, 91));
     }
 
     #[test]
@@ -2766,19 +2921,23 @@ mod tests {
         unfocus_and_alert(&mut a, 9, AgentStatus::Idle);
         v.projects[3].panels[0].unseen = false;
         a.on_server(ServerMsg::SessionView(v.clone()));
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
         assert_eq!(
-            a.on_event(ct::Event::FocusGained, Instant::now()),
-            [focus(true)]
+            logged(&outs),
+            ["terminal 91: the terminal got focus back, no jump: its panel no longer needs you"]
         );
+        assert_eq!(shown(outs), [focus(true)]);
         // Closed: the panel is gone from the view.
         a.on_event(ct::Event::FocusLost, Instant::now());
         a.on_server(alert_for(4, AgentStatus::Waiting));
         v.projects[0].panels.retain(|p| p.id != PanelId(4));
         a.on_server(ServerMsg::SessionView(v));
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
         assert_eq!(
-            a.on_event(ct::Event::FocusGained, Instant::now()),
-            [focus(true)]
+            logged(&outs),
+            ["terminal 41: the terminal got focus back, no jump: its panel is gone"]
         );
+        assert_eq!(shown(outs), [focus(true)]);
     }
 
     #[test]
@@ -2808,7 +2967,7 @@ mod tests {
         f.modes = Modes(Modes::FOCUS_REPORTING);
         a.on_server(ServerMsg::Frame(f));
         unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
-        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        let outs = come_back(&mut a);
         assert_eq!(outs[0], focus(true));
         assert_eq!(
             outs[1],
@@ -2826,10 +2985,14 @@ mod tests {
         let (mut a, _) = jump_app("osc9");
         unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
         a.modal = Some(Modal::Help);
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
         assert_eq!(
-            a.on_event(ct::Event::FocusGained, Instant::now()),
-            [focus(true)]
+            logged(&outs),
+            [
+                "terminal 41: the terminal got focus back, no jump: a prompt, menu or overlay is open"
+            ]
         );
+        assert_eq!(shown(outs), [focus(true)]);
         a.modal = None;
         a.on_event(ct::Event::FocusLost, Instant::now());
         assert_eq!(
@@ -2844,8 +3007,27 @@ mod tests {
         let (mut a, _) = jump_app("osc9");
         unfocus_and_alert(&mut a, 9, AgentStatus::Idle);
         a.on_server(alert_for(4, AgentStatus::Waiting));
-        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
-        assert_eq!(outs[1..], jump_to(1, 4, 41));
+        assert_eq!(come_back(&mut a)[1..], jump_to(1, 4, 41));
+    }
+
+    #[test]
+    fn a_raise_request_brings_the_window_forward_and_its_outcome_is_logged() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        // An older alert the terminal showed is armed; the click on another notification
+        // wins over it.
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        assert_eq!(a.on_server(ServerMsg::Raise), [Out::Raise]);
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+        assert_eq!(
+            App::raised("raise: Ghostty focused /dev/ttys004"),
+            [Out::Send(ClientMsg::AlertLog(
+                "raise: Ghostty focused /dev/ttys004".into()
+            ))]
+        );
     }
 
     #[test]

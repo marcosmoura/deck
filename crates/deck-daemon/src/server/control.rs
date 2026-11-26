@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use deck_core::action::{Action, ActionError, NameKind, validate_name};
 use deck_core::model::{LaunchSpec, PanelId, ProjectId, Session, SessionId, SessionView};
-use deck_core::protocol::{Request, Response, Target};
+use deck_core::protocol::{Request, Response, ServerMsg, Target};
 
 use super::{PanelTarget, Shared, panel_of_terminal};
 
@@ -67,7 +67,7 @@ impl Shared {
                 .control_new_terminal(panel, launch, keep, focus)
                 .await
                 .map(|id| Response::Created { id }),
-            Request::Focus { id } => self.control_focus(id).map(|()| Response::Ok),
+            Request::Focus { id, raise } => self.control_focus(id, raise).map(|()| Response::Ok),
             Request::Close { id } => self.control_close(id).map(|()| Response::Ok),
             Request::RenamePanel { panel, name } => self
                 .control_rename_panel(panel, name)
@@ -196,13 +196,13 @@ impl Shared {
             .await
             .map_err(|e| e.to_string())?;
         if focus {
-            self.control_focus(tid.0)?;
+            self.control_focus(tid.0, false)?;
         }
         Ok(tid.0)
     }
 
     /// Focuses a terminal (and its panel and project) or a panel.
-    fn control_focus(self: &Arc<Self>, id: u64) -> Result<(), String> {
+    fn control_focus(self: &Arc<Self>, id: u64, raise: bool) -> Result<(), String> {
         let mut st = self.st();
         let found = st
             .sessions
@@ -231,6 +231,24 @@ impl Shared {
             sess.model.focus_panel(panel);
         }
         self.settle_named(&mut st, sid, before, renamed);
+        if raise {
+            // A click on a notification: every client of the session is asked for its
+            // window (the one that showed the notification may not be the one that was
+            // active last; a client that cannot raise does nothing), and the log tells what
+            // the click reached.
+            let mut asked = Vec::new();
+            for (cid, client) in st.clients_of(sid) {
+                client.queue.push_msg(ServerMsg::Raise);
+                asked.push(cid.to_string());
+            }
+            if asked.is_empty() {
+                tracing::info!("alert: focus {id} with raise, no client attached");
+            } else {
+                asked.sort();
+                let asked = asked.join(", ");
+                tracing::info!("alert: focus {id} with raise, client {asked} asked to raise");
+            }
+        }
         Ok(())
     }
 

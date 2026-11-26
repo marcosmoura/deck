@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 30;
+pub const PROTOCOL_VERSION: u32 = 31;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -60,6 +60,9 @@ pub enum ClientMsg {
     },
     /// Whether the outer terminal has focus. A client that never reported counts as focused.
     Focus(bool),
+    /// What the client did with an alert (how it showed it, what a return to the terminal or
+    /// a raise did), for the daemon's log. Ids only, never a name.
+    AlertLog(String),
 }
 
 /// Where to scroll a terminal's display. Positive counts go back into the history (up),
@@ -204,8 +207,11 @@ pub enum Request {
         focus: bool,
     },
     /// Focuses a terminal (and its panel and project) or a panel, by its daemon-wide id.
+    /// With `raise`, the session's clients are asked to bring their window forward too
+    /// (`ServerMsg::Raise`).
     Focus {
         id: u64,
+        raise: bool,
     },
     /// Closes a terminal, a panel or a project, by its daemon-wide id.
     Close {
@@ -390,7 +396,12 @@ pub enum ServerMsg {
         panel: String,
         /// The alerted panel (names are not unique).
         panel_id: PanelId,
+        /// The terminal the agent runs in: what a click on the notification focuses.
+        terminal_id: TerminalId,
     },
+    /// Bring the outer terminal's window forward: a notification of this session was clicked
+    /// (`Request::Focus` with `raise`).
+    Raise,
     /// One piece of an image's pixels, for a client that attached with `images`. The pieces of
     /// one image come in order, `data` at most [`MAX_IMAGE_PIECE`] bytes at byte `offset` of
     /// `total`; they precede the first frame that lists the image.
@@ -969,6 +980,7 @@ mod tests {
             },
             ClientMsg::Focus(false),
             ClientMsg::Focus(true),
+            ClientMsg::AlertLog("alert 9: shown".into()),
             ClientMsg::Detach,
             ClientMsg::Request(Request::ListSessions),
             ClientMsg::Request(Request::KillServer),
@@ -1020,7 +1032,7 @@ mod tests {
                 keep: true,
                 focus: false,
             }),
-            ClientMsg::Request(Request::Focus { id: 5 }),
+            ClientMsg::Request(Request::Focus { id: 5, raise: true }),
             ClientMsg::Request(Request::Close { id: 6 }),
             ClientMsg::Request(Request::RenamePanel {
                 panel: PanelId(3),
@@ -1171,7 +1183,9 @@ mod tests {
                 project: "p ✓".into(),
                 panel: "e".into(),
                 panel_id: PanelId(9),
+                terminal_id: TerminalId(10),
             },
+            ServerMsg::Raise,
             ServerMsg::SessionView(view()),
             ServerMsg::Frame(frame()),
             ServerMsg::Image {

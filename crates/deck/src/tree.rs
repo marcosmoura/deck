@@ -110,6 +110,16 @@ pub struct IdArgs {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct FocusArgs {
+    #[command(flatten)]
+    pub target: IdArgs,
+    /// Also bring the window of the session's client forward (what a click on a deck
+    /// notification runs). Exact in Ghostty on macOS; elsewhere it changes nothing.
+    #[arg(long)]
+    pub raise: bool,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct RenamePanelArgs {
     #[command(flatten)]
     pub common: Common,
@@ -692,7 +702,7 @@ pub(crate) fn check_in_session(
     }
 }
 
-fn by_id(args: IdArgs, request: fn(u64) -> Request) -> ExitCode {
+fn by_id(args: IdArgs, request: impl FnOnce(u64) -> Request) -> ExitCode {
     let json = args.common.json;
     let result = Api::connect()
         .and_then(|mut api| {
@@ -706,8 +716,9 @@ fn by_id(args: IdArgs, request: fn(u64) -> Request) -> ExitCode {
     finish(json, result)
 }
 
-pub fn focus(args: IdArgs) -> ExitCode {
-    by_id(args, |id| Request::Focus { id })
+pub fn focus(args: FocusArgs) -> ExitCode {
+    let raise = args.raise;
+    by_id(args.target, |id| Request::Focus { id, raise })
 }
 
 pub fn close(args: IdArgs) -> ExitCode {

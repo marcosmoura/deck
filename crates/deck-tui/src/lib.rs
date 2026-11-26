@@ -46,6 +46,7 @@ mod picker;
 mod placed;
 #[cfg(test)]
 mod placed_tests;
+mod raise;
 mod reader;
 #[cfg(test)]
 mod reload_tests;
@@ -334,9 +335,12 @@ async fn run_async(mut options: Options, uid: u32) -> Exit {
     }
     app.hold_until_configured();
 
+    let (helpers, mut helpers_rx) = mpsc::unbounded_channel();
     let ctx = Ctx {
         socket: options.socket.clone(),
         notifier: notify::available(),
+        raiser: raise::available(),
+        helpers,
         uid,
         cwd,
         colors: probe.colors,
@@ -477,6 +481,11 @@ async fn run_async(mut options: Options, uid: u32) -> Exit {
                 Some(Server::Msg(msg)) => app.on_server(*msg),
                 Some(Server::Closed) | None => break Exit::Lost,
             },
+            Some(helped) = helpers_rx.recv() => match helped {
+                // deck's own notification failed (not allowed, say): the terminal shows it.
+                Helped::NotifyFailed(alert, why) => app.notification_failed(*alert, &why),
+                Helped::Raised(what) => App::raised(&what),
+            },
             found = recv_font(&mut font_rx), if font_rx.is_some() => {
                 font_rx = None;
                 app.on_font_answer(found.unwrap_or(false));
@@ -509,6 +518,7 @@ async fn run_async(mut options: Options, uid: u32) -> Exit {
                     let _ = stdout.flush();
                 }
                 Out::SystemNotify(alert) => system_notify(&alert, &ctx),
+                Out::Raise => raise_window(&ctx),
                 Out::Exit(exit) => break 'run exit,
             }
         }
@@ -614,6 +624,10 @@ struct Ctx {
     socket: PathBuf,
     /// What shows deck's own notifications here, if anything (`notify = "system"`).
     notifier: Option<notify::Notifier>,
+    /// How the outer terminal's window is brought forward here, if it can be.
+    raiser: Option<raise::Raiser>,
+    /// Where the helper threads report back to the client's loop.
+    helpers: mpsc::UnboundedSender<Helped>,
     /// The user the client runs as, who must own the daemon too.
     uid: u32,
     cwd: PathBuf,
@@ -876,17 +890,35 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
         .flatten()
 }
 
-/// Shows deck's own notification, or writes the terminal's (OSC 9) when it cannot be shown.
+/// What a helper thread reports back to the client's loop.
+enum Helped {
+    /// deck's own notification was not shown, and why: the terminal shows it instead.
+    NotifyFailed(Box<notify::SystemAlert>, String),
+    /// The outer terminal's window was asked to come forward: what happened, for the log.
+    Raised(String),
+}
+
+/// Shows deck's own notification. When it cannot be shown, the alert comes back to the
+/// client's loop, which has the terminal show it instead (OSC 9).
 fn system_notify(alert: &notify::SystemAlert, ctx: &Ctx) {
-    let shown = ctx
-        .notifier
-        .as_ref()
-        .is_some_and(|n| notify::show(n, alert, &ctx.socket));
-    if !shown {
-        let mut stdout = io::stdout();
-        let _ = stdout.write_all(&alert.fallback);
-        let _ = stdout.flush();
+    let back = ctx.helpers.clone();
+    let returned = Box::new(alert.clone());
+    let failed = move |why: String| {
+        let _ = back.send(Helped::NotifyFailed(returned, why));
+    };
+    match &ctx.notifier {
+        Some(notifier) => notify::show(notifier, alert, &ctx.socket, failed),
+        None => failed("no notifier".into()),
     }
+}
+
+/// Brings the outer terminal's window forward, off the client's loop: the terminal app can
+/// take its time.
+fn raise_window(ctx: &Ctx) {
+    let (raiser, back) = (ctx.raiser, ctx.helpers.clone());
+    std::thread::spawn(move || {
+        let _ = back.send(Helped::Raised(raise::run(raiser)));
+    });
 }
 
 #[cfg(test)]

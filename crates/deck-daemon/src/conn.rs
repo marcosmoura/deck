@@ -240,6 +240,11 @@ async fn dispatch(
         Ok(ClientMsg::Input { terminal, bytes }) => shared.input(cid, terminal, bytes),
         Ok(ClientMsg::Scroll { terminal, to }) => shared.scroll(cid, terminal, to),
         Ok(ClientMsg::Focus(focused)) => shared.focus(cid, focused),
+        Ok(ClientMsg::AlertLog(text)) => {
+            // The client's words, cut and cleaned: a line of the log, never more.
+            let text: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+            tracing::info!("alert: client {cid}: {text}");
+        }
         Ok(ClientMsg::Detach) => return false,
         Ok(ClientMsg::Request(Request::ListSessions)) => {
             queue.push_msg(ServerMsg::Response(Response::Sessions(

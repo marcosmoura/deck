@@ -369,3 +369,67 @@ async fn interactive_and_full_screen_programs_are_never_busy() {
     assert!(!busy(&client));
     daemon.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn an_alert_names_its_terminal_and_a_focus_with_raise_asks_the_client_to_come_forward() {
+    let daemon = daemon().await;
+    let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
+    let (panel, terminal) = inactive_panel(&mut client).await;
+    event(&mut client, terminal, AgentStatus::Working).await;
+    event(&mut client, terminal, AgentStatus::Waiting).await;
+    client
+        .wait(|c| {
+            c.log.iter().any(|m| {
+                matches!(m, ServerMsg::AgentAlert { panel_id, terminal_id, .. }
+                    if *panel_id == panel && *terminal_id == terminal)
+            })
+        })
+        .await;
+    let raises = |c: &Client| {
+        c.log
+            .iter()
+            .filter(|m| matches!(m, ServerMsg::Raise))
+            .count()
+    };
+    assert_eq!(raises(&client), 0);
+
+    // What a click on the notification runs: `deck focus --raise <terminal>`.
+    let mut control = Client::control(&daemon.paths.socket).await;
+    let r = control
+        .request(Request::Focus {
+            id: terminal.0,
+            raise: true,
+        })
+        .await;
+    assert_eq!(r, Response::Ok);
+    client
+        .wait(|c| c.view.as_ref().unwrap().active_panel == Some(panel) && raises(c) == 1)
+        .await;
+
+    // A plain focus asks nothing of the client, and what the client did with an alert is
+    // only a line of the log.
+    client
+        .send(&ClientMsg::AlertLog("terminal 1: shown".into()))
+        .await;
+    let r = control
+        .request(Request::Focus {
+            id: terminal.0,
+            raise: false,
+        })
+        .await;
+    assert_eq!(r, Response::Ok);
+    drain(&mut client).await;
+    assert_eq!(raises(&client), 1);
+
+    // With no client attached there is nobody to ask: the focus still works.
+    drop(client);
+    pause().await;
+    let r = control
+        .request(Request::Focus {
+            id: terminal.0,
+            raise: true,
+        })
+        .await;
+    assert_eq!(r, Response::Ok);
+    daemon.stop().await.unwrap();
+}

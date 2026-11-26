@@ -141,6 +141,20 @@ pub fn panel_attention(panel: &PanelView) -> Option<TerminalId> {
         .map(|t| t.id)
 }
 
+/// `terminal` if it is in `panel` and needs the user: it waits, or it is idle and the panel is
+/// unseen.
+pub fn terminal_attention(panel: &PanelView, terminal: TerminalId) -> Option<TerminalId> {
+    let status = panel
+        .terminals
+        .iter()
+        .find(|t| t.id == terminal)?
+        .agent
+        .as_ref()?
+        .status;
+    (status == AgentStatus::Waiting || (panel.unseen && status == AgentStatus::Idle))
+        .then_some(terminal)
+}
+
 /// The text a desktop notification carries: what the agent did, and where.
 pub(crate) fn alert_body(
     kind: AgentKind,

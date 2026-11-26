@@ -483,6 +483,24 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
+/// Waits for a line of the daemon's log that has every one of `parts`, in any order.
+fn wait_logged(h: &Harness, parts: &[&str]) {
+    let log = h.home().log_file();
+    let read = || fs::read_to_string(&log).unwrap_or_default();
+    let start = std::time::Instant::now();
+    while !read()
+        .lines()
+        .any(|line| line.contains("alert: ") && parts.iter().all(|p| line.contains(p)))
+    {
+        assert!(
+            start.elapsed() < TIMEOUT,
+            "no log line with {parts:?} in:\n{}",
+            read()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
     let bin = fake_agent("claude");
@@ -570,7 +588,7 @@ fn a_system_notification_opens_its_panel_when_clicked() {
     let before = h.raw_output().len();
     event(&h, terminal, AgentStatus::Working, "s1");
     event(&h, terminal, AgentStatus::Waiting, "s1");
-    // The click ran `deck focus` on the agent's panel: it is the active one again.
+    // The click ran `deck focus` on the agent's terminal: its panel is the active one again.
     wait_until("the agent's panel opened by the click", TIMEOUT, || {
         h.is_active_row(3)
     });
@@ -581,8 +599,95 @@ fn a_system_notification_opens_its_panel_when_clicked() {
         notified.contains(&format!("claude needs you · {project} › {panel}")),
         "{notified}"
     );
+    // The click names the terminal, and asks for deck's window to come forward.
+    let id = terminal.0.to_string();
+    if cfg!(target_os = "macos") {
+        let click = format!("'focus' '--raise' '--session' 'main' '{id}'");
+        assert!(notified.contains(&click), "{notified}");
+        assert!(notified.contains(&format!("deck-main-{id}")), "{notified}");
+    }
     // deck's own notification only: nothing went to the outer terminal.
     assert!(!contains(&written_since(&h, before), b"\x1b]9;"));
+    // The log tells the alert's whole story, with ids only.
+    let of = format!("terminal {id}");
+    wait_logged(&h, &[&of, "waiting, sent to client"]);
+    wait_logged(&h, &[&of, "handed to deck's own notification"]);
+    wait_logged(&h, &[&format!("focus {id} with raise"), "asked to raise"]);
+    wait_logged(&h, &["raise: nothing here can bring the window forward"]);
+    let log = fs::read_to_string(h.home().log_file()).unwrap();
+    assert!(!log.contains(&panel) && !log.contains("needs you"), "{log}");
+}
+
+#[test]
+fn a_notification_macos_refuses_is_shown_by_the_terminal() {
+    // terminal-notifier without the user's permission: "Notifications are not allowed for
+    // this application", status 3.
+    let bin = fake_agent("claude");
+    let refused = bin.path().join("terminal-notifier");
+    fs::write(
+        &refused,
+        "#!/bin/sh\necho 'Could not request notification permission' >&2\nexit 3\n",
+    )
+    .unwrap();
+    fs::set_permissions(&refused, fs::Permissions::from_mode(0o755)).unwrap();
+    let send = bin.path().join("notify-send");
+    fs::write(&send, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&send, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut h = Harness::builder(SIZE)
+        .config_unset("sidebar")
+        .config("notify", "\"system\"")
+        .env("PATH", &path)
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .env_remove("SSH_CONNECTION")
+        .env_remove("SSH_TTY")
+        .env("DECK_TEST_AGENT_POLL_MS", "100")
+        .deck();
+    h.wait_for_text("│$", TIMEOUT);
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    let (project, _, terminal) = inactive_first_panel(&mut h);
+    // The user is elsewhere: focus out, and a new terminal (a grid appears) as the sync point.
+    h.send_bytes(b"\x1b[O");
+    h.send_bytes(PREFIX);
+    h.send_keys("t");
+    wait_until("a grid", TIMEOUT, || {
+        rows(&h).iter().any(|r| r.contains('╭'))
+    });
+
+    let before = h.raw_output().len();
+    event(&h, terminal, AgentStatus::Working, "s1");
+    event(&h, terminal, AgentStatus::Waiting, "s1");
+    let panel = panel_name(&h);
+    let expected = format!("\x1b]9;claude needs you · {project} › {panel}\x07");
+    wait_until("the terminal's notification", TIMEOUT, || {
+        contains(&written_since(&h, before), expected.as_bytes())
+    });
+    let of = format!("terminal {}", terminal.0);
+    let why = if cfg!(target_os = "macos") {
+        "terminal-notifier ended with status 3"
+    } else {
+        "notify-send ended with status 1"
+    };
+    wait_logged(
+        &h,
+        &[
+            &of,
+            why,
+            "shown by the terminal instead",
+            "the next focus gain jumps",
+        ],
+    );
+    assert!(!h.is_active_row(3));
+
+    // The terminal's notification is clicked, whenever: the outer terminal gains focus.
+    h.send_bytes(b"\x1b[I");
+    wait_until("the agent's panel", TIMEOUT, || h.is_active_row(3));
+    wait_logged(&h, &[&of, "the terminal got focus back, jumped to"]);
 }
 
 #[test]

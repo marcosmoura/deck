@@ -295,19 +295,38 @@ async fn focus_moves_only_when_asked() {
     assert_ne!(quiet_project, loud_project);
 
     // Focus by id: a terminal brings its panel and project, a panel its project.
-    let Response::Ok = c.request(Request::Focus { id: quiet }).await else {
+    let Response::Ok = c
+        .request(Request::Focus {
+            id: quiet,
+            raise: false,
+        })
+        .await
+    else {
         panic!("focused")
     };
     c.wait(|c| view(c).active_panel == Some(panel) && c.active_terminal().0 == quiet)
         .await;
     assert_eq!(view(&c).active_project, Some(view(&c).projects[0].id));
-    let Response::Ok = c.request(Request::Focus { id: quiet_panel }).await else {
+    let Response::Ok = c
+        .request(Request::Focus {
+            id: quiet_panel,
+            raise: false,
+        })
+        .await
+    else {
         panic!("focused")
     };
     c.wait(|c| view(c).active_panel == Some(PanelId(quiet_panel)))
         .await;
     assert_eq!(
-        error(&mut c, Request::Focus { id: quiet_project }).await,
+        error(
+            &mut c,
+            Request::Focus {
+                id: quiet_project,
+                raise: false
+            }
+        )
+        .await,
         format!("{quiet_project} is not a terminal or panel")
     );
     daemon.stop().await.unwrap();

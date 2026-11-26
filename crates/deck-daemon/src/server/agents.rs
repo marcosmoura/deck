@@ -267,14 +267,27 @@ impl Shared {
         let Some((project, panel_id, name)) = self.mark_unseen(st, handle) else {
             return;
         };
-        if let Some(client) = st.active_client(handle.session) {
-            client.queue.push_msg(ServerMsg::AgentAlert {
-                kind: after.kind,
-                status: after.status,
-                project,
-                panel: name,
-                panel_id,
-            });
+        let status = after.status.name();
+        let terminal = handle.id;
+        let (t, p) = (terminal.0, panel_id.0);
+        match st.clients_of(handle.session).max_by_key(|(_, c)| c.active) {
+            Some((cid, client)) => {
+                client.queue.push_msg(ServerMsg::AgentAlert {
+                    kind: after.kind,
+                    status: after.status,
+                    project,
+                    panel: name,
+                    panel_id,
+                    terminal_id: terminal,
+                });
+                tracing::info!(
+                    "alert: terminal {t} (panel {p}) {status}, sent to client {cid} (focused: {})",
+                    client.focused
+                );
+            }
+            None => {
+                tracing::info!("alert: terminal {t} (panel {p}) {status}, no client attached");
+            }
         }
     }
 

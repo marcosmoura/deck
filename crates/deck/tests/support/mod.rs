@@ -118,6 +118,9 @@ impl Home {
         // client draws logos as images in Ghostty and kitty); a test opts in with `.env(...)`.
         for key in [
             "TERM_PROGRAM",
+            // macOS names the terminal app here; with Ghostty's id the client would ask the
+            // developer's Ghostty to bring a window forward (`deck focus --raise`).
+            "__CFBundleIdentifier",
             "KITTY_WINDOW_ID",
             "GHOSTTY_RESOURCES_DIR",
             "WEZTERM_EXECUTABLE",
