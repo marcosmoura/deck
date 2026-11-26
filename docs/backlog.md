@@ -10,6 +10,7 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 7. DECK-41 Flaky test of the output pause during an upgrade
 8. DECK-49 Hardening for daily use
+9. DECK-51 Notifications that open their panel
 
 ### Not ordered yet
 
@@ -66,6 +67,7 @@ Open tasks the user has not placed in the queue:
 | DECK-48 | Collapsed sidebar                                | done       | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
 | DECK-49 | Hardening for daily use                          | ready      | DECK-26, DECK-41                                              | [hardening](specs/2026-11-26-hardening/00-overview.md)                       |
 | DECK-50 | Agent activity in the sidebar                    | done       | —                                                             | [agent-activity](specs/2026-11-26-agent-activity/00-overview.md)             |
+| DECK-51 | Notifications that open their panel              | todo       | —                                                             | —                                                                            |
 
 ### Withdrawn
 
@@ -85,6 +87,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-47 | Queued frames merged for a slow client              | 26 Nov 2026 | Taken over by [DECK-49](specs/2026-11-26-hardening/00-overview.md) sub-spec 08                                |
 
 ## Notes
+
+### DECK-51
+
+**Notifications that open their panel.** Asked for on 26 Nov 2026: clicking deck's desktop notification did not bring the user to the panel it was about. The terminal's OSC 9 notification tells deck nothing about a click, and DECK-50's jump on focus return did not work for the user in practice.
+
+- What: a new `notify` value, `"system"`, made the default: the client shows the alert itself, with `terminal-notifier` on macOS (`-execute` runs `deck focus --session <name> <terminal>`, `-activate` brings the outer terminal's app forward by its bundle id, `-group` per panel) or `notify-send --action` on Linux (a click runs the same `deck focus`), and falls back to the terminal's notification when neither is installed. Today's OSC 9 becomes `notify = "terminal"`; `"osc9"` stays accepted as its old name; `"bell"` and `"none"` are unchanged. The notification's text is today's.
+- Why: a click on the notification is the only reliable sign of which panel the user wants.
+- Acceptance: with `terminal-notifier` installed, an alert while the outer terminal is unfocused runs it with the text, the focus command and the app's bundle id, and a click lands on the panel; without it the OSC 9 bytes are written as today; `"terminal"`, `"osc9"`, `"bell"` and `"none"` behave as before; config docs updated.
 
 ### DECK-47
 
