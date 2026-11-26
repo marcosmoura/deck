@@ -21,6 +21,7 @@ Open tasks the user has not placed in the queue:
 - DECK-35 Setting for program clipboard writes
 - DECK-36 Setting for kitty file mediums
 - DECK-38 Daemon not dumpable on Linux
+- DECK-52 Notification clicks that reach the terminal
 
 ## Tasks
 
@@ -67,6 +68,7 @@ Open tasks the user has not placed in the queue:
 | DECK-49 | Hardening for daily use                          | ready      | DECK-26, DECK-41                                              | [hardening](specs/2026-11-26-hardening/00-overview.md)                       |
 | DECK-50 | Agent activity in the sidebar                    | done       | —                                                             | [agent-activity](specs/2026-11-26-agent-activity/00-overview.md)             |
 | DECK-51 | Notifications that open their panel              | done       | —                                                             | —                                                                            |
+| DECK-52 | Notification clicks that reach the terminal      | todo       | —                                                             | —                                                                            |
 
 ### Withdrawn
 
@@ -86,6 +88,14 @@ A task that will not be built moves here from the Tasks table, with the date and
 | DECK-47 | Queued frames merged for a slow client              | 26 Nov 2026 | Taken over by [DECK-49](specs/2026-11-26-hardening/00-overview.md) sub-spec 08                                |
 
 ## Notes
+
+### DECK-52
+
+**Notification clicks that reach the terminal.** Asked for on 26 Nov 2026: a click on a deck notification must bring the user to deck and focus the terminal the notification is about, every time, however long after it appeared. DECK-51's notification focused the panel, not the terminal, and only brought the terminal app forward, so with a second Ghostty window or tab the click landed elsewhere; macOS also refused `terminal-notifier` for an hour on the user's Mac, and nothing was shown or recorded.
+
+- What: the alert names its terminal, and a click focuses that terminal (`deck focus --raise`, one notification per terminal). `--raise` is new: the daemon asks the session's client to bring its own window forward, which in Ghostty on macOS is exact (the window, tab and split, through Ghostty's AppleScript `focus`). A notifier that fails hands the alert to the terminal's notification, with a notice. Without deck's own notification, the first return to the terminal after an alert jumps to its terminal, with no time limit. `daemon.log` records each alert, how it was shown, and what a click or a return did, with ids only.
+- Why: the click was unreliable and failed without a trace.
+- Acceptance: on the user's Mac, a click on a notification of an agent in another space lands on that terminal with deck's Ghostty window in front, also minutes later and with another Ghostty tab selected; a refused notifier still notifies through Ghostty, and coming back jumps; each case leaves its lines in `daemon.log`; docs updated.
 
 ### DECK-51
 
