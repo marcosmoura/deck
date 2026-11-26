@@ -11,6 +11,7 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 7. DECK-41 Flaky test of the output pause during an upgrade
 8. DECK-40 List OpenCode sessions without loading repositories
 9. DECK-28 Stress suite follow-ups
+10. DECK-49 Hardening for daily use
 
 ### Not ordered yet
 
@@ -81,6 +82,7 @@ Open tasks the user has not placed in the queue:
 | DECK-46 | Terminal output read while the emulator works       | todo       | DECK-26                                                       | —                                                                            |
 | DECK-47 | Queued frames merged for a slow client              | todo       | DECK-26                                                       | —                                                                            |
 | DECK-48 | Collapsed sidebar                                   | done       | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
+| DECK-49 | Hardening for daily use                             | draft spec | DECK-26, DECK-41                                              | [hardening](specs/2026-11-26-hardening/00-overview.md)                       |
 
 ### Withdrawn
 
