@@ -2,7 +2,7 @@
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::agents::AgentState;
+use crate::agents::{AgentKind, AgentState};
 use crate::model::{NameSource, Panel, PanelId, PanelView, Session, Terminal, TerminalView};
 
 /// The longest name, in display cells.
@@ -69,6 +69,18 @@ pub fn title_core(title: &str) -> &str {
 /// A title without the `OC | ` that OpenCode puts before its session's name.
 fn strip_agent_prefix(title: &str) -> &str {
     title.strip_prefix("OC |").map_or(title, str::trim_start)
+}
+
+/// An agent's title without what the agent adds after its session's name: Codex titles a
+/// terminal `<session> | <folder>`. Only for that agent, so a `|` in another program's
+/// title stays.
+pub fn strip_agent_suffix(kind: Option<AgentKind>, title: &str) -> &str {
+    match kind {
+        Some(AgentKind::Codex) => title
+            .rsplit_once(" | ")
+            .map_or(title, |(name, _)| name.trim_end()),
+        _ => title,
+    }
 }
 
 /// Recomputes the name of a panel whose name follows what runs in it (`Default` or
@@ -140,7 +152,10 @@ fn agent_name(agent: &AgentState, input: &NameInput, max: usize) -> Option<Strin
     let finish = |text: &str| finish(text, max);
     let from_title = input.title.and_then(|t| {
         let clean: String = t.chars().filter(|c| !c.is_control()).collect();
-        let stripped = strip_agent_prefix(clean.trim_start_matches(|c: char| !c.is_alphanumeric()));
+        let stripped = strip_agent_suffix(
+            Some(agent.kind),
+            strip_agent_prefix(clean.trim_start_matches(|c: char| !c.is_alphanumeric())),
+        );
         let lower = stripped.trim().to_lowercase();
         let bare = lower.is_empty()
             || lower == input.program.to_lowercase()
@@ -219,6 +234,31 @@ mod tests {
         assert_eq!(
             name(Some(&a), Some("⠹ Fix login bug"), "claude").as_deref(),
             Some("Fix login bug")
+        );
+    }
+
+    #[test]
+    fn a_codex_title_loses_its_folder() {
+        let mut a = agent(Some("Review the API"));
+        a.kind = AgentKind::Codex;
+        assert_eq!(
+            name(Some(&a), Some("Ping | deck"), "codex").as_deref(),
+            Some("Ping")
+        );
+        // Only the last part goes; a bare folder falls back to the prompt.
+        assert_eq!(
+            name(Some(&a), Some("A | B | deck"), "codex").as_deref(),
+            Some("A | B")
+        );
+        assert_eq!(
+            name(Some(&a), Some("codex | deck"), "codex").as_deref(),
+            Some("Review the API")
+        );
+        // Another agent keeps its pipe.
+        let claude = agent(None);
+        assert_eq!(
+            name(Some(&claude), Some("Ping | deck"), "claude").as_deref(),
+            Some("Ping | deck")
         );
     }
 

@@ -8,7 +8,9 @@ use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::layout::{self, COLLAPSED_SIDEBAR_WIDTH};
 use deck_core::model::NameSource;
 use deck_core::model::{PanelId, PanelView, ProjectId, SessionView, TerminalId, TerminalView};
-use deck_core::naming::{NameInput, full_auto_name, source_terminal_view, title_core};
+use deck_core::naming::{
+    NameInput, full_auto_name, source_terminal_view, strip_agent_suffix, title_core,
+};
 use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
@@ -1045,7 +1047,11 @@ pub fn panel_icon_kind(panel: &PanelView) -> Option<IconKind> {
 /// What a terminal row says: the title without its spinner and status glyphs, else the
 /// program.
 fn terminal_label(term: &TerminalView) -> String {
-    let title = term.title.as_deref().map_or("", title_core);
+    let kind = term.agent.as_ref().map(|a| a.kind);
+    let title = term
+        .title
+        .as_deref()
+        .map_or("", |t| strip_agent_suffix(kind, title_core(t)));
     if title.is_empty() {
         &term.program
     } else {
