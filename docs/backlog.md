@@ -21,6 +21,7 @@ Open tasks the user has not placed in the queue:
 - DECK-35 Setting for program clipboard writes
 - DECK-36 Setting for kitty file mediums
 - DECK-38 Daemon not dumpable on Linux
+- DECK-50 Agent activity in the sidebar
 
 ## Tasks
 
@@ -65,6 +66,7 @@ Open tasks the user has not placed in the queue:
 | DECK-41 | Flaky test of the output pause during an upgrade | todo       | —                                                             | —                                                                            |
 | DECK-48 | Collapsed sidebar                                | done       | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
 | DECK-49 | Hardening for daily use                          | ready      | DECK-26, DECK-41                                              | [hardening](specs/2026-11-26-hardening/00-overview.md)                       |
+| DECK-50 | Agent activity in the sidebar                    | draft spec | —                                                             | [agent-activity](specs/2026-11-26-agent-activity/00-overview.md)             |
 
 ### Withdrawn
 
