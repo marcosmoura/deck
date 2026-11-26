@@ -18,7 +18,8 @@ use std::fs::{self, File, TryLockError};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -59,8 +60,10 @@ fn short_tmp() -> PathBuf {
 /// Dropping it stops the daemon with `deck kill-server`.
 #[derive(Debug)]
 pub struct Home {
-    dir: tempfile::TempDir,
+    dir: Arc<tempfile::TempDir>,
     env: Vec<(OsString, OsString)>,
+    /// False for an [`Home::alias`], which leaves the daemon running when it is dropped.
+    owner: bool,
 }
 
 impl Home {
@@ -132,7 +135,21 @@ impl Home {
         for (key, value) in env {
             set(key, *value);
         }
-        Self { dir, env: vars }
+        Self {
+            dir: Arc::new(dir),
+            env: vars,
+            owner: true,
+        }
+    }
+
+    /// The same directory and environment, as a second handle: dropping it stops nothing
+    /// (a harness that is dropped between runs on one daemon and one state).
+    pub fn alias(&self) -> Self {
+        Self {
+            dir: Arc::clone(&self.dir),
+            env: self.env.clone(),
+            owner: false,
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -190,7 +207,7 @@ impl Home {
 impl Drop for Home {
     fn drop(&mut self) {
         // Without its `DECK_HOME`, `kill-server` would reach the user's own daemon.
-        if !self.env.iter().any(|(k, _)| k == "DECK_HOME") {
+        if !self.owner || !self.env.iter().any(|(k, _)| k == "DECK_HOME") {
             return;
         }
         let _ = self.deck_command(&["kill-server"]).output();
@@ -325,6 +342,67 @@ struct Mirror {
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
+/// The screen of the harness's terminal, as a watch's test sees it.
+pub struct Screen<'a> {
+    term: &'a Term<Listener>,
+}
+
+impl Screen<'_> {
+    /// The character at `row`, `col`.
+    pub fn char_at(&self, row: usize, col: usize) -> char {
+        let line = Line(i32::try_from(row).unwrap_or(i32::MAX));
+        self.term.grid()[line][Column(col)].c
+    }
+
+    /// One row of the screen as text, trailing spaces removed.
+    pub fn row_text(&self, row: usize) -> String {
+        let line = Line(i32::try_from(row).unwrap_or(i32::MAX));
+        let grid = self.term.grid();
+        let text: String = (0..self.term.columns())
+            .map(|col| &grid[line][Column(col)])
+            .filter(|cell| !cell.flags.contains(Flags::WIDE_CHAR_SPACER))
+            .map(|cell| cell.c)
+            .collect();
+        text.trim_end().to_string()
+    }
+
+    /// The cursor's row.
+    pub fn cursor_row(&self) -> usize {
+        usize::try_from(self.term.grid().cursor.point.line.0).unwrap_or(0)
+    }
+}
+
+/// When a watch fired, both instants taken in the PTY reader thread right after `read`
+/// returned, so the polling period of the test thread is not in them.
+#[derive(Debug, Clone, Copy)]
+pub struct Seen {
+    /// The first bytes that arrived after the watch was armed, whatever they were.
+    pub first_output: Instant,
+    /// The bytes after which the watched condition held.
+    pub shown: Instant,
+}
+
+struct Watch {
+    when: Box<dyn Fn(&Screen<'_>) -> bool + Send>,
+    first_output: Option<Instant>,
+    tx: Sender<Seen>,
+}
+
+/// Per switch to the alternate screen: when it arrived and when a `$` first showed after it.
+type ScreenEntries = Vec<(Instant, Option<Instant>)>;
+
+type WatchSlot = Arc<Mutex<Option<Watch>>>;
+
+/// The receiving end of [`Harness::watch`] and [`Harness::watch_cell`].
+pub struct CellWatch(Receiver<Seen>);
+
+impl CellWatch {
+    /// Waits up to `limit` for the condition; `None` when it did not hold in time.
+    pub fn wait(&self, limit: Duration) -> Option<Seen> {
+        self.0.recv_timeout(limit).ok()
+    }
+}
+
 /// How the harness's terminal answers a program's OSC 10/11 colour queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorAnswers {
@@ -332,8 +410,10 @@ pub enum ColorAnswers {
     Default,
     /// This foreground and background, as 8-bit channels.
     Fixed((u8, u8, u8), (u8, u8, u8)),
-    /// No answer at all, like a terminal that does not know the query.
+    /// No answer to the colour queries (the device attributes are answered).
     Silent,
+    /// No answer to anything: the colour queries and the device attributes.
+    Mute,
 }
 
 /// Builds a [`Harness`] with extra config keys and environment variables.
@@ -410,6 +490,12 @@ impl Builder {
         self
     }
 
+    /// Makes the terminal answer nothing: no colours, no device attributes.
+    pub fn mute(mut self) -> Self {
+        self.colors = ColorAnswers::Mute;
+        self
+    }
+
     /// Makes the terminal ignore colour queries.
     pub fn silent_colors(mut self) -> Self {
         self.colors = ColorAnswers::Silent;
@@ -418,6 +504,20 @@ impl Builder {
 
     pub fn deck(self) -> Harness {
         self.spawn(&[env!("CARGO_BIN_EXE_deck")])
+    }
+
+    /// The built `deck` on an existing home (its config and environment stay; this
+    /// builder's are ignored).
+    pub fn deck_in(self, home: Home) -> Harness {
+        Harness::start(
+            self.size,
+            &[env!("CARGO_BIN_EXE_deck")],
+            home,
+            self.colors,
+            self.cell_px,
+            self.xtversion,
+            self.kitty_keyboard,
+        )
     }
 
     pub fn spawn(self, argv: &[&str]) -> Harness {
@@ -453,6 +553,14 @@ pub struct Harness {
     stop_reader: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
     mirror: Arc<Mutex<Mirror>>,
+    watch: WatchSlot,
+    /// When the program was spawned, and for each switch to the alternate screen the
+    /// instant it arrived and the instant a `$` first showed on the screen after it (both
+    /// taken in the reader thread).
+    spawned: Instant,
+    marks: Arc<Mutex<ScreenEntries>>,
+    /// Bytes the program wrote so far (all of them, whether or not `raw` keeps them).
+    written: Arc<AtomicUsize>,
     size: (u16, u16),
     cell_px: (u16, u16),
     // Last: the home stops the daemon after the child is gone.
@@ -520,6 +628,7 @@ impl Harness {
             cmd.env(k, v);
         }
         cmd.cwd(home.path());
+        let spawned = Instant::now();
         let child = pty.slave.spawn_command(cmd).expect("spawn the program");
         drop(pty.slave);
 
@@ -551,8 +660,13 @@ impl Harness {
         let mut reader = pty.master.try_clone_reader().expect("PTY reader");
         let master_fd = pty.master.as_raw_fd().expect("the PTY's descriptor");
         let stop_reader = Arc::new(AtomicBool::new(false));
+        let watch: WatchSlot = Arc::new(Mutex::new(None));
+        let marks = Arc::new(Mutex::new(Vec::new()));
+        let written = Arc::new(AtomicUsize::new(0));
         let reader_thread = {
             let (mirror, writer) = (Arc::clone(&mirror), Arc::clone(&writer));
+            let (watch, written) = (Arc::clone(&watch), Arc::clone(&written));
+            let marks = Arc::clone(&marks);
             let stop = Arc::clone(&stop_reader);
             std::thread::spawn(move || {
                 let mut parser: Processor = Processor::new();
@@ -570,19 +684,48 @@ impl Harness {
                         Ok(0) | Err(_) => break,
                         Ok(n) => n,
                     };
+                    // Taken before anything else is done with the bytes.
+                    let arrived = Instant::now();
+                    written.fetch_add(n, Ordering::Relaxed);
                     {
                         let mut m = lock(&mirror);
                         m.raw.extend_from_slice(&buf[..n]);
                         parser.advance(&mut m.term, &buf[..n]);
+                        {
+                            let mut marks = lock(&marks);
+                            if buf[..n].windows(8).any(|w| w == b"\x1b[?1049h") {
+                                marks.push((arrived, None));
+                            }
+                            if let Some(last) = marks.last_mut()
+                                && last.1.is_none()
+                                && (0..m.term.screen_lines())
+                                    .any(|r| Screen { term: &m.term }.row_text(r).contains('$'))
+                            {
+                                last.1 = Some(arrived);
+                            }
+                        }
+                        let mut slot = lock(&watch);
+                        if let Some(w) = slot.as_mut() {
+                            let first_output = *w.first_output.get_or_insert(arrived);
+                            if (w.when)(&Screen { term: &m.term }) {
+                                let _ = w.tx.send(Seen {
+                                    first_output,
+                                    shown: arrived,
+                                });
+                                *slot = None;
+                            }
+                        }
                     }
                     // Answer the queries the program makes of its terminal.
                     let replies: Vec<String> = lock(&events.0)
                         .drain(..)
                         .filter_map(|event| match event {
-                            Event::PtyWrite(text) => Some(text),
+                            Event::PtyWrite(text) => {
+                                (answers != ColorAnswers::Mute).then_some(text)
+                            }
                             Event::ColorRequest(index, format) => {
                                 let (fg, bg) = match answers {
-                                    ColorAnswers::Silent => return None,
+                                    ColorAnswers::Silent | ColorAnswers::Mute => return None,
                                     ColorAnswers::Default => ((0xcc, 0xcc, 0xcc), (0, 0, 0)),
                                     ColorAnswers::Fixed(fg, bg) => (fg, bg),
                                 };
@@ -627,10 +770,25 @@ impl Harness {
             stop_reader,
             reader: Some(reader_thread),
             mirror,
+            watch,
+            spawned,
+            marks,
+            written,
             size,
             cell_px,
             home,
         }
+    }
+
+    /// When the program was spawned.
+    pub fn spawned_at(&self) -> Instant {
+        self.spawned
+    }
+
+    /// Every switch to the alternate screen so far: when it arrived, and when a `$` first
+    /// showed on the screen after it.
+    pub fn screen_entries(&self) -> Vec<(Instant, Option<Instant>)> {
+        lock(&self.marks).clone()
     }
 
     pub fn home(&self) -> &Home {
@@ -655,6 +813,20 @@ impl Harness {
         let mut writer = lock(&self.writer);
         writer.write_all(bytes).expect("write to the PTY");
         writer.flush().expect("flush the PTY");
+    }
+
+    /// Writes `bytes` on a thread of its own; `false` when the write has not finished after
+    /// `limit` (deck stopped reading its input), so the test fails instead of hanging.
+    pub fn send_bytes_within(&mut self, bytes: &[u8], limit: Duration) -> bool {
+        let writer = Arc::clone(&self.writer);
+        let bytes = bytes.to_vec();
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut writer = lock(&writer);
+            let written = writer.write_all(&bytes).and_then(|()| writer.flush());
+            let _ = done.send(written.is_ok());
+        });
+        finished.recv_timeout(limit).unwrap_or(false)
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
@@ -826,6 +998,29 @@ impl Harness {
             flags: cell.flags,
             underline_color: cell.underline_color(),
         }
+    }
+
+    /// Arms a watch that fires on the first bytes after which `when` holds for the screen.
+    /// The instants are taken in the PTY reader thread (see [`Seen`]); arm it before the
+    /// keys that should cause the change. One watch at a time: a new one replaces the old.
+    pub fn watch(&self, when: impl Fn(&Screen<'_>) -> bool + Send + 'static) -> CellWatch {
+        let (tx, rx) = channel();
+        *lock(&self.watch) = Some(Watch {
+            when: Box::new(when),
+            first_output: None,
+            tx,
+        });
+        CellWatch(rx)
+    }
+
+    /// [`Harness::watch`] for the cell at `row`, `col` to show `ch`.
+    pub fn watch_cell(&self, row: usize, col: usize, ch: char) -> CellWatch {
+        self.watch(move |screen| screen.char_at(row, col) == ch)
+    }
+
+    /// How many bytes the program wrote to its terminal so far.
+    pub fn output_bytes(&self) -> usize {
+        self.written.load(Ordering::Relaxed)
     }
 
     /// The screen's size in columns and rows.

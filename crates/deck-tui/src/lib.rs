@@ -8,6 +8,8 @@ mod backend;
 mod bar;
 #[cfg(test)]
 mod bar_tests;
+#[cfg(test)]
+mod bench_tests;
 mod caps;
 #[cfg(test)]
 mod caps_tests;
@@ -98,12 +100,15 @@ use tokio::sync::mpsc;
 use tokio::time::sleep_until;
 
 use crate::app::{App, Out};
-pub use crate::reader::{StdinState, WaitStdin};
+pub use crate::reader::{RearmStdin, StdinState, WaitStdin};
 
 /// The redraw timer: at most one draw per tick, and only when something changed.
 const REDRAW: Duration = Duration::from_millis(16);
-/// How often the input thread looks at its stop flag.
+/// The input thread's pause when a wait said ready and crossterm then had nothing.
 const INPUT_POLL: Duration = Duration::from_millis(50);
+/// The longest the input thread waits while nothing is expected: a safety net for a terminal
+/// that went away without a hang-up. A signal or the exit wakes it at once.
+const INPUT_IDLE: Duration = Duration::from_secs(1);
 /// How long the main loop waits for the input thread on the way out.
 const READER_JOIN: Duration = Duration::from_millis(200);
 /// How long the writer may take to flush the last messages (`Detach`) on the way out.
@@ -124,6 +129,8 @@ pub struct Options {
     pub read_stdin: ReadStdin,
     /// Waits for input without reading it and tells when the terminal is gone.
     pub wait_stdin: WaitStdin,
+    /// Makes the terminal report input crossterm left unread.
+    pub rearm_stdin: RearmStdin,
 }
 
 impl std::fmt::Debug for Options {
@@ -168,23 +175,46 @@ pub fn run(options: Options) -> Exit {
         Ok(rt) => rt,
         Err(e) => return Exit::Error(format!("cannot start the runtime: {e}")),
     };
-    let exit = runtime.block_on(run_async(options));
+    let uid = match runtime.block_on(async { own_uid() }) {
+        Ok(uid) => uid,
+        Err(e) => return Exit::Error(format!("cannot read the user id: {e}")),
+    };
+    let exit = runtime.block_on(run_async(options, uid));
     // The runtime and its handlers go before the process is replaced.
     drop(runtime);
-    reattach(exit, exec_attach)
+    reattach(exit, uid, exec_attach)
+}
+
+/// The effective uid of this process, from the credentials of a socket pair (the safe way
+/// to read it). Needs the runtime.
+fn own_uid() -> io::Result<u32> {
+    let (a, _b) = UnixStream::pair()?;
+    Ok(a.peer_cred()?.uid())
 }
 
 /// A client told that the daemon is upgrading comes back to its session by executing the new
 /// binary (the terminal is restored by now); `exec` replaces the process and returns only
-/// the error when it cannot.
-fn reattach(exit: Exit, exec: impl FnOnce(&Path, Option<&str>) -> io::Error) -> Exit {
+/// the error when it cannot. A path the daemon of user `uid` would not hand itself over to
+/// is not executed.
+fn reattach(exit: Exit, uid: u32, exec: impl FnOnce(&Path, Option<&str>) -> io::Error) -> Exit {
     match exit {
         Exit::Upgrading { exe, session } => {
-            let _ = exec(&exe, session.as_deref());
+            if upgrade_target(&exe, uid) {
+                let _ = exec(&exe, session.as_deref());
+            }
             Exit::Upgraded
         }
         other => other,
     }
+}
+
+/// Whether `exe` can be the binary a daemon of user `uid` upgrades to: an absolute path to a
+/// regular file owned by that user or by root, as the daemon checks before it executes one.
+fn upgrade_target(exe: &Path, uid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    exe.is_absolute()
+        && std::fs::metadata(exe)
+            .is_ok_and(|meta| meta.is_file() && (meta.uid() == uid || meta.uid() == 0))
 }
 
 /// `<exe> attach <session>` (plain `<exe>` before the client had a session) in place of
@@ -245,7 +275,7 @@ enum Server {
     Closed,
 }
 
-async fn run_async(mut options: Options) -> Exit {
+async fn run_async(mut options: Options, uid: u32) -> Exit {
     // Handlers first, so a signal during set-up still restores the terminal.
     let (Ok(mut sigterm), Ok(mut sighup), Ok(mut sigwinch)) = (
         signal(SignalKind::terminate()),
@@ -301,12 +331,13 @@ async fn run_async(mut options: Options) -> Exit {
 
     let ctx = Ctx {
         socket: options.socket.clone(),
+        uid,
         cwd,
         colors: probe.colors,
         outer_name: probe.xtversion.clone(),
     };
     let hello = ctx.hello(&app, options.session.clone(), options.create);
-    let mut link = match Link::open(&ctx.socket, hello).await {
+    let mut link = match Link::open(&ctx.socket, ctx.uid, hello).await {
         Ok(link) => link,
         Err(e) => {
             drop(guard);
@@ -329,6 +360,7 @@ async fn run_async(mut options: Options) -> Exit {
         let stop = Arc::clone(&stop);
         let late = colors::LateAnswers::new(probe.late, Instant::now());
         let wait = options.wait_stdin;
+        let rearm = options.rearm_stdin;
         let stuck = std::env::var_os("DECK_TEST_STUCK_READER").is_some_and(|v| v == "1");
         std::thread::spawn(move || {
             let _done = done_tx;
@@ -337,11 +369,14 @@ async fn run_async(mut options: Options) -> Exit {
                     std::thread::park();
                 }
             }
-            reader::run(wait, &wake_rx, late, &stop, &input_tx);
+            reader::run(wait, rearm, &wake_rx, late, &stop, &input_tx);
         })
     };
 
-    let mut terminal = match Terminal::new(backend::DeckBackend::new(io::stdout())) {
+    // A frame goes out in a few large writes, not one per 1 KiB line of the line-buffered
+    // stdout; every draw ends with a flush.
+    let screen = io::BufWriter::with_capacity(64 * 1024, io::stdout());
+    let mut terminal = match Terminal::new(backend::DeckBackend::new(screen)) {
         Ok(t) => t,
         Err(e) => return Exit::Error(format!("cannot start the screen: {e}")),
     };
@@ -373,6 +408,9 @@ async fn run_async(mut options: Options) -> Exit {
         };
         let outs = if early.is_empty() {
             tokio::select! {
+            // A key goes before a burst of daemon messages, and a due draw before the next
+            // message of one.
+            biased;
             event = input_rx.recv() => match event {
                 Some(event) => {
                     if matches!(event, ct::Event::Resize(..)) {
@@ -382,17 +420,17 @@ async fn run_async(mut options: Options) -> Exit {
                 }
                 None => break Exit::Error("lost the terminal input".into()),
             },
-            msg = link.server_rx.recv() => match msg {
-                Some(Server::Msg(msg)) => app.on_server(*msg),
-                Some(Server::Closed) | None => break Exit::Lost,
-            },
             () = sleep_until(wake.unwrap_or_else(Instant::now).into()), if wake.is_some() => {
                 let now = Instant::now();
                 let outs = app.tick(now);
                 if app.take_dirty() {
-                    last_draw = now;
                     if let Err(e) = app.draw_frame(&mut terminal) {
                         break Exit::Error(format!("cannot draw: {e}"));
+                    }
+                    // Only a draw that wrote cells restarts the throttle: a key's no-op draw
+                    // must not hold back the echo that follows it.
+                    if terminal.backend_mut().take_wrote_cells() {
+                        last_draw = now;
                     }
                     // What no placement used goes away.
                     if let Err(e) = app.finish_images(terminal.backend_mut()) {
@@ -413,11 +451,6 @@ async fn run_async(mut options: Options) -> Exit {
                 }
                 outs
             },
-            found = recv_font(&mut font_rx), if font_rx.is_some() => {
-                font_rx = None;
-                app.on_font_answer(found.unwrap_or(false));
-                Vec::new()
-            },
             // crossterm drops a SIGWINCH that becomes ready together with the TTY, so the
             // size is also read here; a size the app already has is not a resize.
             _ = sigwinch.recv() => {
@@ -433,6 +466,15 @@ async fn run_async(mut options: Options) -> Exit {
             },
             _ = sigterm.recv() => break Exit::Signal,
             _ = sighup.recv(), if !ignore_sighup => break Exit::Signal,
+            msg = link.server_rx.recv() => match msg {
+                Some(Server::Msg(msg)) => app.on_server(*msg),
+                Some(Server::Closed) | None => break Exit::Lost,
+            },
+            found = recv_font(&mut font_rx), if font_rx.is_some() => {
+                font_rx = None;
+                app.on_font_answer(found.unwrap_or(false));
+                Vec::new()
+            },
             }
         } else {
             std::mem::take(&mut early)
@@ -465,6 +507,7 @@ async fn run_async(mut options: Options) -> Exit {
     };
 
     stop.store(true, Ordering::Release);
+    let _ = (&wake_tx).write(&[0]);
     // A reader that does not finish (a hung-up terminal can trap it inside crossterm) is left
     // to end with the process.
     if done_rx.recv_timeout(READER_JOIN) != Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
@@ -561,6 +604,8 @@ async fn recv_font(rx: &mut Option<mpsc::UnboundedReceiver<bool>>) -> Option<boo
 /// What a connection's `Hello` needs besides the session.
 struct Ctx {
     socket: PathBuf,
+    /// The user the client runs as, who must own the daemon too.
+    uid: u32,
     cwd: PathBuf,
     colors: Option<OuterColors>,
     /// The outer terminal's XTVERSION name.
@@ -596,17 +641,37 @@ struct Link {
 }
 
 impl Link {
-    /// Connects and sends `hello`.
-    async fn open(socket: &Path, hello: ClientMsg) -> io::Result<Self> {
+    /// Connects and sends `hello`, which carries the environment, to the daemon of user
+    /// `uid`: a socket that another user listens on is refused before a byte is sent.
+    async fn open(socket: &Path, uid: u32, hello: ClientMsg) -> io::Result<Self> {
         let stream = UnixStream::connect(socket).await?;
+        let peer = stream.peer_cred()?.uid();
+        if peer != uid {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} is served by uid {peer}, not {uid}", socket.display()),
+            ));
+        }
         let (mut read_half, mut write_half) = stream.into_split();
 
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ClientMsg>();
         let _ = out_tx.send(hello);
         let writer = tokio::spawn(async move {
+            let mut bytes = Vec::new();
             while let Some(msg) = out_rx.recv().await {
-                let Ok(bytes) = encode(&msg) else { continue };
-                if write_half.write_all(&bytes).await.is_err() {
+                // What is already queued goes out in one write: a burst of typed keys is one
+                // message each.
+                bytes.clear();
+                let mut next = Some(msg);
+                while let Some(msg) = next.take() {
+                    if let Ok(encoded) = encode(&msg) {
+                        bytes.extend_from_slice(&encoded);
+                    }
+                    if bytes.len() < 64 * 1024 {
+                        next = out_rx.try_recv().ok();
+                    }
+                }
+                if !bytes.is_empty() && write_half.write_all(&bytes).await.is_err() {
                     break;
                 }
             }
@@ -665,7 +730,7 @@ const ATTACH_FOR: Duration = Duration::from_secs(5);
 /// `Err` is why the daemon refused (the session is gone, say) or could not be reached.
 async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, Refused> {
     let hello = ctx.hello(app, Some(name.to_string()), false);
-    let mut link = Link::open(&ctx.socket, hello)
+    let mut link = Link::open(&ctx.socket, ctx.uid, hello)
         .await
         .map_err(|e| Refused::Text(format!("cannot connect to the deck daemon: {e}")))?;
     let wait = async {
@@ -775,7 +840,7 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
         colors: None,
     };
     let ask = async {
-        let mut link = Link::open(&ctx.socket, hello).await.ok()?;
+        let mut link = Link::open(&ctx.socket, ctx.uid, hello).await.ok()?;
         link.out_tx
             .send(ClientMsg::Request(Request::ListSessions))
             .ok()?;
@@ -802,43 +867,106 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ByeReason, Exit, Path, Refused, reattach, refusal};
+    use std::os::unix::fs::MetadataExt;
+    use std::path::PathBuf;
+
+    use super::{ByeReason, ClientMsg, Exit, Link, Path, Refused, reattach, refusal};
+
+    /// A binary the user owns (this test's), and the user.
+    fn own_binary() -> (PathBuf, u32) {
+        let exe = std::env::current_exe().unwrap();
+        let uid = std::fs::metadata(&exe).unwrap().uid();
+        (exe, uid)
+    }
 
     #[test]
     fn an_upgrading_client_executes_the_new_binary_on_its_session() {
+        let (exe, uid) = own_binary();
         let mut ran = None;
         let exit = reattach(
             Exit::Upgrading {
-                exe: "/opt/deck/bin/deck".into(),
+                exe: exe.clone(),
                 session: Some("work".into()),
             },
+            uid,
             |exe: &Path, session: Option<&str>| {
                 ran = Some((exe.to_path_buf(), session.map(str::to_string)));
                 std::io::Error::other("no exec in a test")
             },
         );
-        assert_eq!(
-            ran,
-            Some(("/opt/deck/bin/deck".into(), Some("work".to_string())))
-        );
+        assert_eq!(ran, Some((exe, Some("work".to_string()))));
         // The exec failed: the client ends and says how to come back.
         assert_eq!(exit, Exit::Upgraded);
     }
 
     #[test]
     fn an_upgrading_client_without_a_session_executes_the_plain_binary() {
+        let (exe, uid) = own_binary();
         let mut ran = None;
         reattach(
             Exit::Upgrading {
-                exe: "/opt/deck/bin/deck".into(),
+                exe: exe.clone(),
                 session: None,
             },
+            uid,
             |exe: &Path, session: Option<&str>| {
                 ran = Some((exe.to_path_buf(), session.map(str::to_string)));
                 std::io::Error::other("no exec in a test")
             },
         );
-        assert_eq!(ran, Some(("/opt/deck/bin/deck".into(), None)));
+        assert_eq!(ran, Some((exe, None)));
+    }
+
+    #[test]
+    fn an_upgrade_to_a_path_the_daemon_would_refuse_executes_nothing() {
+        let (exe, uid) = own_binary();
+        let relative = PathBuf::from(exe.file_name().unwrap());
+        let directory = exe.parent().unwrap().to_path_buf();
+        let missing = exe.with_extension("missing");
+        // The last one is a file of another user: the client expects a daemon of `uid + 1`.
+        for (path, uid) in [
+            (relative, uid),
+            (directory, uid),
+            (missing, uid),
+            (exe, uid + 1),
+        ] {
+            let exit = reattach(
+                Exit::Upgrading {
+                    exe: path.clone(),
+                    session: Some("work".into()),
+                },
+                uid,
+                |_: &Path, _: Option<&str>| unreachable!("executed {}", path.display()),
+            );
+            assert_eq!(exit, Exit::Upgraded);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_socket_another_user_listens_on_is_sent_nothing() {
+        use tokio::io::AsyncReadExt;
+        let dir = std::env::temp_dir().join(format!("deck-tui-peer-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let socket = dir.join("s");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let uid = super::own_uid().unwrap();
+        let hello = || ClientMsg::Request(deck_core::protocol::Request::ListSessions);
+
+        // The listener is not the user the client expects: nothing is written.
+        let err = Link::open(&socket, uid + 1, hello()).await.err().unwrap();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err}");
+        let (mut peer, _) = listener.accept().await.unwrap();
+        let mut got = Vec::new();
+        peer.read_to_end(&mut got).await.unwrap();
+        assert!(got.is_empty(), "{got:?}");
+
+        // The user's own listener gets the first message.
+        let link = Link::open(&socket, uid, hello()).await.unwrap();
+        let (mut peer, _) = listener.accept().await.unwrap();
+        link.close().await;
+        peer.read_to_end(&mut got).await.unwrap();
+        assert!(!got.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -869,7 +997,7 @@ mod tests {
 
     #[test]
     fn other_exits_do_not_execute_anything() {
-        let exit = reattach(Exit::DaemonStopped, |_: &Path, _: Option<&str>| {
+        let exit = reattach(Exit::DaemonStopped, 0, |_: &Path, _: Option<&str>| {
             unreachable!("no exec")
         });
         assert_eq!(exit, Exit::DaemonStopped);

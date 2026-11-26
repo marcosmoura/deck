@@ -5,7 +5,8 @@
 //! `Response`, `Welcome`, `Clipboard`, `ImageGone` and the pieces of images are never
 //! dropped, and only the latest `SessionView` is kept. Image pieces are bounded by bytes
 //! instead of by count: an image that does not fit waits (the writer is told when the pieces
-//! drain, with [`Next::Owed`]).
+//! drain, with [`Next::Owed`]). Clipboard copies are bounded by bytes too: one that does not
+//! fit behind those a slow client has not read yet is dropped.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -30,6 +31,19 @@ pub const MAX_PENDING_MSGS: usize = 1000;
 /// Image bytes kept for a client before a further image waits (one image is always let
 /// through when none is pending).
 pub const MAX_PENDING_IMAGE_BYTES: usize = 64 << 20;
+
+/// Clipboard text kept for a client before a further copy is dropped (one copy is always
+/// let through when none is pending). Counting the copies as messages alone would let a
+/// client that does not read hold [`MAX_PENDING_MSGS`] of them, each megabytes long.
+pub const MAX_PENDING_CLIPBOARD_BYTES: usize = 16 << 20;
+
+/// The bytes of clipboard text a message carries.
+fn clipboard_bytes(msg: &ServerMsg) -> usize {
+    match msg {
+        ServerMsg::Clipboard { text, .. } => text.len(),
+        _ => 0,
+    }
+}
 
 #[derive(Debug)]
 enum Item {
@@ -88,6 +102,8 @@ struct Inner {
     msgs: usize,
     /// Pixel bytes in the pending image pieces.
     pieces: usize,
+    /// Bytes of text in the pending clipboard copies.
+    clipboard: usize,
     /// An image was held back: tell the writer when the pieces have drained.
     owed: bool,
     view: Option<SessionView>,
@@ -132,6 +148,7 @@ impl Queue {
             q.frames = 0;
             q.msgs = 0;
             q.pieces = 0;
+            q.clipboard = 0;
             q.owed = false;
             q.view = None;
             q.closed = true;
@@ -139,6 +156,15 @@ impl Queue {
             self.notify.notify_one();
             return;
         }
+        let copied = clipboard_bytes(&msg);
+        // Only a copy is dropped for the budget, never another message behind one.
+        if copied > 0
+            && q.clipboard > 0
+            && q.clipboard.saturating_add(copied) > MAX_PENDING_CLIPBOARD_BYTES
+        {
+            return;
+        }
+        q.clipboard += copied;
         q.msgs += 1;
         q.items.push_back(Item::Msg(msg));
         drop(q);
@@ -239,6 +265,7 @@ impl Queue {
                     }
                     Some(Item::Msg(m)) => {
                         q.msgs = q.msgs.saturating_sub(1);
+                        q.clipboard = q.clipboard.saturating_sub(clipboard_bytes(&m));
                         return Next::Msg(m);
                     }
                     Some(Item::Frame(f)) => {
@@ -420,6 +447,43 @@ mod tests {
             q.push_msg(ServerMsg::Response(deck_core::protocol::Response::Ok));
             assert!(matches!(q.next().await, Next::Msg(_)));
         }
+    }
+
+    #[tokio::test]
+    async fn pending_clipboard_copies_are_bounded_by_bytes() {
+        let copy = |bytes: usize| ServerMsg::Clipboard {
+            selection: "c".into(),
+            text: "a".repeat(bytes),
+        };
+        let size = |next: Next| match next {
+            Next::Msg(ServerMsg::Clipboard { text, .. }) => text.len(),
+            other => panic!("{other:?}"),
+        };
+        let q = Queue::new();
+        // Four copies fill the budget; the fifth is dropped, and the client stays.
+        for _ in 0..5 {
+            q.push_msg(copy(MAX_PENDING_CLIPBOARD_BYTES / 4));
+        }
+        q.push_msg(copy(1));
+        q.push_msg(ServerMsg::Response(deck_core::protocol::Response::Ok));
+        for _ in 0..4 {
+            assert_eq!(size(q.next().await), MAX_PENDING_CLIPBOARD_BYTES / 4);
+        }
+        assert!(matches!(q.next().await, Next::Msg(ServerMsg::Response(_))));
+        // Once read, the budget is free again; a copy alone passes whatever its size. Behind
+        // it a copy is dropped, and any other message is kept.
+        q.push_msg(copy(MAX_PENDING_CLIPBOARD_BYTES + 1));
+        q.push_msg(copy(1));
+        q.push_msg(ServerMsg::Response(deck_core::protocol::Response::Ok));
+        assert_eq!(size(q.next().await), MAX_PENDING_CLIPBOARD_BYTES + 1);
+        // A dropped response would leave the queue empty: fail then, instead of waiting.
+        let next = tokio::time::timeout(std::time::Duration::from_secs(5), q.next()).await;
+        assert!(
+            matches!(next, Ok(Next::Msg(ServerMsg::Response(_)))),
+            "{next:?}"
+        );
+        q.push_msg(copy(1));
+        assert_eq!(size(q.next().await), 1);
     }
 
     #[tokio::test]

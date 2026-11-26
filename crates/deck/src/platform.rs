@@ -1,11 +1,12 @@
-//! The `unsafe` of the binary: process identity, liveness, signals, detaching, reading stdin and
-//! telling when it is gone. Everything else is safe code.
+//! The `unsafe` of the binary: process identity, the user at the other end of a socket, liveness,
+//! signals, detaching, reading stdin and telling when it is gone. Everything else is safe code.
 
 #![allow(unsafe_code)]
 
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -18,6 +19,49 @@ use deck_tui::StdinState;
 pub fn effective_uid() -> u32 {
     // SAFETY: `geteuid` has no preconditions and cannot fail.
     unsafe { libc::geteuid() }
+}
+
+/// The effective user id of the process that listens at the other end of a connected Unix
+/// socket, as it was when the socket was made.
+#[cfg(target_os = "linux")]
+pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let size = size_of::<libc::ucred>();
+    let mut len = libc::socklen_t::try_from(size).map_err(io::Error::other)?;
+    // SAFETY: the descriptor is open, and `cred` is valid for writes of `len` bytes, its size.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut cred).cast(),
+            &raw mut len,
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if usize::try_from(len).ok() != Some(size) {
+        return Err(io::Error::other("the peer credentials are incomplete"));
+    }
+    Ok(cred.uid)
+}
+
+/// The effective user id of the process that listens at the other end of a connected Unix
+/// socket, as it was when the socket was made.
+#[cfg(target_os = "macos")]
+pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+    let (mut uid, mut gid): (libc::uid_t, libc::gid_t) = (0, 0);
+    // SAFETY: the descriptor is open and both pointers are valid for one write each.
+    let rc = unsafe { libc::getpeereid(stream.as_raw_fd(), &raw mut uid, &raw mut gid) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(uid)
 }
 
 /// True while a process with this pid exists (`kill(pid, 0)` sends no signal).
@@ -114,6 +158,24 @@ pub fn read_stdin(timeout: Duration) -> Option<Vec<u8>> {
     }
 }
 
+/// Re-applies stdin's terminal settings unchanged. On Linux that wakes every waiter on the
+/// terminal, so input left unread is reported again (`deck_tui::RearmStdin`); elsewhere it does
+/// nothing.
+pub fn rearm_stdin() {
+    #[cfg(target_os = "linux")]
+    {
+        let mut settings = std::mem::MaybeUninit::<libc::termios>::zeroed();
+        // SAFETY: `settings` is a zeroed `termios`, valid for `tcgetattr` to fill.
+        if unsafe { libc::tcgetattr(libc::STDIN_FILENO, settings.as_mut_ptr()) } != 0 {
+            return;
+        }
+        // SAFETY: the call succeeded, so it filled the struct.
+        let settings = unsafe { settings.assume_init() };
+        // SAFETY: the terminal's own settings, set back with `TCSANOW` (nothing is flushed).
+        unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &raw const settings) };
+    }
+}
+
 /// Waits up to `timeout` for input on stdin without reading it, or for `wake` to be readable
 /// (that is `Ready` too), and tells when the terminal is gone: `POLLHUP` or `POLLERR`;
 /// `POLLIN` with nothing queued (`FIONREAD` 0 or failing: a revoked tty reads as end of file);
@@ -122,7 +184,8 @@ pub fn read_stdin(timeout: Duration) -> Option<Vec<u8>> {
 pub fn wait_stdin(timeout: Duration, wake: BorrowedFd<'_>) -> StdinState {
     // SAFETY: `isatty` only looks at a descriptor number.
     if unsafe { libc::isatty(libc::STDIN_FILENO) } != 1 {
-        std::thread::sleep(timeout);
+        // Nothing wakes this sleep, so it stays short enough for the thread to see its stop flag.
+        std::thread::sleep(timeout.min(Duration::from_millis(50)));
         return StdinState::Idle;
     }
     let mut fds = [

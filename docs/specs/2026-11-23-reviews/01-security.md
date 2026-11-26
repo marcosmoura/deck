@@ -1,13 +1,13 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
 # 01 — Security review
 
 ## Scope
 
-A review of how deck could be abused by another local user, by a program running inside it, by a file or terminal output it reads, or through its release pipeline; supply-chain checks in CI; fixes within budget; the report. Run on Fable 5.2 at `xhigh` (overview).
+A review of how deck could be abused by another local user, by a program running inside it, by a file or terminal output it reads, or through its release pipeline; supply-chain checks in CI; the high and medium fixes; the report. The audit itself was run by reviewers on 24 Nov 2026; the lead hands its findings to the worker, which writes the report and makes the fixes from it. Run on Fable 5.2 at `xhigh` (overview).
 
 ## Requirements
 
@@ -23,14 +23,15 @@ A review of how deck could be abused by another local user, by a program running
    - `deck stats` (DECK-23: what it reveals over the socket) and copy mode and search (DECK-24: search input, the text requests, their OSC 52 writes);
    - dependencies and supply chain: `cargo-deny` (overview), DECK-19's Zig build fetching sources at build time, GitHub Actions pinning, token scopes in DECK-25, `install.sh` and the formula's checksums.
 3. **`cargo-deny`**, `deny.toml`, `just audit`, the CI step (overview). Advisories found are fixed by updating, or accepted in `deny.toml` with a reason and a link.
-4. Fixes and proposed tasks per the overview's fix budget, each fix with a test that fails without it.
+4. **The report** `docs/reviews/<date>-security.md` from the audit's findings: threat model, every area concluded, the findings table with each status per the audit's disposition (`fixed (sub-spec 01, test <name>)`, `planned (sub-spec 02)`, `DECK-NN`, `accepted: <reason>`), what could not be checked, and the spec claims that differed. A `docs/reviews/README.md` lists the reports; `docs/index.md` routes to it.
+5. **Fixes in this sub-spec**, most severe first, each with a test or check that fails without it: B-1, A-1 (a), (b) and (c), B-2, D-1, C-1, the C-2 job split; and C-8's update procedure in `docs/architecture.md`. The worker confirms each still holds at the commit it starts from; one that no longer does is recorded as such.
 
 ## Acceptance criteria
 
-- [ ] `docs/reviews/<date>-security.md` exists with the commit reviewed, the features added since the spec, the threat model, every area of 2 (and every added one) concluded, and the findings table.
+- [ ] `docs/reviews/<date>-security.md` exists, built from the audit, with the commit reviewed, the features added since the spec, the threat model, every area of 2 (and every added one) concluded, and the findings table.
 - [ ] `just audit` passes and runs in CI.
 - [ ] Every `critical` or `high` finding is fixed, or is a backlog task the lead has raised with the user (overview, Proposed tasks).
-- [ ] Each fix has a regression test.
+- [ ] B-1, A-1 (a, b, c), B-2, D-1, C-1 and the C-2 job split are fixed, each with a regression test or check.
 
 ## Tests
 

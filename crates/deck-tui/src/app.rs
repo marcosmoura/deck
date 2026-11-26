@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::agent::SPIN_FPS;
 use crate::graphics::{Images, SPINNER_FRAMES};
 use crate::placed::Piece;
 use deck_core::action::Action as Act;
@@ -190,6 +191,9 @@ pub struct App {
     pub(crate) started: Instant,
     /// The loader image's frame (0..8) as of the last tick; every spinner shows it.
     pub(crate) spin_frame: u8,
+    /// The last draw showed a spinner (true until one has drawn): while none shows, no timer
+    /// runs and nothing is redrawn for it.
+    pub(crate) spinner_seen: std::cell::Cell<bool>,
     /// The outer terminal has focus, as far as its focus events told.
     focused: bool,
     /// The first line of the help overlay shown.
@@ -279,6 +283,7 @@ impl App {
             spin_at: None,
             started: Instant::now(),
             spin_frame: 0,
+            spinner_seen: std::cell::Cell::new(true),
             focused: true,
             help_scroll: 0,
             focus_seen: false,
@@ -539,27 +544,29 @@ impl App {
         self.configured && std::mem::take(&mut self.dirty)
     }
 
-    /// Starts the spinner's timer when a terminal spins and none runs yet.
-    fn arm_spinner(&mut self, now: Instant) {
-        if self.spin_at.is_none() && self.mirror.view().is_some_and(agent::view_spins) {
-            self.spin_at = Some(if self.live_images().is_some() {
-                self.next_frame_at(now)
-            } else {
-                now + agent::SPIN_EVERY
-            });
+    /// Starts the spinner's timer when a terminal spins, a spinner is on screen and none runs
+    /// yet.
+    pub(crate) fn arm_spinner(&mut self, now: Instant) {
+        if self.spin_at.is_none()
+            && self.spinner_seen.get()
+            && self.mirror.view().is_some_and(agent::view_spins)
+        {
+            self.spin_at = Some(self.next_frame_at(now));
         }
     }
 
-    /// The loader image's frame at `now`: `floor(elapsed * 8) mod 8`.
+    /// The loader image's frame at `now`: the tick of the clock (`SPIN_FPS` a second, since
+    /// the client started) scaled to the loader's `SPINNER_FRAMES`, so it never rounds to 0
+    /// if the two differ.
     fn frame_at(&self, now: Instant) -> u8 {
         let elapsed = now.saturating_duration_since(self.started).as_nanos();
-        let frame = elapsed * SPINNER_FRAMES as u128 / 1_000_000_000 % SPINNER_FRAMES as u128;
-        u8::try_from(frame).unwrap_or(0)
+        let tick = elapsed * SPIN_FPS as u128 / 1_000_000_000 % SPIN_FPS as u128;
+        u8::try_from(tick * SPINNER_FRAMES as u128 / SPIN_FPS as u128).unwrap_or(0)
     }
 
-    /// The next 1/8 s boundary of the time since the start, after `now`.
+    /// The next 1/[`SPIN_FPS`] s boundary of the time since the start, after `now`.
     fn next_frame_at(&self, now: Instant) -> Instant {
-        let frames = SPINNER_FRAMES as u128;
+        let frames = SPIN_FPS as u128;
         let elapsed = now.saturating_duration_since(self.started).as_nanos();
         let next = elapsed * frames / 1_000_000_000 + 1;
         let nanos = (next * 1_000_000_000).div_ceil(frames);
@@ -572,8 +579,11 @@ impl App {
             self.spin = self.spin.wrapping_add(1);
             self.spin_frame = self.frame_at(now);
             self.spin_at = None;
-            self.arm_spinner(now);
-            self.dirty = true;
+            // Off screen it only stops: the draw that shows it again starts it.
+            if self.spinner_seen.get() {
+                self.arm_spinner(now);
+                self.dirty = true;
+            }
         }
         if self.resize_until.is_some_and(|until| now >= until) {
             self.resize_until = None;
@@ -1537,13 +1547,14 @@ impl App {
             Queued::Key(key, kind) => encode_key(key, *kind, modes),
             Queued::Paste(text) => {
                 let mut bytes = Vec::with_capacity(text.len() + 12);
-                let bracketed = modes.has(Modes::BRACKETED_PASTE);
-                if bracketed {
+                if modes.has(Modes::BRACKETED_PASTE) {
+                    // Every ESC byte is left out, as the daemon does for `deck send --paste`, so
+                    // pasted text can never end the paste early.
                     bytes.extend_from_slice(b"\x1b[200~");
-                }
-                bytes.extend_from_slice(text.as_bytes());
-                if bracketed {
+                    bytes.extend(text.bytes().filter(|b| *b != 0x1b));
                     bytes.extend_from_slice(b"\x1b[201~");
+                } else {
+                    bytes.extend_from_slice(text.as_bytes());
                 }
                 bytes
             }
@@ -1909,6 +1920,11 @@ mod tests {
         assert_eq!(
             a.on_event(ct::Event::Paste("a\nb".into()), now),
             [input(b"\x1b[200~a\nb\x1b[201~")]
+        );
+        // A paste that carries the end marker cannot end the paste: its ESC bytes are dropped.
+        assert_eq!(
+            a.on_event(ct::Event::Paste("a\x1b[201~rm -rf\x1b".into()), now),
+            [input(b"\x1b[200~a[201~rm -rf\x1b[201~")]
         );
         let mut f = frame(false, (78, 21), vec![]);
         f.modes = Modes::default();

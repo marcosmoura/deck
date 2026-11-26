@@ -8,6 +8,7 @@ on:
       - "**/Cargo.toml"
       - Cargo.lock
       - .mise.toml
+      - mise.lock
       - .github/workflows/release.yml
 
 permissions:
@@ -16,6 +17,10 @@ permissions:
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  # mise installs a tool only as mise.lock records it, and checks the download against it.
+  MISE_LOCKED: "1"
 
 jobs:
   build:
@@ -32,32 +37,40 @@ jobs:
             os: ubuntu-22.04-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
+      # No cache: what a release is built with is downloaded for that release.
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          version: 2026.11.13
           install_args: rust zig
-      - name: Check the tag matches the workspace version
-        if: startsWith(github.ref, 'refs/tags/v')
+          cache: false
+      # A pull request has no tag: it builds and packs the workspace version, and uploads nothing.
+      - name: Read the workspace version, which a tag must match
         run: |
           version="$(cargo pkgid -p deck | sed 's/.*[#@]//')"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "tag $GITHUB_REF_NAME does not match the workspace version $version" >&2
-            exit 1
-          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+                echo "tag $GITHUB_REF_NAME does not match the workspace version $version" >&2
+                exit 1
+              fi
+              ;;
+          esac
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build
         run: cargo build --release --locked -p deck --target ${{ matrix.target }}
       - name: Package
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           name="deck-$VERSION-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/deck" README.md "dist/$name/"
+          cp "target/${{ matrix.target }}/release/deck" README.md LICENSE "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           cd dist
           shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: deck-${{ matrix.target }}
           path: dist/*.tar.gz*
@@ -69,7 +82,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -91,7 +104,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Download the checksums
         env:
           GH_TOKEN: ${{ github.token }}
@@ -103,8 +118,9 @@ jobs:
           sh packaging/homebrew/render.sh "$version" sums > deck.rb
           echo "VERSION=$version" >> "$GITHUB_ENV"
       # The tap's shared action creates or updates the file; any other project publishes the same way.
+      # It has no releases: the pin is a commit of the tap's `main`, moved by hand to take a fix.
       - name: Publish it to the tap
-        uses: marcosmoura/homebrew-tap/.github/actions/publish@main
+        uses: marcosmoura/homebrew-tap/.github/actions/publish@a2ff0e50a6e36c2511dba1cfd0dd57ccafb27813 # main, 24 Nov 2026
         with:
           file: deck.rb
           path: Formula/deck.rb

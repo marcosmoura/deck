@@ -1,0 +1,16 @@
+# Keeps the pinned actions and the crates current. A `ghostty-vt` update is not merged as it
+# comes: it follows the procedure in docs/architecture.md.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)

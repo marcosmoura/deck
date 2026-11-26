@@ -106,11 +106,12 @@ impl Osc7Scanner {
         if !self.accepts(host) {
             return None;
         }
-        let decoded = percent_decode(path);
-        if decoded.contains(&0) {
+        let path = String::from_utf8(percent_decode(path)).ok()?;
+        // Output chooses this text, and it is printed later (`deck ls`): a path that hides
+        // an escape sequence behind percent-encoding is not a directory to report.
+        if path.chars().any(char::is_control) {
             return None;
         }
-        let path = String::from_utf8(decoded).ok()?;
         Some(PathBuf::from(path))
     }
 
@@ -219,6 +220,24 @@ mod tests {
             Vec::<PathBuf>::new(),
             "no hostname known"
         );
+    }
+
+    #[test]
+    fn a_path_with_control_characters_is_dropped() {
+        let cases: [&[u8]; 6] = [
+            // An OSC 52 behind percent-encoding, as the audit's attack.
+            b"\x1b]7;file:///tmp/%1b]52;c;ZXZpbA==%07\x07",
+            b"\x1b]7;file:///tmp/a%0Ab\x07",
+            b"\x1b]7;file:///tmp/a%09b\x07",
+            b"\x1b]7;file:///tmp/a%7Fb\x07",
+            // C1 CSI (U+009B), percent-encoded and raw.
+            b"\x1b]7;file:///tmp/a%C2%9B2Jb\x07",
+            b"\x1b]7;file:///tmp/a\xc2\x9b2Jb\x07",
+        ];
+        for case in cases {
+            assert_eq!(scan("mac", case), Vec::<PathBuf>::new(), "{case:?}");
+        }
+        assert_eq!(scan("mac", b"\x1b]7;file:///tmp/a%20b\x07").len(), 1);
     }
 
     #[test]

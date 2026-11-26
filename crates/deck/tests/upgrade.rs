@@ -266,6 +266,31 @@ fn the_terminals_keep_their_process_and_screen_and_the_daemon_its_pid() {
 }
 
 #[test]
+fn an_upgrade_makes_the_state_directory_the_log_and_the_locks_private() {
+    let home = Home::new();
+    started(&home);
+    let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    // What a deck that did not set the modes left behind.
+    let state = home.path().join("state");
+    let files = [
+        home.log_file().to_path_buf(),
+        state.join("state.lock"),
+        home.path().join("run").join("deck.lock"),
+    ];
+    fs::set_permissions(&state, fs::Permissions::from_mode(0o755)).unwrap();
+    for file in &files {
+        fs::set_permissions(file, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    upgrade_to(&home, &copy_of_deck(&home, "deck-next"));
+    adopted(&home, 1);
+    assert_eq!(mode(&state), 0o700);
+    for file in &files {
+        assert_eq!(mode(file), 0o600, "{}", file.display());
+    }
+}
+
+#[test]
 fn a_long_output_goes_on_without_a_gap() {
     let home = Home::new();
     started(&home);
@@ -463,9 +488,8 @@ fn kill_server_during_the_handoff_is_answered_by_the_new_daemon_which_then_stops
     let next = copy_of_deck(&home, "deck-next");
     upgrade_to(&home, &next);
     upgrading(&home);
-    // This connection waits in the socket's queue until the new image accepts it. Not
-    // `deck kill-server`: it sends `SIGTERM` after a second without an answer, which is the
-    // test above.
+    // This request is queued on the socket until the new image accepts it. The command
+    // itself (`deck kill-server`, which waits the handoff out) is the two tests below.
     assert_eq!(Conn::open(&home).kill_server(), Response::Ok);
     wait_until("the daemon to stop", LIMIT, || !home.daemon_running());
     assert!(!marker_file(&home).exists());
@@ -475,10 +499,36 @@ fn kill_server_during_the_handoff_is_answered_by_the_new_daemon_which_then_stops
     assert!(hup.exists(), "the terminal was not hung up normally");
 }
 
+/// `deck kill-server` while a 1.5 s handoff is held, with nothing but `DECK_HOME` in its
+/// environment, so its `Hello` fits the socket's buffer and cannot block the write (a large
+/// environment did, on macOS, and hid that the command gave up after 1 s).
 #[test]
-fn deck_kill_server_during_a_long_handoff_stops_the_new_daemon_with_sigterm() {
-    // Frozen past the second `deck kill-server` waits for an answer: it sends `SIGTERM`,
-    // which the handoff records and the new image acts on.
+fn kill_server_with_a_minimal_environment_during_the_handoff_is_answered_by_the_new_daemon() {
+    let home = slow_home(0, 1500);
+    started(&home);
+    let (_, hup) = hup_trap(&home);
+    let next = copy_of_deck(&home, "deck-next");
+    upgrade_to(&home, &next);
+    upgrading(&home);
+    let out = home
+        .deck_command(&["kill-server"])
+        .env_clear()
+        .env("DECK_HOME", home.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    wait_until("the daemon to stop", LIMIT, || !home.daemon_running());
+    assert!(!marker_file(&home).exists());
+    let log = log(&home);
+    let adopted_at = after(&log, 0, "adopted ");
+    after(&log, adopted_at, "shutting down: kill-server");
+    assert!(hup.exists(), "the terminal was not hung up normally");
+}
+
+#[test]
+fn deck_kill_server_waits_out_a_long_handoff_and_is_answered_by_the_new_daemon() {
+    // Frozen past the second `deck kill-server` used to wait for an answer: the command now
+    // waits the handoff out and asks the new image, so no `SIGTERM` is sent.
     let home = slow_home(0, 2500);
     started(&home);
     let (_, hup) = hup_trap(&home);
@@ -490,7 +540,7 @@ fn deck_kill_server_during_a_long_handoff_stops_the_new_daemon_with_sigterm() {
     assert!(!marker_file(&home).exists());
     let log = log(&home);
     let adopted_at = after(&log, 0, "adopted ");
-    after(&log, adopted_at, "shutting down: SIGTERM");
+    after(&log, adopted_at, "shutting down: kill-server");
     assert!(hup.exists(), "the terminal was not hung up normally");
 }
 

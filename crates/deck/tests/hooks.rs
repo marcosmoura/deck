@@ -98,6 +98,36 @@ const EXISTING: &str = r#"{
 "#;
 
 #[test]
+fn a_complete_variable_in_the_agents_environment_does_not_reach_a_hook() {
+    let sb = Sandbox::new();
+    for shell in ["nushell", "fish", "bash"] {
+        for args in [
+            &["agent-event", "--bogus"][..],
+            &["agent-event", "--agent", "claude", "--event", "Stop"][..],
+        ] {
+            let out = sb.deck(args).env("COMPLETE", shell).output().unwrap();
+            assert!(out.status.success(), "{shell} {args:?}: {}", stderr(&out));
+            assert!(out.stdout.is_empty() && out.stderr.is_empty(), "{out:?}");
+        }
+    }
+    // A shell's own request still gets its script.
+    let out = sb.deck(&[]).env("COMPLETE", "fish").output().unwrap();
+    assert!(out.status.success() && stdout(&out).contains("complete"));
+}
+
+#[test]
+fn the_first_install_makes_the_state_and_backup_directories_private() {
+    let sb = Sandbox::new();
+    write(&sb.claude_file(), EXISTING);
+    sb.ok(&["hooks", "install", "claude"]);
+    assert_eq!(sb.backups().len(), 1);
+    for dir in ["state/deck", "state/deck/backups"] {
+        let mode = fs::metadata(sb.path(dir)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "{dir}");
+    }
+}
+
+#[test]
 fn claude_install_keeps_hooks_backs_up_and_is_idempotent() {
     let sb = Sandbox::new();
     write(&sb.claude_file(), EXISTING);
@@ -323,16 +353,87 @@ fn print_writes_nothing_and_status_notices_a_removed_binary() {
     assert!(status.contains("claude: stale"), "{status}");
 }
 
+/// `text` with what stands between `open` and `close` on a line replaced by `with`.
+fn replace_between(text: &str, open: &str, close: &str, with: &str) -> String {
+    text.lines()
+        .map(|line| match (line.find(open), line.find(close)) {
+            (Some(a), Some(b)) if a + open.len() <= b => {
+                format!("{}{with}{}\n", &line[..a + open.len()], &line[b..])
+            }
+            _ => format!("{line}\n"),
+        })
+        .collect()
+}
+
+#[test]
+fn hooks_that_run_the_bare_name_are_stale_also_with_deck_on_path() {
+    let sb = Sandbox::new();
+    let bin = sb.path("bin/deck");
+    write(&bin, "");
+    fs::copy(env!("CARGO_BIN_EXE_deck"), &bin).unwrap();
+    // A `deck` is on `PATH`, so a bare name is not a binary that is gone.
+    let status = || {
+        let path = format!("{}:/usr/bin:/bin", sb.path("bin").display());
+        let out = sb
+            .deck(&["hooks", "status"])
+            .env("PATH", path)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        stdout(&out)
+    };
+    sb.ok(&["hooks", "install", "claude", "opencode"]);
+    let installed = status();
+    assert!(installed.contains("claude: installed"), "{installed}");
+    assert!(installed.contains("opencode: installed"), "{installed}");
+
+    // What deck 0.1 and 0.2 wrote: the bare name, which the agent's `PATH` resolves.
+    let claude = fs::read_to_string(sb.claude_file()).unwrap();
+    let bare = replace_between(&claude, "\"command\": \"", " agent-event --agent ", "deck");
+    assert!(bare.contains("\"deck agent-event --agent claude"), "{bare}");
+    fs::write(sb.claude_file(), bare).unwrap();
+    let plugin = fs::read_to_string(opencode_plugin(&sb)).unwrap();
+    let bare = replace_between(&plugin, "const DECK = ", ";", "\"deck\"");
+    assert!(bare.contains("const DECK = \"deck\";"), "{bare}");
+    fs::write(opencode_plugin(&sb), bare).unwrap();
+
+    let stale = status();
+    for agent in ["claude", "opencode"] {
+        let line = stale.lines().find(|l| l.starts_with(agent)).unwrap();
+        assert!(
+            line.contains("stale") && line.contains("absolute path"),
+            "{stale}"
+        );
+        assert!(line.contains("deck hooks install"), "{stale}");
+    }
+
+    // The next install writes the absolute path again.
+    sb.ok(&["hooks", "install", "claude", "opencode"]);
+    let again = status();
+    assert!(again.contains("claude: installed"), "{again}");
+    assert!(again.contains("opencode: installed"), "{again}");
+}
+
 #[test]
 fn backups_never_overwrite_each_other() {
     let sb = Sandbox::new();
     write(&sb.claude_file(), EXISTING);
-    for _ in 0..2 {
-        sb.ok(&["hooks", "install", "claude"]);
-        sb.ok(&["hooks", "uninstall", "claude"]);
-    }
-    // Four writes of an existing file, all within about a second: four distinct backups.
-    assert_eq!(sb.backups().len(), 4, "{:?}", sb.backups());
+    sb.ok(&["hooks", "install", "claude"]);
+    sb.ok(&["hooks", "uninstall", "claude"]);
+    sb.ok(&["hooks", "install", "claude"]);
+    // Three writes of an existing file, all within about a second: three distinct backups.
+    let three = sb.backups();
+    assert_eq!(three.len(), 3, "{three:?}");
+    // A fourth gets a name of its own too. Only the newest three of a file are kept, so the
+    // oldest one goes (privacy review, P-5).
+    sb.ok(&["hooks", "uninstall", "claude"]);
+    let kept = sb.backups();
+    assert_eq!(kept.len(), 3, "{kept:?}");
+    let new = kept.iter().filter(|b| !three.contains(b)).count();
+    assert_eq!(new, 1, "{three:?} {kept:?}");
+    // Names of one second sort in the order they were written (`-<secs>`, `-<secs>-1`...).
+    let gone: Vec<_> = three.iter().filter(|b| !kept.contains(b)).collect();
+    assert_eq!(gone, [three.iter().min().unwrap()], "{three:?} {kept:?}");
 }
 
 #[test]

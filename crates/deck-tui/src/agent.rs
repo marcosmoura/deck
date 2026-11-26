@@ -10,8 +10,12 @@ use ratatui::style::{Modifier, Style};
 
 use crate::draw::color;
 
+/// How many frames a second the spinner moves, in every tier.
+pub const SPIN_FPS: usize = 8;
 /// How often the spinner moves a frame.
-pub const SPIN_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+#[cfg(test)]
+pub const SPIN_EVERY: std::time::Duration =
+    std::time::Duration::from_millis(1000 / SPIN_FPS as u64);
 
 /// Whether a status shows the spinner.
 pub fn spins(status: AgentStatus) -> bool {

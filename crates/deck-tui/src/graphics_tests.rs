@@ -661,7 +661,7 @@ fn every_spinner_shows_the_same_frame() {
         Some(agent(AgentKind::Claude, AgentStatus::Working));
     let mut a = ghostty("");
     a.on_server(deck_core::protocol::ServerMsg::SessionView(view));
-    a.spin_frame = 7;
+    a.spin_frame = 6;
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
     let (buf, rows) = render(&a);
@@ -674,7 +674,7 @@ fn every_spinner_shows_the_same_frame() {
     let spinners: Vec<u32> = images
         .order
         .iter()
-        .filter(|(_, p)| p.icon == Icon::Spinner && p.frame == 7)
+        .filter(|(_, p)| p.icon == Icon::Spinner && p.frame == 6)
         .map(|(id, _)| *id)
         .collect();
     assert!(!spinners.is_empty());
@@ -683,27 +683,19 @@ fn every_spinner_shows_the_same_frame() {
 }
 
 #[test]
-fn the_timer_follows_the_clock_at_8_hz_in_the_image_tier() {
+fn the_timer_runs_at_8_hz_in_every_tier() {
     use std::time::Duration;
-    let step = Duration::from_nanos(1_000_000_000 / 8 + 1);
-    let a = spinning();
-    let d = a.wake_deadline().expect("a deadline");
-    let now = std::time::Instant::now();
-    assert!(d <= now + step, "{:?}", d.saturating_duration_since(now));
-    // On a boundary of 1/8 s since the start.
-    let nanos = d.duration_since(a.started).as_nanos();
-    let rest = (nanos * 8) % 1_000_000_000;
-    assert!(rest < 8, "{rest}");
-    // The other tiers keep 100 ms.
-    for tier in [Tier::Nerd, Tier::Unicode] {
+    for tier in [Tier::Image, Tier::Nerd, Tier::Unicode] {
         let mut a = spinning();
         a.tier = tier;
         a.spin_at = None;
         a.on_server(deck_core::protocol::ServerMsg::SessionView(titled()));
         let d = a.wake_deadline().expect("a deadline");
         let ahead = d.saturating_duration_since(std::time::Instant::now());
-        assert!(ahead > Duration::from_millis(50), "{tier:?} {ahead:?}");
-        assert!(ahead <= Duration::from_millis(100), "{tier:?} {ahead:?}");
+        assert!(ahead <= Duration::from_millis(126), "{tier:?} {ahead:?}");
+        // On a boundary of 1/8 s since the start.
+        let nanos = d.duration_since(a.started).as_nanos();
+        assert_eq!((nanos * 8) % 1_000_000_000, 0, "{tier:?}");
     }
     // Nothing spins: no timer.
     let mut view = titled();
@@ -712,6 +704,44 @@ fn the_timer_follows_the_clock_at_8_hz_in_the_image_tier() {
     a.spin_at = None;
     a.on_server(deck_core::protocol::ServerMsg::SessionView(view));
     assert_eq!(a.wake_deadline(), None);
+}
+
+#[test]
+fn the_spinner_neither_ticks_nor_redraws_while_it_is_off_screen() {
+    use std::time::Duration;
+    let mut a = spinning();
+    let at = a.wake_deadline().expect("a deadline");
+    // A draw that shows no spinner: the due tick stops the timer and marks nothing dirty.
+    a.spinner_seen.set(false);
+    a.take_dirty();
+    a.tick(at);
+    assert!(!a.take_dirty());
+    assert_eq!(a.wake_deadline(), None);
+    // A draw that shows one starts it again.
+    a.spinner_seen.set(true);
+    a.arm_spinner(at + Duration::from_millis(1));
+    assert!(a.wake_deadline().is_some());
+}
+
+#[test]
+fn a_drawn_frame_decides_whether_the_off_screen_spinner_keeps_ticking() {
+    use std::time::Duration;
+    let mut a = spinning();
+    let sink = Shared::default();
+    let mut t = byte_terminal(&a, &sink);
+    // A working agent, but the sidebar that shows its spinner is hidden: the draw sees none.
+    a.sidebar_hidden = true;
+    a.draw_frame(&mut t).unwrap();
+    assert!(!a.spinner_seen.get());
+    let at = a.wake_deadline().expect("armed before the draw");
+    a.tick(at);
+    assert_eq!(a.wake_deadline(), None);
+    // The sidebar back: the draw shows the spinner and the timer starts again.
+    a.sidebar_hidden = false;
+    a.draw_frame(&mut t).unwrap();
+    assert!(a.spinner_seen.get());
+    a.arm_spinner(at + Duration::from_millis(1));
+    assert!(a.wake_deadline().is_some());
 }
 
 #[test]
@@ -788,7 +818,7 @@ fn two_draws_one_frame_apart_differ_only_in_the_spinner_cells() {
     let mut a = ghostty("");
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
-    a.spin_frame = 3;
+    a.spin_frame = 2;
     let (before, _) = render(&a);
     a.spin_frame = 4;
     let (after, _) = render(&a);

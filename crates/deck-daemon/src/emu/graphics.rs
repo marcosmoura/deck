@@ -17,6 +17,9 @@ use super::Emu;
 
 /// Kitty image storage per screen of a terminal.
 const STORAGE_LIMIT: u64 = 64 << 20;
+/// The most decoded bytes after which the PNG decoder keeps its scratch buffer for the next
+/// image; after a larger image the buffer is freed.
+const SCRATCH_KEEP: u64 = 1 << 20;
 /// Remembered "cannot express this image" warnings, so a log line appears once per image.
 const WARNED_CAP: usize = 256;
 
@@ -65,9 +68,81 @@ pub(super) fn install_png_decoder() -> Result<(), Error> {
 /// rejects as invalid data.
 struct PngDecoder(kg::RustPngDecoder);
 
+/// The bytes of the RGBA pixels a PNG declares, read from its `IHDR`: the chunk every PNG
+/// starts with, after the 8-byte signature and the chunk's length. `None` for data that does
+/// not start so (the decoder refuses it too) and for a size that overflows.
+fn declared_png_bytes(data: &[u8]) -> Option<u64> {
+    let header: [u8; 12] = data.get(12..24)?.try_into().ok()?;
+    let [b'I', b'H', b'D', b'R', w0, w1, w2, w3, h0, h1, h2, h3] = header else {
+        return None;
+    };
+    let width = u64::from(u32::from_be_bytes([w0, w1, w2, w3]));
+    let height = u64::from(u32::from_be_bytes([h0, h1, h2, h3]));
+    width.checked_mul(height)?.checked_mul(4)
+}
+
+/// Deflate cannot shrink data more than about 1,032 times; a bit of room on top.
+const DEFLATE_RATIO: u64 = 1_100;
+
+/// The bytes of scanlines (filter bytes included) a PNG's `IHDR` declares, which its zlib
+/// stream must produce. `None` when the header is not one.
+fn declared_scanline_bytes(data: &[u8]) -> Option<u64> {
+    let header: [u8; 15] = data.get(12..27)?.try_into().ok()?;
+    let [
+        b'I',
+        b'H',
+        b'D',
+        b'R',
+        w0,
+        w1,
+        w2,
+        w3,
+        h0,
+        h1,
+        h2,
+        h3,
+        depth,
+        color,
+        _,
+    ] = header
+    else {
+        return None;
+    };
+    let width = u64::from(u32::from_be_bytes([w0, w1, w2, w3]));
+    let height = u64::from(u32::from_be_bytes([h0, h1, h2, h3]));
+    let channels = match color {
+        0 | 3 => 1,
+        2 => 3,
+        4 => 2,
+        6 => 4,
+        _ => return None,
+    };
+    let row = (width.checked_mul(channels)?.checked_mul(u64::from(depth))?).div_ceil(8);
+    height.checked_mul(row.checked_add(1)?)
+}
+
+/// Whether a PNG of this length can hold the pixels its header declares: a header that
+/// declares far more than its data can expand to is not decoded (the decoder allocates and
+/// fills the declared size first).
+fn png_can_hold_its_size(data: &[u8]) -> bool {
+    declared_scanline_bytes(data)
+        .is_some_and(|raw| raw <= (data.len() as u64).saturating_mul(DEFLATE_RATIO))
+}
+
 impl kg::DecodePng for PngDecoder {
     fn decode_png(&mut self, alloc: &Allocator, data: &[u8]) -> Option<kg::DecodedImage> {
-        let mut image = self.0.decode_png(alloc, data)?;
+        // The inner decoder allocates and zero-fills what the header declares before it reads
+        // any pixel, so a header alone could take gigabytes: refuse what cannot be stored.
+        let declared = declared_png_bytes(data).filter(|bytes| *bytes <= STORAGE_LIMIT)?;
+        if !png_can_hold_its_size(data) {
+            return None;
+        }
+        let decoded = self.0.decode_png(alloc, data);
+        if declared > SCRATCH_KEEP {
+            // Its scratch buffer keeps its capacity: free it after a large image.
+            self.0 = kg::RustPngDecoder::new();
+        }
+        let mut image = decoded?;
         let pixels = usize::try_from(u64::from(image.width) * u64::from(image.height)).ok()?;
         let grey_alpha = match image.data.len() {
             n if n == pixels => false,

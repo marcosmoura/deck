@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # mise installs a tool only as mise.lock records it, and checks the download against it.
+  MISE_LOCKED: "1"
+
 jobs:
   check:
     strategy:
@@ -16,10 +20,19 @@ jobs:
         os: [macos-15, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v3
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          version: 2026.11.13
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: just check
       - name: Lint the workflows and shell scripts
         if: runner.os == 'Linux'
         run: just lint-ci
+      # The advisory database changes by itself: a failure here with no change to the
+      # dependencies is fixed by an update or a reasoned ignore in deny.toml.
+      - name: Audit the dependencies
+        if: runner.os == 'Linux'
+        run: just audit

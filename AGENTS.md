@@ -39,6 +39,8 @@ equivalents in [docs/workflow.md](docs/workflow.md#checks). Run them from the re
 | `just test-crate <crate> [f]` | Tests of one crate, optionally filtered, e.g. `deck-core layout`      |
 | `just record-compat <name>`   | Record a program's output for the compat suite (`FORCE=1` to replace) |
 | `just lint-ci`                | actionlint on the workflows, shellcheck on the shell scripts          |
+| `just audit`                  | cargo-deny on the dependencies: advisories, licences, duplicates      |
+| `just lock-tools`             | Rewrite `mise.lock` after a change of `.mise.toml`                    |
 | `just stress [filter]`        | Stress and soak suite, release build; slow, not in the gate           |
 | `just run [args]`             | Build and run `deck` with an isolated socket and state dir            |
 | `just install`                | Install `deck` into `$PREFIX/bin` (default `~/.local/bin`)            |

@@ -20,7 +20,7 @@ use crate::terminal::TermHandle;
 const KEEP_EXITS: Duration = Duration::from_secs(60);
 /// At most this many exit codes are kept; the oldest go first.
 const MAX_EXITS: usize = 256;
-/// The longest a wait sleeps while it depends on the clock.
+/// The longest a wait sleeps while it depends on a clock that does not run by itself.
 const NAP_CAP: Duration = Duration::from_millis(50);
 
 /// The exit codes of terminals that ended and left the daemon.
@@ -135,7 +135,7 @@ impl Shared {
                 Some(nap) => {
                     tokio::select! {
                         _ = changes.changed() => {}
-                        () = tokio::time::sleep(nap.min(NAP_CAP)) => {}
+                        () = tokio::time::sleep(if self.clock.runs() { nap } else { nap.min(NAP_CAP) }) => {}
                     }
                 }
                 None => {

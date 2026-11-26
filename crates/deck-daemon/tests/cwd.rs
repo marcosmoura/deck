@@ -13,8 +13,8 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use deck_core::action::Action;
@@ -161,18 +161,99 @@ async fn osc7_sets_the_cwd_wins_over_the_os_and_is_restored() {
     wait_view_cwd(&mut client, tid, &reported).await;
     wait_saved_cwd(&daemon, &reported).await;
 
-    // Never asked again once it reported (a query already running may still answer).
-    tokio::time::sleep(POLL * 3).await;
+    // The OS is still asked, and its answer, which does not change, never replaces the report.
     let before = calls.load(Ordering::SeqCst);
-    tokio::time::sleep(POLL * 6).await;
-    assert_eq!(calls.load(Ordering::SeqCst), before, "no more queries");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while calls.load(Ordering::SeqCst) < before + 6 {
+        assert!(Instant::now() < deadline, "the OS was not asked again");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert_eq!(view_cwd(&client, tid).as_deref(), Some(reported.as_path()));
+    wait_saved_cwd(&daemon, &reported).await;
     drop(client);
 
     let home = daemon.stop_keep().await;
     let daemon = TestDaemon::start_on(home).await;
     let mut client = reattach(&daemon).await;
     expect_pwd(&mut client, &reported).await;
+    daemon.stop().await.unwrap();
+}
+
+/// A daemon whose directory lookup answers what the test last put in the returned cell.
+fn answering(first: &str) -> (Options, Arc<Mutex<PathBuf>>) {
+    let answer = Arc::new(Mutex::new(PathBuf::from(first)));
+    let asked = Arc::clone(&answer);
+    let options = Options {
+        cwd_poll: POLL,
+        cwd_query: CwdQuery::new(move |_| Some(asked.lock().unwrap().clone())),
+        ..Options::default()
+    };
+    (options, answer)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_no_shell_sent_holds_only_until_the_shell_moves() {
+    let (options, os) = answering("/os-first");
+    let daemon = TestDaemon::start_with(support::config(), options).await;
+    let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
+    let tid = client.terminal();
+    wait_view_cwd(&mut client, tid, Path::new("/os-first")).await;
+
+    // Some output carries an OSC 7: it is believed while the shell stays where it is.
+    client
+        .type_line(r"printf '\033]7;file://localhost/not-the-shell\007'")
+        .await;
+    wait_view_cwd(&mut client, tid, Path::new("/not-the-shell")).await;
+    tokio::time::sleep(POLL * 5).await;
+    assert_eq!(
+        view_cwd(&client, tid).as_deref(),
+        Some(Path::new("/not-the-shell"))
+    );
+
+    // The shell moves and reports nothing: the report was not its own, and the operating
+    // system is believed again, also for the moves that follow.
+    *os.lock().unwrap() = PathBuf::from("/os-second");
+    wait_view_cwd(&mut client, tid, Path::new("/os-second")).await;
+    *os.lock().unwrap() = PathBuf::from("/os-third");
+    wait_view_cwd(&mut client, tid, Path::new("/os-third")).await;
+
+    // A shell that reports each move keeps its own spelling of the directory.
+    *os.lock().unwrap() = PathBuf::from("/private/os-fourth");
+    client
+        .type_line(r"printf '\033]7;file://localhost/os-fourth\007'")
+        .await;
+    wait_view_cwd(&mut client, tid, Path::new("/os-fourth")).await;
+    tokio::time::sleep(POLL * 5).await;
+    assert_eq!(
+        view_cwd(&client, tid).as_deref(),
+        Some(Path::new("/os-fourth"))
+    );
+    drop(client);
+    daemon.stop().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_burst_of_reports_sends_few_views() {
+    let options = Options {
+        cwd_query: CwdQuery::new(|_| None),
+        ..Options::default()
+    };
+    let daemon = TestDaemon::start_with(support::config(), options).await;
+    let mut client = Client::attach(&daemon.paths.socket, Attach::default()).await;
+    let tid = client.terminal();
+    client.wait(|c| c.view.is_some()).await;
+    let before = client.views().count();
+
+    // 200 directories in one go, far inside one interval of the view throttle.
+    client
+        .type_line(
+            r"i=0; while [ $i -lt 200 ]; do printf '\033]7;file://localhost/burst/%s\007' $i; i=$((i+1)); done",
+        )
+        .await;
+    wait_view_cwd(&mut client, tid, Path::new("/burst/199")).await;
+    let views = client.views().count() - before;
+    assert!(views <= 20, "{views} views for one burst");
+    drop(client);
     daemon.stop().await.unwrap();
 }
 

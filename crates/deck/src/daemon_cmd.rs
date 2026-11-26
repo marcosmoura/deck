@@ -2,7 +2,7 @@
 
 use std::fs::{self, DirBuilder};
 use std::io::{self, Write};
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
@@ -192,16 +192,27 @@ fn serve(
 /// Rotates the log, opens it for append and points stderr at it; returns the original
 /// stderr.
 fn redirect_to_log(paths: &DaemonPaths) -> io::Result<fs::File> {
+    let log = open_log(paths)?;
+    platform::redirect_stderr(&log)
+}
+
+/// The log, open for append, in a state directory only the user reads. Both are made
+/// private when they exist with a looser mode (an older deck made them so): the log holds
+/// names, paths and pids.
+fn open_log(paths: &DaemonPaths) -> io::Result<fs::File> {
     DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(&paths.state_dir)?;
+    fs::set_permissions(&paths.state_dir, fs::Permissions::from_mode(0o700))?;
     rotate_log(&paths.log_file)?;
     let log = fs::OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(&paths.log_file)?;
-    platform::redirect_stderr(&log)
+    log.set_permissions(fs::Permissions::from_mode(0o600))?;
+    Ok(log)
 }
 
 /// Completes once the process `pid` is gone; never when there is none to watch.
@@ -236,6 +247,26 @@ fn rotate_log(log: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_log_and_the_state_directory_are_private_even_when_they_were_not() {
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("home");
+        let env = |name: &str| (name == "DECK_HOME").then(|| base.to_string_lossy().into_owned());
+        let paths = DaemonPaths::from_env(&env, platform::effective_uid()).unwrap();
+
+        drop(open_log(&paths).unwrap());
+        assert_eq!(mode(&paths.state_dir), 0o700);
+        assert_eq!(mode(&paths.log_file), 0o600);
+
+        // What `deck hooks install` and an older daemon left behind.
+        fs::set_permissions(&paths.state_dir, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&paths.log_file, fs::Permissions::from_mode(0o644)).unwrap();
+        drop(open_log(&paths).unwrap());
+        assert_eq!(mode(&paths.state_dir), 0o700);
+        assert_eq!(mode(&paths.log_file), 0o600);
+    }
 
     #[test]
     fn rotation_replaces_the_old_copy_only_over_the_limit() {

@@ -3,6 +3,7 @@
 
 use std::fs::{self, File, TryLockError};
 use std::io::{self, IsTerminal, Read, Write};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -108,6 +109,7 @@ fn run_client(
         session,
         read_stdin: Box::new(platform::read_stdin),
         wait_stdin: Box::new(platform::wait_stdin),
+        rearm_stdin: Box::new(platform::rearm_stdin),
     });
     finish(exit)
 }
@@ -221,7 +223,21 @@ pub(crate) enum Outcome {
 
 impl Conn {
     pub(crate) fn open(socket: &Path, timeout: Duration) -> io::Result<Self> {
+        Self::open_as(socket, timeout, platform::effective_uid())
+    }
+
+    /// [`Conn::open`] to the daemon of user `uid`. A socket that another user listens on (in
+    /// a runtime directory planted before the daemon made its own, or where `DECK_SOCKET`
+    /// points) is refused before a byte is sent: `Hello` carries the environment.
+    fn open_as(socket: &Path, timeout: Duration, uid: u32) -> io::Result<Self> {
         let stream = UnixStream::connect(socket)?;
+        let peer = platform::peer_uid(&stream)?;
+        if peer != uid {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} is served by uid {peer}, not {uid}", socket.display()),
+            ));
+        }
         stream.set_read_timeout(Some(timeout))?;
         stream.set_write_timeout(Some(timeout))?;
         Ok(Self {
@@ -571,9 +587,32 @@ fn wait_unlocked(lock: &Path, limit: Duration) -> bool {
     true
 }
 
+/// The pid of the daemon to signal, from its lock file.
+pub(crate) fn daemon_pid(paths: &DaemonPaths) -> anyhow::Result<i32> {
+    daemon_pid_as(&paths.lock, platform::effective_uid())
+}
+
+/// [`daemon_pid`] for user `uid`. The directory of the lock must be there, a real directory,
+/// owned by `uid` and `0700`, as the daemon makes it: the check every command makes first
+/// passes when the directory is missing, so one planted since (by another user, in `/tmp`)
+/// could name any process of the user in its lock file. Only `uid` writes in a directory
+/// that passed.
+fn daemon_pid_as(lock: &Path, uid: u32) -> anyhow::Result<i32> {
+    let dir = lock.parent().context("the lock file has no directory")?;
+    let meta =
+        fs::symlink_metadata(dir).with_context(|| format!("cannot inspect {}", dir.display()))?;
+    if !meta.file_type().is_dir() || meta.uid() != uid || meta.mode() & 0o777 != 0o700 {
+        bail!(
+            "unsafe runtime directory {}: not a directory of mode 0700 owned by uid {uid}",
+            dir.display()
+        );
+    }
+    read_pid(lock).context("cannot read the daemon's pid from the lock file")
+}
+
 /// The pid in the lock file; the daemon writes it just after taking the lock, so retry
 /// briefly. Never a pid that `kill` would treat as a group (0 or below).
-pub(crate) fn read_pid(lock: &Path) -> Option<i32> {
+fn read_pid(lock: &Path) -> Option<i32> {
     let deadline = Instant::now() + ANSWER_TIMEOUT;
     loop {
         let pid = fs::read_to_string(lock)
@@ -587,12 +626,22 @@ pub(crate) fn read_pid(lock: &Path) -> Option<i32> {
     }
 }
 
-/// Deletes the saved state and a leftover temp file.
+/// Deletes the saved state, a leftover temp file and every unreadable state moved aside
+/// (`state.json.bad-<secs>`), which holds what the state held.
 fn forget_state(paths: &DaemonPaths) -> anyhow::Result<()> {
     let state = paths.state_file();
     let mut tmp = state.clone().into_os_string();
     tmp.push(".tmp");
-    for file in [state, PathBuf::from(tmp)] {
+    let mut files = vec![state, PathBuf::from(tmp)];
+    if let Ok(entries) = fs::read_dir(&paths.state_dir) {
+        let aside = entries.flatten().filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("state.json.bad-"))
+        });
+        files.extend(aside.map(|e| e.path()));
+    }
+    for file in files {
         match fs::remove_file(&file) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -614,6 +663,10 @@ pub fn kill_server(forget: bool) -> anyhow::Result<ExitCode> {
         }
         return Ok(ExitCode::SUCCESS);
     }
+    // A daemon that is handing itself over does not accept until the new image does, which
+    // can take longer than the answer timeout: wait it out, as `Conn::connect` does. After
+    // the 30 s limit the connection below fails and the daemon is signalled.
+    let _ = upgrade_cmd::wait_out_handoff(&paths);
     // The daemon may still be binding its socket: retry until the answer timeout.
     let deadline = Instant::now() + ANSWER_TIMEOUT;
     let outcome = loop {
@@ -628,9 +681,13 @@ pub fn kill_server(forget: bool) -> anyhow::Result<ExitCode> {
         Outcome::Response(Response::Error(text)) => bail!("{text}"),
         // The daemon cannot be asked: it takes the clean shutdown path on `SIGTERM`.
         Outcome::Response(_) | Outcome::Mismatch(_) | Outcome::Other(_) => {
+            // A handoff that began after the check above is why nobody answered: ask the
+            // daemon that comes out of it, not the one that is handing itself over.
+            if upgrade_cmd::wait_out_handoff(&paths).unwrap_or(false) {
+                return kill_server(forget);
+            }
             if lock_held(&paths.lock) {
-                let pid = read_pid(&paths.lock)
-                    .context("cannot read the daemon's pid from the lock file")?;
+                let pid = daemon_pid(&paths)?;
                 if let Err(e) = platform::terminate(pid)
                     && e.raw_os_error() != Some(libc::ESRCH)
                 {
@@ -667,6 +724,73 @@ mod tests {
         assert_eq!(
             text,
             "main       1 space   1 terminal  (attached)\nwork-long  2 spaces  3 terminals\n"
+        );
+    }
+
+    #[test]
+    fn a_socket_another_user_listens_on_is_sent_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("deck.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let uid = platform::effective_uid();
+        assert_eq!(
+            platform::peer_uid(&UnixStream::connect(&socket).unwrap()).unwrap(),
+            uid
+        );
+        drop(listener.accept().unwrap());
+
+        // The listener is not the user the client expects: no `Hello`, no request.
+        let err = Conn::open_as(&socket, REPLY_TIMEOUT, uid + 1)
+            .err()
+            .unwrap();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied, "{err}");
+        assert!(err.to_string().contains("is served by uid"), "{err}");
+        let (mut peer, _) = listener.accept().unwrap();
+        let mut got = Vec::new();
+        peer.read_to_end(&mut got).unwrap();
+        assert!(got.is_empty(), "{got:?}");
+
+        // The user's own listener is accepted.
+        assert!(Conn::open(&socket, REPLY_TIMEOUT).is_ok());
+    }
+
+    #[test]
+    fn a_pid_is_read_only_from_a_private_runtime_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let uid = platform::effective_uid();
+        let dir = tmp.path().join("run");
+        let lock = dir.join("deck.lock");
+        let chmod = |mode| fs::set_permissions(&dir, fs::Permissions::from_mode(mode)).unwrap();
+
+        // Missing: the first check of a command passes, this one does not.
+        let err = daemon_pid_as(&lock, uid).unwrap_err();
+        assert!(err.to_string().contains("cannot inspect"), "{err}");
+
+        fs::create_dir(&dir).unwrap();
+        fs::write(&lock, "4242").unwrap();
+        chmod(0o700);
+        assert_eq!(daemon_pid_as(&lock, uid).unwrap(), 4242);
+
+        // Planted: open to others, another user's, or a link to a private directory.
+        chmod(0o755);
+        let err = daemon_pid_as(&lock, uid).unwrap_err();
+        assert!(
+            err.to_string().contains("unsafe runtime directory"),
+            "{err}"
+        );
+        chmod(0o700);
+        let err = daemon_pid_as(&lock, uid + 1).unwrap_err();
+        assert!(
+            err.to_string().contains("unsafe runtime directory"),
+            "{err}"
+        );
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        let err = daemon_pid_as(&link.join("deck.lock"), uid).unwrap_err();
+        assert!(
+            err.to_string().contains("unsafe runtime directory"),
+            "{err}"
         );
     }
 

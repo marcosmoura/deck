@@ -20,6 +20,8 @@ use ghostty_vt::terminal::{
 };
 use ghostty_vt::{Error, Event, Terminal, TerminalOptions};
 
+#[cfg(test)]
+mod bench;
 mod capture;
 pub(crate) mod files;
 mod graphics;
@@ -68,13 +70,19 @@ fn scrollback_budget(lines: usize) -> usize {
         .saturating_add(BUDGET_SLACK)
 }
 
+/// The most bytes of text one clipboard copy of a program may hold; a larger one is dropped.
+/// The library's own ceilings are higher (64 MiB for an OSC 5522 write) and a message over
+/// 16 MiB cannot be sent to a client at all.
+pub const CLIPBOARD_MAX: usize = 4 << 20;
+
 /// What the daemon does about an emulator event.
 pub enum EmuEvent {
     /// A title change; `None` resets it.
     Title(Option<String>),
     /// Bytes to send to the program (answers to queries).
     Reply(String),
-    /// OSC 52 copy; `selection` is `"c"` or `"p"`.
+    /// A copy to the clipboard (OSC 52, OSC 1337 `Copy=`, OSC 5522); `selection` is `"c"`
+    /// or `"p"`.
     ClipboardStore {
         selection: &'static str,
         text: String,
@@ -170,6 +178,8 @@ impl Emu {
             tertiary: TertiaryDeviceAttributes::default(),
         }));
         graphics::enable(&mut term)?;
+        // An OSC 5522 write stops at the cap instead of buffering up to the library's 64 MiB.
+        term.set_clipboard_write_max_bytes(Some(CLIPBOARD_MAX))?;
         let mut palette = Palette::default();
         for (index, color) in palette.0.iter_mut().enumerate() {
             *color = default_palette(index);
@@ -491,11 +501,22 @@ impl Emu {
     }
 }
 
+/// Whether a clipboard representation is plain text (`text/plain`, with or without
+/// parameters such as a charset).
+fn is_plain_text(mime: &str) -> bool {
+    let kind = mime.split(';').next().unwrap_or_default().trim();
+    kind.eq_ignore_ascii_case("text/plain")
+}
+
 /// Turns what the emulator raised into what the daemon acts on.
 fn convert(event: Event, cell_known: bool, named: bool) -> Option<EmuEvent> {
     Some(match event {
-        Event::TitleChanged(title) if title.is_empty() => EmuEvent::Title(None),
-        Event::TitleChanged(title) => EmuEvent::Title(Some(title)),
+        // A title is printed later (the sidebar, `deck ls`): the library drops the C0
+        // controls, and the C1 ones and DEL go here.
+        Event::TitleChanged(title) => {
+            let title: String = title.chars().filter(|c| !c.is_control()).collect();
+            EmuEvent::Title((!title.is_empty()).then_some(title))
+        }
         Event::PtyWrite(bytes) if is_unanswered(&bytes, cell_known, named) => return None,
         Event::PtyWrite(bytes) => EmuEvent::Reply(String::from_utf8_lossy(&bytes).into_owned()),
         Event::ClipboardWrite(write) => {
@@ -504,7 +525,13 @@ fn convert(event: Event, cell_known: bool, named: bool) -> Option<EmuEvent> {
                 ClipboardLocation::Primary => "p",
                 _ => return None,
             };
-            let content = write.contents.into_iter().next()?;
+            // The outer terminal gets the copy as OSC 52, which is text: another
+            // representation (`text/html`, an image) is not passed off as it.
+            let content = write
+                .contents
+                .into_iter()
+                .find(|content| is_plain_text(&content.mime))
+                .filter(|content| content.data.len() <= CLIPBOARD_MAX)?;
             EmuEvent::ClipboardStore {
                 selection,
                 text: String::from_utf8_lossy(&content.data).into_owned(),
@@ -1257,6 +1284,88 @@ mod tests {
             e.feed(b"\x1b]2;\x07").as_slice(),
             [EmuEvent::Title(None)]
         ));
+    }
+
+    #[test]
+    fn a_title_keeps_no_control_characters() {
+        let mut e = emu(10, 4);
+        // C1 CSI (U+009B), a line feed, a NUL and DEL inside the title.
+        let events = e.feed("\x1b]2;TI\u{9b}31mT\nL\0E\x7f\x07".as_bytes());
+        let [EmuEvent::Title(Some(title))] = events.as_slice() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(title, "TI31mTLE");
+        // A title of control characters only is no title.
+        let events = e.feed("\x1b]2;\u{9b}\x7f\x07".as_bytes());
+        assert!(matches!(events.as_slice(), [EmuEvent::Title(None)]));
+    }
+
+    /// A whole OSC 5522 write of one representation.
+    fn kitty_copy(mime: &str, data: &[u8]) -> Vec<u8> {
+        let b64 = deck_core::base64::encode;
+        format!(
+            "\x1b]5522;type=write\x1b\\\x1b]5522;type=wdata:mime={};{}\x1b\\\x1b]5522;type=wdata\x1b\\",
+            b64(mime.as_bytes()),
+            b64(data)
+        )
+        .into_bytes()
+    }
+
+    fn copies(events: &[EmuEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter(|ev| matches!(ev, EmuEvent::ClipboardStore { .. }))
+            .map(|ev| format!("{ev:?}"))
+            .collect()
+    }
+
+    #[test]
+    fn a_clipboard_write_over_the_cap_or_without_plain_text_is_dropped() {
+        let mut e = emu(10, 4);
+        // The three ways a program copies: each arrives as plain text.
+        assert_eq!(
+            copies(&e.feed(b"\x1b]52;c;aGk=\x07")),
+            ["ClipboardStore(c, \"hi\")"]
+        );
+        assert_eq!(
+            copies(&e.feed(b"\x1b]1337;Copy=:aGk=\x07")),
+            ["ClipboardStore(c, \"hi\")"]
+        );
+        assert_eq!(
+            copies(&e.feed(&kitty_copy("text/plain", b"hi"))),
+            ["ClipboardStore(c, \"hi\")"]
+        );
+        // Another representation is not passed off as text.
+        assert!(copies(&e.feed(&kitty_copy("text/html", b"<b>hi</b>"))).is_empty());
+
+        // At the cap a copy passes; one byte more and it is dropped.
+        let mut big = vec![b'a'; CLIPBOARD_MAX];
+        let events = e.feed(&kitty_copy("text/plain", &big));
+        let sizes: Vec<usize> = events
+            .iter()
+            .filter_map(|ev| match ev {
+                EmuEvent::ClipboardStore { text, .. } => Some(text.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sizes, [CLIPBOARD_MAX]);
+        big.push(b'a');
+        assert!(copies(&e.feed(&kitty_copy("text/plain", &big))).is_empty());
+        // The emulator still works.
+        assert_eq!(
+            copies(&e.feed(b"\x1b]52;c;aGk=\x07")),
+            ["ClipboardStore(c, \"hi\")"]
+        );
+    }
+
+    #[test]
+    fn plain_text_is_told_from_other_representations() {
+        for mime in ["text/plain", "Text/Plain", "text/plain;charset=utf-8"] {
+            assert!(is_plain_text(mime), "{mime}");
+        }
+        for mime in ["", "text/html", "text/plain2", "image/png"] {
+            assert!(!is_plain_text(mime), "{mime}");
+        }
     }
 
     #[test]

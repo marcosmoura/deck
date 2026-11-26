@@ -10,6 +10,7 @@ Read first; then open only the pages your task needs.
 | [specs/README.md](specs/README.md)     | You write, build or check the status of a spec                                        |
 | [specs/TEMPLATE.md](specs/TEMPLATE.md) | You write a spec                                                                      |
 | [features/](features/README.md)        | You need how a shipped feature behaves (one page per feature, added as features land) |
+| [reviews/](reviews/README.md)          | You need what a security, privacy or performance review found and what became of it   |
 
 ## Where a request goes
 

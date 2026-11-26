@@ -8,6 +8,12 @@ use std::time::{Duration, Instant};
 /// A monotonic clock: the time since some fixed origin.
 pub trait Clock: Send + Sync + fmt::Debug {
     fn now(&self) -> Duration;
+
+    /// Whether time passes by itself: a wait on a real clock can sleep until its time, one on
+    /// a manual clock has to look again.
+    fn runs(&self) -> bool {
+        true
+    }
 }
 
 /// The real clock.
@@ -66,6 +72,10 @@ impl ManualClock {
 impl Clock for ManualClock {
     fn now(&self) -> Duration {
         *self.now.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn runs(&self) -> bool {
+        false
     }
 }
 
@@ -166,6 +176,12 @@ mod tests {
     use super::*;
 
     const MS: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn only_a_real_clock_runs_by_itself() {
+        assert!(SystemClock::new().runs());
+        assert!(!ManualClock::new().runs());
+    }
 
     #[test]
     fn throttle_limits_a_thousand_changes_in_a_second() {

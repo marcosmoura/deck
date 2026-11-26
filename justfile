@@ -16,11 +16,25 @@ fmt:
 lint:
     cargo clippy --workspace --all-targets --locked -- -D warnings
 
-# Lint the GitHub workflows with actionlint and the shell scripts with shellcheck.
+# Lint the GitHub workflows with actionlint and the shell scripts with shellcheck, and check
+# that the workflows run only pinned actions and a pinned mise.
 lint-ci:
     actionlint
-    shellcheck install.sh packaging/homebrew/render.sh packaging/homebrew/check.sh
+    shellcheck install.sh packaging/install-check.sh packaging/homebrew/render.sh packaging/homebrew/check.sh .github/check-pins.sh
+    sh packaging/install-check.sh
     sh packaging/homebrew/check.sh
+    sh .github/check-pins.sh
+
+# Check the dependencies with cargo-deny (`deny.toml`): advisories, licences, duplicate
+# versions and sources. It downloads the advisory database.
+audit:
+    cargo deny --locked check
+
+# Rewrite `mise.lock`, the URL and checksum of every tool of `.mise.toml`, for the platforms
+# the lock already has. Run it after a change of `.mise.toml`; it downloads from the tools'
+# releases.
+lock-tools:
+    mise lock
 
 # All tests with cargo-nextest.
 test:
@@ -31,9 +45,10 @@ test-crate crate filter="":
     cargo nextest run -p {{crate}} {{filter}}
 
 # The stress and soak suite, in a release build, one scenario at a time. `DECK_SOAK_SECS`
-# sets the soak's length (default 600).
+# sets the soak's length (default 600). The 10-minute `idle` runs only when the filter is
+# exactly `idle`: the recipe passes it on as `DECK_STRESS_FILTER`.
 stress filter="":
-    ulimit -n 4096 && cargo nextest run --release -p deck --test stress --run-ignored only --test-threads 1 --no-capture {{filter}}
+    ulimit -n 4096 && DECK_STRESS_FILTER='{{filter}}' cargo nextest run --release -p deck --test stress --run-ignored only --test-threads 1 --no-capture {{filter}}
 
 # Record a program's output from `crates/deck/tests/compat/scenarios/<name>.scenario`; FORCE=1
 # replaces an existing recording.

@@ -170,6 +170,8 @@ fn environment(home: &Path) -> Vec<(String, String)> {
         ("USER", "deck".into()),
         ("LOGNAME", "deck".into()),
         ("HOSTNAME", "deck".into()),
+        // The recording machine's time zone must not show in a clock or a date.
+        ("TZ", "UTC".into()),
         // A system gitconfig must not change what a recording shows.
         ("GIT_CONFIG_NOSYSTEM", "1".into()),
     ]
@@ -277,16 +279,51 @@ const PATH_ROOTS: &[&str] = &[
     "/Applications/",
 ];
 
-/// Absolute paths in `text` (a `/` at the start of a word, followed by a name) that are not
-/// under an allowed root.
+/// Marks the place of an escape sequence in [`views`]: a word boundary for [`stray_paths`].
+const ESCAPE: char = '\x1b';
+
+/// Two readings of a recording next to its own text: `joined`, with every CSI sequence taken
+/// out, so a name that colours split apart reads whole (`/\x1b[1mUs\x1b[0mers/`), and
+/// `marked`, with every CSI sequence replaced by one [`ESCAPE`], so what follows a colour
+/// change starts a word. The bodies of OSC, DCS and APC strings stay in both: they hold
+/// titles, paths and URLs.
+fn views(text: &str) -> (String, String) {
+    let (mut joined, mut marked) = (String::new(), String::new());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == ESCAPE && chars.peek() == Some(&'[') {
+            chars.next();
+            // Parameters and intermediates, then one final byte.
+            while chars.next_if(|n| ('\x20'..='\x3f').contains(n)).is_some() {}
+            chars.next_if(|n| ('\x40'..='\x7e').contains(n));
+            marked.push(ESCAPE);
+        } else {
+            joined.push(c);
+            marked.push(c);
+        }
+    }
+    (joined, marked)
+}
+
+/// Absolute paths in `text` that are not under an allowed root: a `/` followed by a name, at
+/// the start of a word (after white space, an escape sequence or one of `'"=(:[;`), or after
+/// `file://` and a host.
 fn stray_paths(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let name = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-');
+    let after_file_url = |i: usize| {
+        let host = chars[..i].iter().rev().take_while(|&&c| name(c)).count();
+        chars[..i - host].ends_with(&['f', 'i', 'l', 'e', ':', '/', '/'])
+    };
     let mut found = Vec::new();
     for (i, &c) in chars.iter().enumerate() {
         let starts = c == '/'
             && chars.get(i + 1).is_some_and(|&n| name(n))
-            && (i == 0 || chars[i - 1].is_whitespace() || "\'\"=(:[".contains(chars[i - 1]));
+            && (i == 0
+                || chars[i - 1].is_whitespace()
+                || chars[i - 1] == ESCAPE
+                || "\'\"=(:[;".contains(chars[i - 1])
+                || after_file_url(i));
         if !starts {
             continue;
         }
@@ -301,14 +338,50 @@ fn stray_paths(text: &str) -> Vec<String> {
     found
 }
 
+/// Whether `word` stands in `text` as a whole word: not inside a longer name.
+fn has_word(text: &str, word: &str) -> bool {
+    let inside = |c: char| c.is_alphanumeric() || c == '_';
+    !word.is_empty()
+        && text.match_indices(word).any(|(at, _)| {
+            !text[..at].chars().next_back().is_some_and(inside)
+                && !text[at + word.len()..].chars().next().is_some_and(inside)
+        })
+}
+
+/// The host name of this machine, long and short; none that is `deck`, the name a recording
+/// gets.
+fn host_names() -> Vec<String> {
+    let mut names = Vec::new();
+    for flag in [None, Some("-s")] {
+        let mut command = Command::new("hostname");
+        command.args(flag);
+        if let Ok(out) = command.output() {
+            let host = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let short = host.split('.').next().unwrap_or_default().to_string();
+            names.extend([host, short]);
+        }
+    }
+    names.retain(|n| !n.is_empty() && n != "deck");
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// What makes a recording unfit to commit: the machine's home or host name, a path under
 /// any home directory, or any absolute path outside the scratch directory and the system
-/// roots.
+/// roots. The names are looked for in the text as it is and without its CSI sequences, the
+/// paths in the text with a word boundary where each CSI sequence was ([`views`]).
+///
+/// It does not see a name of fewer than 4 characters (only [`write_recording`] does, on the
+/// recording machine), a path whose first name an escape sequence parts from its `/`, an
+/// e-mail or IP address, or anything encoded (base64 in OSC 52, percent-encoding in a URL).
+/// It refuses a relative path whose parts are coloured apart (`src`, a colour, `/main.rs`).
 pub fn privacy_violations(bytes: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(bytes);
+    let (joined, marked) = views(&text);
     let mut found = Vec::new();
     let mut deny = |what: &str, needle: &str| {
-        if !needle.is_empty() && text.contains(needle) {
+        if !needle.is_empty() && (text.contains(needle) || joined.contains(needle)) {
             found.push(format!("{what} ({needle:?})"));
         }
     };
@@ -319,19 +392,42 @@ pub fn privacy_violations(bytes: &[u8]) -> Vec<String> {
     if home.len() >= 4 {
         deny("the real $HOME", &home);
     }
-    for flag in [None, Some("-s")] {
-        let mut command = Command::new("hostname");
-        command.args(flag);
-        if let Ok(out) = command.output() {
-            let host = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if host.len() >= 4 && host != "deck" {
-                deny("the host name", &host);
-                deny("the host name", host.split('.').next().unwrap_or_default());
-            }
-        }
+    for host in host_names().iter().filter(|h| h.len() >= 4) {
+        deny("the host name", host);
     }
-    for path in stray_paths(&text) {
+    // Not in `joined`: there a prompt that is a lone `/` joins what is typed after it (the
+    // search of `less` prints `/`, `CSI K`, then the pattern).
+    for path in stray_paths(&marked) {
         found.push(format!("a path outside the scratch directory ({path:?})"));
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// What only the recording machine can check: its user and host names whatever their
+/// length, a name of fewer than 4 characters as a whole word (`al` is in `total`). On
+/// another machine they can be words the programs print (`deck`, `main`), so the committed
+/// test leaves them out.
+pub fn machine_names(bytes: &[u8], user: &str) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let (joined, _) = views(&text);
+    let shown = |name: &str| {
+        if name.len() >= 4 {
+            text.contains(name) || joined.contains(name)
+        } else {
+            has_word(&text, name) || has_word(&joined, name)
+        }
+    };
+    let mut found = Vec::new();
+    // `deck` is the user of every recording.
+    if user != "deck" && shown(user) {
+        found.push(format!("the real $USER ({user:?})"));
+    }
+    for host in host_names() {
+        if shown(&host) {
+            found.push(format!("the host name ({host:?})"));
+        }
     }
     found
 }
@@ -346,14 +442,11 @@ pub fn write_recording(name: &str, bytes: &[u8], force: bool) -> Result<PathBuf,
         ));
     }
     let mut found = privacy_violations(bytes);
-    // The user name is checked only here: on another machine it can be a word the programs
-    // print (`deck`, `main`), so the committed test leaves it out.
-    if let Ok(user) = std::env::var("USER")
-        && user.len() >= 4
-        && String::from_utf8_lossy(bytes).contains(&user)
-    {
-        found.push(format!("the real $USER ({user:?})"));
-    }
+    found.extend(machine_names(
+        bytes,
+        &std::env::var("USER").unwrap_or_default(),
+    ));
+    found.dedup();
     if !found.is_empty() {
         return Err(format!(
             "{name}: the recording shows private details: {}",

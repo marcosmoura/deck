@@ -345,6 +345,81 @@ fn grey_formats_expand_to_rgb_and_rgba() {
     assert!(pixels_of(kg::ImageFormat::Png, 1, 1, &[0; 4]).is_err());
 }
 
+/// A PNG that is a header declaring `width` by `height`, four bytes of data and the end.
+fn png_header_only(width: u32, height: u32) -> Vec<u8> {
+    let mut header = width.to_be_bytes().to_vec();
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 6, 0, 0, 0]);
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    out.extend(chunk(b"IHDR", &header));
+    out.extend(chunk(b"IDAT", &[0x78, 0x01, 0x01, 0x00]));
+    out.extend(chunk(b"IEND", &[]));
+    out
+}
+
+fn resident_bytes() -> u64 {
+    crate::platform::self_stats().rss_bytes.expect("rss")
+}
+
+#[test]
+fn a_png_too_short_for_the_size_it_declares_is_refused_before_decoding() {
+    // 111 bytes of output declaring 4096 by 4096: within the storage limit, but deflate
+    // cannot make 64 MiB of scanlines out of a few bytes.
+    let tiny = png_header_only(4096, 4096);
+    assert!(!png_can_hold_its_size(&tiny));
+    assert!(!png_can_hold_its_size(b"not a png, however long it is"));
+    // What a real, small or flat image declares is let through.
+    assert!(png_can_hold_its_size(&png(2, 2, 8, 6, &[], &rgba(2, 2))));
+    let mut e = emu();
+    // Without the check the decoder allocates and fills the declared 64 MiB before it finds
+    // the data short, and keeps the buffer.
+    let before = resident_bytes();
+    let got = replies(&mut e, &apc("a=T,f=100,i=3", &tiny));
+    assert!(got[0].starts_with("\x1b_Gi=3;EINVAL"), "{got:?}");
+    let grown = resident_bytes().saturating_sub(before);
+    assert!(grown < 32 << 20, "resident memory grew by {grown} bytes");
+    // One bit per pixel: the scanlines are 1/32 of the RGBA, so they are what counts.
+    let mut flat = png_header_only(1024, 1024);
+    flat[24..26].copy_from_slice(&[1, 0]);
+    assert_eq!(declared_scanline_bytes(&flat), Some(1024 * 129));
+}
+
+#[test]
+fn a_png_declaring_more_than_the_storage_limit_is_refused_before_decoding() {
+    let huge = png_header_only(16384, 16384);
+    assert_eq!(declared_png_bytes(&huge), Some(1 << 30));
+    assert_eq!(
+        declared_png_bytes(&png_header_only(4096, 4096)),
+        Some(STORAGE_LIMIT)
+    );
+    assert_eq!(
+        declared_png_bytes(&png_header_only(u32::MAX, u32::MAX)),
+        None
+    );
+    assert_eq!(declared_png_bytes(&huge[..23]), None);
+    assert_eq!(declared_png_bytes(b"not a png, however long it is"), None);
+
+    // 107 bytes of output: without the gate the decoder zero-fills 1 GiB and keeps it.
+    let mut e = emu();
+    let before = resident_bytes();
+    let got = replies(&mut e, &apc("a=T,f=100,i=7", &huge));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].starts_with("\x1b_Gi=7;EINVAL"), "{got:?}");
+    let grown = resident_bytes().saturating_sub(before);
+    assert!(grown < 256 << 20, "resident memory grew by {grown} bytes");
+    assert!(e.image(ImageScreen::Primary, 7).is_none());
+
+    // One pixel row over the limit is refused; a PNG within it still decodes.
+    let got = replies(&mut e, &apc("a=T,f=100,i=8", &png_header_only(4096, 4097)));
+    assert!(got[0].starts_with("\x1b_Gi=8;EINVAL"), "{got:?}");
+    let small = png(2, 2, 8, 6, &[], &rgba(2, 2));
+    assert_eq!(
+        replies(&mut e, &apc("a=T,f=100,i=9", &small)),
+        ["\x1b_Gi=9;OK\x1b\\"]
+    );
+    assert!(e.image(ImageScreen::Primary, 9).is_some());
+}
+
 #[test]
 fn a_malformed_png_is_rejected_with_an_error_answer() {
     let mut e = emu();

@@ -434,6 +434,7 @@ impl App {
         B: Backend<Error = io::Error> + Write,
     {
         terminal.autoresize()?;
+        self.spinner_seen.set(false);
         self.send_program_images(terminal.backend_mut())?;
         if let Some(images) = self.live_images() {
             images.take_wanted();
@@ -448,6 +449,8 @@ impl App {
         // flushes several times.
         terminal.backend_mut().write_all(BEGIN_SYNC)?;
         terminal.apply_buffer_with_cursor(cursor)?;
+        // A spinner that came on screen starts its timer.
+        self.arm_spinner(std::time::Instant::now());
         let out = terminal.backend_mut();
         out.write_all(END_SYNC)?;
         Write::flush(out)
@@ -484,14 +487,18 @@ impl App {
     }
 
     /// Before a frame: sends the programs' images the terminal does not have yet and makes
-    /// the virtual placements the frame's cells show.
+    /// the virtual placements the frame's cells show. Images left for the next draw (the
+    /// budget of one draw is spent) ask for that draw.
     fn send_program_images(&mut self, out: &mut impl Write) -> io::Result<()> {
         let wanted = self.wanted_placed();
         let cell = self.cell;
         let Some(images) = &mut self.images else {
             return Ok(());
         };
-        images.ensure_placed(out, &wanted, cell)
+        if images.ensure_placed(out, &wanted, cell)? {
+            self.dirty = true;
+        }
+        Ok(())
     }
 
     /// After a frame: deletes the program images it did not use.

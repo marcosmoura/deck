@@ -1029,6 +1029,9 @@ pub fn icon_style(kind: IconKind, style: Style) -> Style {
 /// icon is its glyph of the tier in the first cell and a blank second, in `style`. An image
 /// not sent yet is noted for the pre-pass ([`App::send_images`]) and drawn as its glyph.
 pub fn icon_slot(app: &App, icon: Icon, style: Style) -> (String, Style) {
+    if icon == Icon::Spinner {
+        app.spinner_seen.set(true);
+    }
     let style = match icon {
         Icon::Kind(kind) => icon_style(kind, style),
         _ => style,

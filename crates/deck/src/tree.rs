@@ -297,12 +297,12 @@ pub fn launch_spec(
 pub(crate) fn finish(json: bool, result: anyhow::Result<Option<Value>>) -> ExitCode {
     match result {
         Ok(Some(value)) if json => {
-            println!("{value}");
+            println!("{}", json_text(&value));
             ExitCode::SUCCESS
         }
         Ok(_) => ExitCode::SUCCESS,
         Err(e) if json => {
-            println!("{}", json!({ "error": format!("{e:#}") }));
+            println!("{}", json_text(&json!({ "error": format!("{e:#}") })));
             ExitCode::FAILURE
         }
         Err(e) => {
@@ -310,6 +310,25 @@ pub(crate) fn finish(json: bool, result: anyhow::Result<Option<Value>>) -> ExitC
             ExitCode::FAILURE
         }
     }
+}
+
+/// A JSON document as it is printed. JSON escapes only what is below U+0020; DEL and the C1
+/// controls, which a program's name or a directory read from the operating system can carry
+/// and some terminals obey, are written as `\u00XX`. They occur only inside strings, so the
+/// document decodes to the same values.
+fn json_text(value: &Value) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = String::new();
+    for c in value.to_string().chars() {
+        if ('\u{7f}'..='\u{9f}').contains(&c) {
+            // Writing to a `String` does not fail.
+            let _ = write!(text, "\\u{:04x}", u32::from(c));
+        } else {
+            text.push(c);
+        }
+    }
+    text
 }
 
 fn source_name(source: NameSource) -> &'static str {
@@ -380,9 +399,19 @@ pub fn tree_json(tree: &[SessionView]) -> Value {
     })
 }
 
+/// `text` as it is printed to a terminal or a shell: a `?` for each control character. A
+/// program's name and a directory are chosen by what runs in a terminal (`argv[0]`, the
+/// name of a directory), and would carry an escape sequence to whoever lists them.
+pub(crate) fn printable(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
 /// The text of `ls --tree`: one line per session, project, panel and terminal, indented;
 /// `*` marks the active panel and the focused terminal.
 pub fn tree_text(tree: &[SessionView]) -> String {
+    let path = |path: &std::path::Path| printable(&path.to_string_lossy());
     let mut out = String::new();
     for s in tree {
         let attached = if s.attached_clients > 0 {
@@ -390,14 +419,15 @@ pub fn tree_text(tree: &[SessionView]) -> String {
         } else {
             ""
         };
-        out.push_str(&format!("session {} [{}]{attached}\n", s.name, s.id));
+        let name = printable(&s.name);
+        out.push_str(&format!("session {name} [{}]{attached}\n", s.id));
         for p in &s.projects {
             let collapsed = if p.collapsed { " (collapsed)" } else { "" };
             out.push_str(&format!(
                 "  space {} [{}] {}{collapsed}\n",
-                p.name,
+                printable(&p.name),
                 p.id,
-                p.root.display()
+                path(&p.root)
             ));
             for panel in &p.panels {
                 let mark = if s.active_panel == Some(panel.id) {
@@ -405,11 +435,13 @@ pub fn tree_text(tree: &[SessionView]) -> String {
                 } else {
                     ""
                 };
-                out.push_str(&format!("    panel {} [{}]{mark}\n", panel.name, panel.id));
+                let name = printable(&panel.name);
+                out.push_str(&format!("    panel {name} [{}]{mark}\n", panel.id));
                 for (i, t) in panel.terminals.iter().enumerate() {
-                    let mut line = format!("      {} [{}] {}", i + 1, t.id, t.program);
+                    let program = printable(&t.program);
+                    let mut line = format!("      {} [{}] {program}", i + 1, t.id);
                     if let Some(cwd) = &t.cwd {
-                        line.push_str(&format!("  {}", cwd.display()));
+                        line.push_str(&format!("  {}", path(cwd)));
                     }
                     match (t.exit_status, t.pid) {
                         (Some(code), _) => line.push_str(&format!("  exited {code}")),
@@ -962,5 +994,41 @@ mod tests {
             "session main [10] (attached)\n  space proj [11] /work\n    panel 1 [12] *\n      \
              1 [13] sh  /work  pid 113 *\n"
         );
+    }
+
+    #[test]
+    fn json_output_never_prints_control_characters() {
+        let value = json!({ "program": "a\u{7f}b\u{9b}31mc\u{1b}[2J", "cwd": "/tmp/\u{85}é" });
+        let text = json_text(&value);
+        assert!(!text.chars().any(char::is_control), "{text:?}");
+        assert!(
+            text.contains("\\u007f") && text.contains("\\u009b"),
+            "{text}"
+        );
+        // The escapes are JSON's own, so nothing is lost.
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), value);
+    }
+
+    #[test]
+    fn tree_text_never_prints_control_characters() {
+        // What a program or a directory name can hold: an OSC 52, a C1 CSI, a line break.
+        let hostile = "a\x1b]52;c;ZXZpbA==\x07b\u{9b}2Jc\nd\x7f";
+        let mut s = session(10, "main");
+        s.name = hostile.into();
+        let project = &mut s.projects[0];
+        project.name = hostile.into();
+        project.root = format!("/r/{hostile}").into();
+        project.panels[0].name = hostile.into();
+        let terminal = &mut project.panels[0].terminals[0];
+        terminal.program = hostile.into();
+        terminal.cwd = Some(format!("/w/{hostile}").into());
+
+        let text = tree_text(&[s]);
+        assert_eq!(text.lines().count(), 4, "{text:?}");
+        assert!(
+            !text.chars().any(|c| c.is_control() && c != '\n'),
+            "{text:?}"
+        );
+        assert!(text.contains("a?]52;c;ZXZpbA==?b?2Jc?d?"), "{text:?}");
     }
 }

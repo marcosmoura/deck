@@ -43,8 +43,12 @@ pub struct OpenCodeTracker {
     user_messages: VecDeque<String>,
 }
 
+/// A longer id is not remembered: OpenCode's are a few dozen bytes, and the lists would
+/// otherwise hold whatever a client of the daemon sends.
+pub const MAX_ID_LEN: usize = 128;
+
 fn remember(list: &mut VecDeque<String>, cap: usize, id: &str) {
-    if list.iter().any(|known| known == id) {
+    if id.len() > MAX_ID_LEN || list.iter().any(|known| known == id) {
         return;
     }
     if list.len() >= cap {
@@ -186,6 +190,19 @@ mod tests {
             session_id: session.map(str::to_string),
             prompt: None,
         })
+    }
+
+    #[test]
+    fn an_oversized_id_is_not_remembered() {
+        let mut t = OpenCodeTracker::default();
+        t.feed_raw(&child(&"c".repeat(MAX_ID_LEN + 1)));
+        let long = "m".repeat(MAX_ID_LEN + 1);
+        t.feed_raw(&format!(
+            r#"{{"type":"message.updated","properties":{{"info":{{"id":"{long}","role":"user","sessionID":"s1"}}}}}}"#
+        ));
+        assert!(t.children.is_empty() && t.user_messages.is_empty());
+        t.feed_raw(&child(&"c".repeat(MAX_ID_LEN)));
+        assert_eq!(t.children.len(), 1);
     }
 
     #[test]

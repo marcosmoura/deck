@@ -20,6 +20,13 @@ use crate::graphics::{Images, delete};
 
 /// The most RGBA bytes of a canvas; a placement that needs more is not drawn.
 pub const MAX_CANVAS: u64 = 64 << 20;
+/// The most canvas bytes built and written before one draw; the placements over it wait for
+/// the next draw, so a screen of large placements cannot hold the client in one of them.
+pub const DRAW_BUDGET: u64 = MAX_CANVAS;
+/// The most canvas bytes of the outer images of what is on screen; a placement over it gets
+/// no outer image until others leave. Well under the 320 MB that kitty and Ghostty store by
+/// default: the images a draw is about to delete and the virtual placements count there too.
+pub const LIVE_BUDGET: u64 = 2 * MAX_CANVAS;
 /// The most pixel bytes of one received image: the daemon's storage limit of a screen.
 const MAX_IMAGE: u64 = 64 << 20;
 /// Raw bytes of one chunk; 3072 bytes are 4096 in base64.
@@ -118,6 +125,13 @@ impl OuterKey {
             rows,
             cell: (cell.width, cell.height),
         })
+    }
+
+    /// The RGBA bytes of the canvas of this placement.
+    fn canvas_bytes(&self) -> u64 {
+        let width = u64::from(self.cols) * u64::from(self.cell.0);
+        let height = u64::from(self.rows) * u64::from(self.cell.1);
+        width * height * 4
     }
 }
 
@@ -466,14 +480,27 @@ fn write_pixels(
 impl Images {
     /// Before a draw: builds and sends the outer image of each wanted placement that has
     /// none and whose pixels are in. What the draw wants is remembered for [`Images::finish_placed`].
+    ///
+    /// The canvases are built within two budgets, in the order of `wanted`: [`DRAW_BUDGET`]
+    /// for this draw and [`LIVE_BUDGET`] for everything on screen. `true` when a placement
+    /// was left for the next draw, which the caller then asks for.
     pub(crate) fn ensure_placed(
         &mut self,
         out: &mut impl Write,
         wanted: &[(TerminalId, Placement)],
         cell: Option<CellPx>,
-    ) -> io::Result<()> {
+    ) -> io::Result<bool> {
         self.program.used.clear();
         self.program.used_virtual.clear();
+        // The outer images this draw keeps; the others go right after it.
+        let kept: HashSet<OuterKey> = wanted
+            .iter()
+            .filter_map(|(terminal, p)| OuterKey::of(*terminal, p, cell))
+            .filter(|key| self.program.outer.contains_key(key))
+            .collect();
+        let mut live: u64 = kept.iter().map(OuterKey::canvas_bytes).sum();
+        let mut built: u64 = 0;
+        let mut deferred = false;
         let mut wrote = false;
         for (terminal, p) in wanted {
             if let Some(key) = VirtualKey::of(*terminal, p) {
@@ -511,22 +538,36 @@ impl Images {
                 continue;
             }
             let Some(cell) = cell else { continue };
-            let built = match self.program.pixels.get(&key.slot) {
+            let size = key.canvas_bytes();
+            let canvas = match self.program.pixels.get(&key.slot) {
                 Some((generation, image)) if *generation == key.generation => {
+                    // A canvas over `MAX_CANVAS` is refused below, whatever the budgets.
+                    if size <= MAX_CANVAS && live + size > LIVE_BUDGET {
+                        continue;
+                    }
+                    if size <= MAX_CANVAS && built + size > DRAW_BUDGET {
+                        deferred = true;
+                        continue;
+                    }
                     canvas(image, p.source, p.pixels, key.cols, key.rows, cell)
                 }
                 _ => continue,
             };
-            let Some(built) = built else {
+            let Some(canvas) = canvas else {
                 self.program.refused.insert(key);
                 continue;
             };
             let Some(id) = self.alloc() else { continue };
-            write_outer(out, id, &built, key.cols, key.rows)?;
+            write_outer(out, id, &canvas, key.cols, key.rows)?;
             self.program.outer.insert(key, id);
+            built += size;
+            live += size;
             wrote = true;
         }
-        if wrote { out.flush() } else { Ok(()) }
+        if wrote {
+            out.flush()?;
+        }
+        Ok(deferred)
     }
 
     /// After a draw: deletes the outer images it did not use, and the ones owed a delete.

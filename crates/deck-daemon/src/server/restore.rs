@@ -388,7 +388,14 @@ impl Shared {
                 }
                 self.settle_named(&mut st, sid, before, renamed);
                 drop(st);
-                self.notify(
+                // The names go to the user only: a panel name can be the first words of a
+                // prompt or a title, so the log has the ids.
+                let panel = renamed.map_or_else(String::new, |p| p.to_string());
+                tracing::warn!(
+                    "could not restore terminal {tid} (session {sid}, space {}, panel {panel}): {reason}",
+                    launch.project
+                );
+                self.show(
                     NoticeLevel::Warning,
                     format!(
                         "could not restore a terminal in {}/{}: {reason}",

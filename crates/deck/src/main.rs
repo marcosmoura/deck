@@ -137,7 +137,13 @@ enum Command {
     #[command(hide = true)]
     Daemon {
         /// A new image of the running daemon: the descriptor of the handoff file.
-        #[arg(long, value_name = "FD", conflicts_with = "handoff_check")]
+        /// Never 0, 1 or 2: the daemon takes the descriptor over and closes it.
+        #[arg(
+            long,
+            value_name = "FD",
+            conflicts_with = "handoff_check",
+            value_parser = clap::value_parser!(i32).range(3..)
+        )]
         adopt: Option<i32>,
         /// Exits 0 when this build reads handoff version N, else 1.
         #[arg(long = "handoff-check", value_name = "N")]
@@ -146,9 +152,9 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    // `COMPLETE=<shell> deck ...`: a shell asking for completions; answers and exits.
-    completion::complete();
-    // A hook must never fail: any parse error of `agent-event` is silent and exits 0.
+    // A hook must never fail: any parse error of `agent-event` is silent and exits 0. It
+    // comes before completion, so a `COMPLETE` left in an agent's environment changes
+    // nothing (a shell's completion request has `--` first, never `agent-event`).
     if std::env::args_os()
         .nth(1)
         .is_some_and(|a| a == "agent-event")
@@ -160,6 +166,8 @@ fn main() -> ExitCode {
             Err(_) => ExitCode::SUCCESS,
         };
     }
+    // `COMPLETE=<shell> deck ...`: a shell asking for completions; answers and exits.
+    completion::complete();
     let cli = Cli::parse();
     let result = match cli.command {
         Some(Command::Daemon {
@@ -216,6 +224,12 @@ mod tests {
         assert!(!help.contains("_probe"), "{help}");
         assert!(Cli::try_parse_from(["deck", "daemon"]).is_ok());
         assert!(Cli::try_parse_from(["deck", "daemon", "--adopt", "7"]).is_ok());
+        assert!(Cli::try_parse_from(["deck", "daemon", "--adopt", "3"]).is_ok());
+        // A standard descriptor is never the handoff file.
+        for fd in ["0", "1", "2", "-1"] {
+            let args = ["deck", "daemon", "--adopt", fd];
+            assert!(Cli::try_parse_from(args).is_err(), "{fd}");
+        }
         assert!(Cli::try_parse_from(["deck", "daemon", "--handoff-check", "1"]).is_ok());
         assert!(Cli::try_parse_from(["deck", "_probe", "--session", "x"]).is_ok());
     }

@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use ratatui::crossterm::event as ct;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::INPUT_POLL;
 use crate::colors::LateAnswers;
+use crate::{INPUT_IDLE, INPUT_POLL};
 
 /// What the outer terminal's input is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,13 +29,29 @@ pub enum StdinState {
 /// `deck` builds it from `poll(2)`, since `deck-tui` has no `unsafe`.
 pub type WaitStdin = Box<dyn Fn(Duration, BorrowedFd<'_>) -> StdinState + Send>;
 
-/// One ready event from crossterm, `None` when nothing is ready (it never waits).
-fn ready_event() -> io::Result<Option<ct::Event>> {
-    if ct::poll(Duration::ZERO)? {
-        ct::read().map(Some)
+/// Makes the outer terminal report its waiting input as new: on Linux, re-applying its
+/// settings wakes everything that waits on it. `deck` builds it, since `deck-tui` has no
+/// `unsafe`.
+pub type RearmStdin = Box<dyn Fn() + Send>;
+
+/// One ready event, `None` when nothing is ready (it never waits). crossterm's `poll` also
+/// returns false after it skipped an event of its own (a cursor, keyboard or attribute
+/// answer) while more events sit in its parser, so only a second poll that finds nothing
+/// too ends the drain.
+fn ready_from(
+    mut poll: impl FnMut() -> io::Result<bool>,
+    read: impl FnOnce() -> io::Result<ct::Event>,
+) -> io::Result<Option<ct::Event>> {
+    if poll()? || poll()? {
+        read().map(Some)
     } else {
         Ok(None)
     }
+}
+
+/// One ready event from crossterm, `None` when nothing is ready (it never waits).
+fn ready_event() -> io::Result<Option<ct::Event>> {
+    ready_from(|| ct::poll(Duration::ZERO), ct::read)
 }
 
 /// The reader thread's body, with the real crossterm. The main loop writes to `wake` on
@@ -43,12 +59,13 @@ fn ready_event() -> io::Result<Option<ct::Event>> {
 /// one of its polls it can drop the input, so the thread is woken to take the signal first.
 pub fn run(
     wait: WaitStdin,
+    rearm: RearmStdin,
     wake: &UnixStream,
     late: LateAnswers,
     stop: &AtomicBool,
     tx: &UnboundedSender<ct::Event>,
 ) {
-    run_with(&*wait, wake, ready_event, late, stop, tx);
+    run_with(&*wait, &*rearm, wake, ready_event, late, stop, tx);
 }
 
 /// Empties the wake-up socket (it is non-blocking).
@@ -61,6 +78,7 @@ fn clear(mut wake: &UnixStream) {
 /// invisible to `poll(2)`), then the wait. Returning drops the sender, which ends the main loop.
 fn run_with(
     wait: &dyn Fn(Duration, BorrowedFd<'_>) -> StdinState,
+    rearm: &dyn Fn(),
     wake: &UnixStream,
     mut next: impl FnMut() -> io::Result<Option<ct::Event>>,
     mut late: LateAnswers,
@@ -70,6 +88,8 @@ fn run_with(
     // The last wait said `Ready`: if the drain then finds nothing, crossterm used up the
     // readiness without reading the bytes, and trusting the wait again would spin.
     let mut ready_last = false;
+    // Whether the terminal was re-armed since crossterm last gave an event.
+    let mut rearmed = false;
     while !stop.load(Ordering::Acquire) {
         let fd = std::os::fd::AsFd::as_fd(wake);
         if wait(Duration::ZERO, fd) == StdinState::HungUp {
@@ -93,12 +113,27 @@ fn run_with(
                 Err(_) => return,
             }
         }
+        if got {
+            rearmed = false;
+        }
         if ready_last && !got {
             ready_last = false;
+            // crossterm waits for input edge-triggered and reads only until one event parses,
+            // so what it left in the kernel needs new input to be seen. On Linux a terminal
+            // holds a burst's sender back until fewer than 128 bytes wait, so none comes: the
+            // re-arm gives crossterm the wake-up instead. Once per stall; then the old sleep.
+            if !rearmed {
+                rearmed = true;
+                rearm();
+                continue;
+            }
             std::thread::sleep(INPUT_POLL);
             continue;
         }
-        let state = wait(INPUT_POLL, fd);
+        let timeout = late
+            .next_wake(Instant::now())
+            .map_or(INPUT_IDLE, |d| d.min(INPUT_IDLE));
+        let state = wait(timeout, fd);
         ready_last = state == StdinState::Ready;
         match state {
             StdinState::HungUp => return,
@@ -153,6 +188,7 @@ mod tests {
         wake.set_nonblocking(true).expect("non-blocking");
         run_with(
             &wait,
+            &|| {},
             &wake,
             || Ok(events.borrow_mut().pop_front()),
             LateAnswers::new(0, Instant::now()),
@@ -176,11 +212,81 @@ mod tests {
         assert!(closed);
     }
 
+    /// Every wait says `Ready` until the answers run out; crossterm gives `events` in turn,
+    /// `None` for an empty slot. Returns the waits and the re-arms in order.
+    fn drive_stalls(answers: usize, events: Vec<Option<ct::Event>>) -> Vec<&'static str> {
+        let log = RefCell::new(Vec::new());
+        let left = RefCell::new(answers);
+        let events = RefCell::new(events.into_iter().collect::<VecDeque<_>>());
+        let wait = |t: Duration, _: BorrowedFd<'_>| {
+            if t.is_zero() {
+                return StdinState::Idle;
+            }
+            log.borrow_mut().push("wait");
+            let mut left = left.borrow_mut();
+            if *left == 0 {
+                return StdinState::HungUp;
+            }
+            *left -= 1;
+            StdinState::Ready
+        };
+        let rearm = || log.borrow_mut().push("rearm");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let stop = AtomicBool::new(false);
+        let (wake, _tx) = UnixStream::pair().expect("a socket pair");
+        wake.set_nonblocking(true).expect("non-blocking");
+        run_with(
+            &wait,
+            &rearm,
+            &wake,
+            || Ok(events.borrow_mut().pop_front().flatten()),
+            LateAnswers::new(0, Instant::now()),
+            &stop,
+            &tx,
+        );
+        log.into_inner()
+    }
+
+    #[test]
+    fn input_crossterm_leaves_unread_is_re_armed_once_per_stall() {
+        // Ready, nothing read: one re-arm, then (still nothing) the sleep, then the wait.
+        assert_eq!(
+            drive_stalls(2, Vec::new()),
+            ["wait", "rearm", "wait", "wait"]
+        );
+        // An event after the re-arm starts a new stall, which is re-armed again.
+        assert_eq!(
+            drive_stalls(2, vec![None, None, Some(key('a'))]),
+            ["wait", "rearm", "wait", "rearm", "wait"]
+        );
+    }
+
+    #[test]
+    fn a_poll_that_skipped_an_internal_event_is_asked_a_second_time() {
+        let polls = RefCell::new(VecDeque::from([false, true]));
+        let got = ready_from(
+            || Ok(polls.borrow_mut().pop_front().unwrap_or(false)),
+            || Ok(key('a')),
+        );
+        assert_eq!(got.unwrap(), Some(key('a')));
+        // Two polls that find nothing end the drain, without a read.
+        let mut count = 0;
+        let got = ready_from(
+            || {
+                count += 1;
+                Ok(false)
+            },
+            || Err(io::Error::other("read")),
+        );
+        assert_eq!(got.unwrap(), None);
+        assert_eq!(count, 2);
+    }
+
     #[test]
     fn a_hang_up_during_the_wait_ends_the_thread() {
         let (sent, waits, closed) = drive(&[StdinState::Idle, StdinState::HungUp], Vec::new());
         assert!(sent.is_empty());
-        assert_eq!(waits, [Duration::ZERO, INPUT_POLL]);
+        assert_eq!(waits, [Duration::ZERO, INPUT_IDLE]);
         assert!(closed);
     }
 
@@ -189,7 +295,7 @@ mod tests {
         let events = vec![key('a'), key('b'), key('c')];
         let (sent, waits, closed) = drive(&[StdinState::Idle, StdinState::HungUp], events.clone());
         assert_eq!(sent, events);
-        assert_eq!(waits, [Duration::ZERO, INPUT_POLL]);
+        assert_eq!(waits, [Duration::ZERO, INPUT_IDLE]);
         assert!(closed);
     }
 
@@ -199,7 +305,7 @@ mod tests {
             &[StdinState::Idle, StdinState::Ready, StdinState::HungUp],
             Vec::new(),
         );
-        assert_eq!(waits, [Duration::ZERO, INPUT_POLL, Duration::ZERO]);
+        assert_eq!(waits, [Duration::ZERO, INPUT_IDLE, Duration::ZERO]);
     }
 
     #[test]
@@ -208,7 +314,7 @@ mod tests {
             &[StdinState::Idle, StdinState::Idle, StdinState::HungUp],
             Vec::new(),
         );
-        assert_eq!(waits, [Duration::ZERO, INPUT_POLL, Duration::ZERO]);
+        assert_eq!(waits, [Duration::ZERO, INPUT_IDLE, Duration::ZERO]);
     }
 
     #[test]
@@ -226,6 +332,7 @@ mod tests {
             scope.spawn(|| {
                 run_with(
                     &wait,
+                    &|| {},
                     &wake,
                     || Ok(None),
                     LateAnswers::new(0, Instant::now()),
@@ -250,6 +357,7 @@ mod tests {
         wake.set_nonblocking(true).expect("non-blocking");
         run_with(
             &wait,
+            &|| {},
             &wake,
             || Ok(events.borrow_mut().pop_front()),
             LateAnswers::new(0, Instant::now()),

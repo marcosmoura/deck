@@ -1,13 +1,13 @@
 ---
 type: foundation
-status: todo
+status: done
 ---
 
-# 02 — Privacy review
+# 03 — Privacy review
 
 ## Scope
 
-What deck learns about the user, where it keeps it, how long, who can read it, and what leaves the machine; fixes within budget; the report. Run on Fable 5.2 at `xhigh` (overview).
+What deck learns about the user, where it keeps it, how long, who can read it, and what leaves the machine; fixes within budget; the report. The audit was run by reviewers on 24 Nov 2026 with the user's disposition of each finding; the worker writes the report, the user page, the test and the fixes from it. Run on Fable 5.2 at `xhigh` (overview).
 
 ## Requirements
 
@@ -26,7 +26,7 @@ What deck learns about the user, where it keeps it, how long, who can read it, a
 
 - [ ] `docs/reviews/<date>-privacy.md` exists with the inventory, every question answered, and the findings table.
 - [ ] `docs/features/privacy.md` exists and matches the inventory.
-- [ ] An end-to-end test, `crates/deck/tests/privacy.rs` (new), runs a `Home` daemon whose environment holds `DECK_PRIVACY_SECRET=<random>`, types a random word, sets a random title with OSC 2, sends a `UserPromptSubmit` hook event with a random prompt through `deck agent-event`, and copies a random string with OSC 52 (`printf` in the terminal); after `kill-server`, `daemon.log` and `state.json` contain none of those values.
+- [ ] An end-to-end test, `crates/deck/tests/privacy.rs` (new), as the privacy audit described it: a `Home` daemon whose environment holds `DECK_PRIVACY_SECRET=<random>` and a random non-`DECK_` variable, a random typed word, a random OSC 2 title and a random `UserPromptSubmit` prompt (both longer than 32 cells), and a random OSC 52 copy. After `kill-server` (and again after a live upgrade, a failed one, and a restart), no file under the home contains any of those values, raw or base64, except the first 32 cells of the title or prompt as `panels[].name` in `state.json` (decided 24 Nov 2026: auto panel names are kept and documented).
 
 ## Tests
 

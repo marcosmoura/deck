@@ -88,11 +88,21 @@ fn sub_parameter(kind: Underline) -> u8 {
 #[derive(Debug)]
 pub struct DeckBackend<W: Write> {
     writer: W,
+    /// Whether a `draw` since the last `take_wrote_cells` had cells to write.
+    wrote_cells: bool,
 }
 
 impl<W: Write> DeckBackend<W> {
     pub const fn new(writer: W) -> Self {
-        Self { writer }
+        Self {
+            writer,
+            wrote_cells: false,
+        }
+    }
+
+    /// Whether a draw wrote any cell since the last call; a draw of nothing writes none.
+    pub fn take_wrote_cells(&mut self) -> bool {
+        std::mem::take(&mut self.wrote_cells)
     }
 
     /// What was written so far.
@@ -188,6 +198,7 @@ impl<W: Write> Backend for DeckBackend<W> {
         let mut modifier = Modifier::empty();
         let mut last_pos: Option<Position> = None;
         for (x, y, cell) in content {
+            self.wrote_cells = true;
             // Move the cursor unless the previous cell was just before this one.
             if !matches!(last_pos, Some(p) if x == p.x + 1 && y == p.y) {
                 queue!(self.writer, MoveTo(x, y))?;
@@ -335,6 +346,17 @@ mod tests {
         c.modifier = modifier_of(kind);
         c.underline_color = color;
         c
+    }
+
+    #[test]
+    fn only_a_draw_with_cells_counts_as_wrote_cells() {
+        let mut b = DeckBackend::new(Vec::new());
+        b.draw(std::iter::empty()).unwrap();
+        assert!(!b.take_wrote_cells());
+        let c = Cell::new("x");
+        b.draw(std::iter::once((0, 0, &c))).unwrap();
+        assert!(b.take_wrote_cells());
+        assert!(!b.take_wrote_cells());
     }
 
     #[test]

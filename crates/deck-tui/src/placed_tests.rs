@@ -18,7 +18,7 @@ use crate::diacritics::{DIACRITICS, PLACEHOLDER};
 use crate::graphics::{Images, Pair, delete};
 use crate::icons_tests::render;
 use crate::mirror::tests::{frame, line, no_sidebar, view};
-use crate::placed::{Canvas, MAX_CANVAS, Piece, Pixels, Program, canvas};
+use crate::placed::{Canvas, DRAW_BUDGET, LIVE_BUDGET, MAX_CANVAS, Piece, Pixels, Program, canvas};
 
 const CELL: CellPx = CellPx {
     width: 8,
@@ -524,6 +524,73 @@ fn a_huge_placement_is_cut_to_297_cells_each_way_and_never_to_64_mib() {
     show(&mut b, &[], vec![p]);
     assert_eq!(cycle(&mut b), (String::new(), String::new()));
     assert_eq!(cycle(&mut b), (String::new(), String::new()));
+}
+
+/// Counts what one draw writes without keeping it, and fails over the base64 of a draw's
+/// budget.
+struct Count(u64);
+
+impl std::io::Write for Count {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 += bytes.len() as u64;
+        if self.0 > DRAW_BUDGET * 3 / 2 {
+            return Err(std::io::Error::other("one draw wrote more than its budget"));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_screen_of_large_placements_is_built_within_the_budgets() {
+    // 100 images, each placed over 297×297 cells: a canvas of 43 MiB each, 4.3 GiB when
+    // every one is built and written.
+    let ids: Vec<u32> = (1..=100).collect();
+    let mut a = app(&ids);
+    let all: Vec<Placement> = ids
+        .iter()
+        .map(|id| placement(*id, 0, 0, 297, 297))
+        .collect();
+    let canvases = |a: &App, of: &[Placement]| -> u64 {
+        let images = a.images.as_ref().unwrap();
+        of.iter()
+            .filter_map(|p| images.placed_id(T, p, a.cell))
+            .map(|(_, cols, rows)| u64::from(cols) * 8 * u64::from(rows) * 16 * 4)
+            .sum()
+    };
+    show(&mut a, &[], all.clone());
+    let mut draws = 0;
+    while a.take_dirty() {
+        let before = canvases(&a, &all);
+        let mut out = Count(0);
+        a.send_images(&mut out).unwrap();
+        a.finish_images(&mut out).unwrap();
+        let built = canvases(&a, &all) - before;
+        assert!(built <= DRAW_BUDGET, "{built} bytes built in one draw");
+        // Base64 of what was built and little else.
+        assert!(out.0 <= built * 3 / 2, "{} bytes for {built}", out.0);
+        draws += 1;
+        assert!(draws < 50, "the draws do not end");
+    }
+    // One canvas a draw: the first draw left placements behind and asked for the second.
+    assert_eq!(draws, 2);
+    let live = canvases(&a, &all);
+    assert!(
+        live <= LIVE_BUDGET && live > LIVE_BUDGET - MAX_CANVAS,
+        "{live}"
+    );
+    // The others were not built, and are once the first ones leave the screen.
+    let last = all[99];
+    assert!(canvases(&a, &[last]) == 0);
+    show(&mut a, &[], vec![last]);
+    let mut out = Count(0);
+    a.send_images(&mut out).unwrap();
+    a.finish_images(&mut out).unwrap();
+    assert!(canvases(&a, &[last]) > 0);
+    assert_eq!(canvases(&a, &all), canvases(&a, &[last]));
 }
 
 #[test]

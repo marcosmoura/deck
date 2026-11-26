@@ -163,6 +163,18 @@ impl LateAnswers {
         }
     }
 
+    /// How long until `flush` has something to do: the rest of the window while answers are
+    /// expected, now when events are held past it, `None` when there is nothing to wait for.
+    pub fn next_wake(&self, now: Instant) -> Option<Duration> {
+        if self.active(now) {
+            Some(self.until.saturating_duration_since(now))
+        } else if self.held.is_empty() {
+            None
+        } else {
+            Some(Duration::ZERO)
+        }
+    }
+
     /// The held events, once the window has ended; call it on idle wake-ups.
     pub fn flush(&mut self, now: Instant) -> Vec<Event> {
         if self.active(now) {
@@ -447,6 +459,14 @@ fn parse_color(spec: &str) -> Option<Rgb> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_reader_has_nothing_to_wake_for_without_late_answers() {
+        let now = Instant::now();
+        assert_eq!(LateAnswers::new(0, now).next_wake(now), None);
+        assert_eq!(LateAnswers::new(1, now).next_wake(now), Some(LATE_WINDOW));
+        assert_eq!(LateAnswers::new(1, now).next_wake(now + LATE_WINDOW), None);
+    }
 
     #[test]
     fn parses_both_terminators_and_every_digit_count() {

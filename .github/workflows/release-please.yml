@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # mise installs a tool only as mise.lock records it, and checks the download against it.
+  MISE_LOCKED: "1"
+
 jobs:
   release-please:
     if: github.ref_name == 'main'
@@ -21,19 +25,28 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
   # On release-please's branch: refresh Cargo.lock and format CHANGELOG.md, which
-  # release-please leaves stale or unformatted. Commits through the API as the token's
-  # owner so CI runs again; a push with nothing to fix commits nothing. Never touches main.
-  # Each changed file is its own commit and CI run; each new push cancels the previous fix-up run.
-  fix-up:
+  # release-please leaves stale or unformatted. A push with nothing to fix commits nothing.
+  # Never touches main. Each changed file is its own commit and CI run; each new push cancels
+  # the previous fix-up run.
+  #
+  # Two jobs, so the release token never shares a runner with the checkout and the tools:
+  # `prepare` runs them without any secret and uploads what changed; `commit` holds the token
+  # and runs only the artifact download and `gh`.
+  prepare:
     if: startsWith(github.ref_name, 'release-please--branches--main')
     runs-on: ubuntu-24.04
     concurrency:
       group: release-please-fix-up
       cancel-in-progress: true
+    outputs:
+      changed: ${{ steps.collect.outputs.changed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
         with:
+          version: 2026.11.13
           install_args: rust aqua:oxc-project/oxc/oxfmt
       # release-please writes these files in its own format, which `oxfmt --check` (in
       # `just check`) rejects; Cargo.lock follows the version in Cargo.toml.
@@ -41,6 +54,44 @@ jobs:
         run: |
           oxfmt CHANGELOG.md .release-please-manifest.json Cargo.toml
           cargo update --workspace
+      # Each changed file, and beside it the blob it replaces (the contents API asks for it).
+      - name: Collect what changed
+        id: collect
+        run: |
+          mkdir fixed
+          changed=false
+          for file in Cargo.lock CHANGELOG.md .release-please-manifest.json Cargo.toml; do
+            if git diff --quiet -- "$file"; then
+              continue
+            fi
+            cp "$file" "fixed/$file"
+            git rev-parse "HEAD:$file" > "fixed/$file.sha"
+            changed=true
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+      - if: steps.collect.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fix-up
+          path: fixed/
+          include-hidden-files: true
+          retention-days: 1
+
+  # Commits through the API as the token's owner, so CI runs again.
+  commit:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    # Never cancels: when the `prepare` of a newer push is running, this job waits for it.
+    # That `prepare` cancels this job if it is already running.
+    concurrency:
+      group: release-please-fix-up
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fix-up
+          path: fixed
       - name: Commit what changed
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
@@ -48,13 +99,13 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           for file in Cargo.lock CHANGELOG.md .release-please-manifest.json Cargo.toml; do
-            if git diff --quiet -- "$file"; then
+            if [ ! -f "fixed/$file" ]; then
               continue
             fi
             # The body goes through stdin: Cargo.lock in base64 is too long for one argument.
-            base64 -w0 "$file" | jq -Rs \
+            base64 -w0 "fixed/$file" | jq -Rs \
               --arg message "chore(repo): update $file" \
-              --arg sha "$(git rev-parse "HEAD:$file")" \
+              --arg sha "$(tr -d '\n' < "fixed/$file.sha")" \
               --arg branch "$BRANCH" \
               '{message: $message, content: ., sha: $sha, branch: $branch}' |
               gh api --method PUT "repos/$GH_REPO/contents/$file" --input - >/dev/null

@@ -44,12 +44,6 @@ const OPENCODE_FAILED: &str = "could not run opencode session list";
 const OPENCODE_TIMED_OUT: &str = "timed out";
 const READ_FAILED: &str = "could not read the sessions";
 
-/// What a listing needs of its session.
-struct Input {
-    env: Env,
-    roots: Vec<PathBuf>,
-}
-
 impl Shared {
     /// Starts the listing of `kind` for the session of client `cid` in `tasks`; its answer is
     /// pushed to `queue` when it is done. A client without a session gets `no session` at once.
@@ -62,26 +56,16 @@ impl Shared {
         tasks: &mut JoinSet<()>,
     ) {
         while tasks.try_join_next().is_some() {}
+        // All a listing needs of its session is its environment.
         let input = {
             let st = self.st();
             st.clients
                 .get(&cid)
                 .and_then(|c| c.session)
                 .and_then(|sid| st.session(sid))
-                .map(|sess| {
-                    let mut roots: Vec<PathBuf> = Vec::new();
-                    for p in &sess.model.projects {
-                        if !roots.contains(&p.root) {
-                            roots.push(p.root.clone());
-                        }
-                    }
-                    Input {
-                        env: sess.env.clone(),
-                        roots,
-                    }
-                })
+                .map(|sess| sess.env.clone())
         };
-        let Some(input) = input else {
+        let Some(env) = input else {
             queue.push_msg(ServerMsg::Response(Response::Error("no session".into())));
             return;
         };
@@ -89,7 +73,7 @@ impl Shared {
         tasks.spawn(async move {
             let started = Instant::now();
             let (sessions, error) = shared
-                .list(kind, usize::from(limit.clamp(1, 100)), input)
+                .list(kind, usize::from(limit.clamp(1, 100)), env)
                 .await;
             // Counts and timings only: titles and directories are never logged.
             tracing::info!(
@@ -111,16 +95,16 @@ impl Shared {
         &self,
         kind: AgentKind,
         limit: usize,
-        input: Input,
+        env: Env,
     ) -> (Vec<AgentSession>, Option<String>) {
         let stats = Arc::clone(&self.listing);
         match kind {
             AgentKind::Claude => {
-                let root = agent_root(&input.env, "CLAUDE_CONFIG_DIR", ".claude", "projects");
+                let root = agent_root(&env, "CLAUDE_CONFIG_DIR", ".claude", "projects");
                 blocking(move || root.map(|r| claude(&r, limit, &stats)).unwrap_or_default()).await
             }
             AgentKind::Codex => {
-                let root = agent_root(&input.env, "CODEX_HOME", ".codex", "sessions");
+                let root = agent_root(&env, "CODEX_HOME", ".codex", "sessions");
                 blocking(move || root.map(|r| codex(&r, limit, &stats)).unwrap_or_default()).await
             }
             AgentKind::OpenCode => {
@@ -128,7 +112,7 @@ impl Shared {
                 let program = check_template(&command, false)
                     .ok()
                     .and_then(|()| render_template(&command, None).into_iter().next());
-                opencode(program, input, limit, &stats, &self.opencode_slots).await
+                opencode(program, env, limit, &stats, &self.opencode_slots).await
             }
         }
     }
@@ -309,11 +293,16 @@ fn is_user_message(line: &[u8]) -> bool {
     })
 }
 
-/// OpenCode: `opencode session list` in every project root and the home directory, two at a
-/// time, all inside 8 s.
+/// OpenCode: one `opencode session list`, run in the home directory and never in a space
+/// root, inside 8 s. OpenCode loads the configuration of its working directory and of every
+/// directory above it, runs the plugins it finds there and starts their MCP servers, so a
+/// listing in a repository would run that repository's code (security review, Q-4). It lists
+/// the sessions of its working directory's project only: sessions of repositories are not
+/// listed. A session without an absolute `HOME` lists nothing: a relative one would name a
+/// directory under the daemon's own.
 async fn opencode(
     program: Option<String>,
-    input: Input,
+    env: Env,
     limit: usize,
     stats: &Arc<ListingStats>,
     permits: &Arc<Semaphore>,
@@ -321,51 +310,28 @@ async fn opencode(
     let Some(program) = program else {
         return (Vec::new(), Some(OPENCODE_FAILED.to_string()));
     };
-    let mut dirs = input.roots;
-    if let Some(home) = env::lookup(&input.env, "HOME").filter(|h| !h.is_empty()) {
-        let home = PathBuf::from(home);
-        if !dirs.contains(&home) {
-            dirs.push(home);
-        }
-    }
-    if dirs.is_empty() {
+    let Some(home) = env::lookup(&env, "HOME")
+        .map(PathBuf::from)
+        .filter(|h| h.is_absolute())
+    else {
         return (Vec::new(), None);
-    }
-    // Each run stops at the deadline; its child is reaped by `Reaped`, not left to tokio.
-    let deadline = tokio::time::Instant::now() + OPENCODE_TIMEOUT;
-    let mut children = JoinSet::new();
-    for dir in &dirs {
-        children.spawn(run_opencode(
-            program.clone(),
-            input.env.clone(),
-            dir.clone(),
-            limit,
-            deadline,
-            Arc::clone(permits),
-            Arc::clone(stats),
-        ));
-    }
-    let mut outputs: Vec<Vec<u8>> = Vec::new();
-    let mut timed_out = false;
-    while let Some(done) = children.join_next().await {
-        match done {
-            Ok(Run::Done(Some(output))) => outputs.push(output),
-            Ok(Run::TimedOut) => timed_out = true,
-            Ok(Run::Done(None)) | Err(_) => {}
-        }
-    }
-    let error = if !outputs.is_empty() {
-        None
-    } else if timed_out {
-        Some(OPENCODE_TIMED_OUT.to_string())
-    } else {
-        Some(OPENCODE_FAILED.to_string())
     };
-    let sessions = outputs
-        .iter()
-        .flat_map(|o| parse_opencode_list(o))
-        .collect();
-    (recent(sessions, limit), error)
+    // The child is killed and reaped with this future: at the deadline, or with the connection.
+    let deadline = tokio::time::Instant::now() + OPENCODE_TIMEOUT;
+    let run = run_opencode(
+        program,
+        env,
+        home,
+        limit,
+        deadline,
+        Arc::clone(permits),
+        Arc::clone(stats),
+    );
+    match run.await {
+        Run::Done(Some(output)) => (recent(parse_opencode_list(&output), limit), None),
+        Run::Done(None) => (Vec::new(), Some(OPENCODE_FAILED.to_string())),
+        Run::TimedOut => (Vec::new(), Some(OPENCODE_TIMED_OUT.to_string())),
+    }
 }
 
 /// Counts a running child, and the most that ran together.
@@ -383,6 +349,28 @@ impl Drop for Running<'_> {
     fn drop(&mut self) {
         self.0.running.fetch_sub(1, Ordering::AcqRel);
     }
+}
+
+/// The listing command: `program session list` in `dir`, with the session's environment.
+/// `PWD` and `OLDPWD` of that environment name the directory the session was created in and
+/// the one before it, usually a space root, and a program can take `PWD` for its working
+/// directory: the child gets `dir` as its `PWD` and no `OLDPWD`.
+fn opencode_command(program: &str, env: &Env, dir: &Path, limit: usize) -> Command {
+    let mut command = Command::new(program);
+    command
+        .args(["session", "list", "--max-count"])
+        .arg(limit.to_string())
+        .args(["--format", "json"])
+        .env_clear()
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .env("PWD", dir)
+        .env_remove("OLDPWD")
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    command
 }
 
 /// How one listing ended.
@@ -432,18 +420,7 @@ async fn run_opencode(
     if tokio::time::Instant::now() >= deadline {
         return Run::TimedOut;
     }
-    let spawned = Command::new(&program)
-        .args(["session", "list", "--max-count"])
-        .arg(limit.to_string())
-        .args(["--format", "json"])
-        .env_clear()
-        .envs(env.iter().map(|(k, v)| (k, v)))
-        .current_dir(&dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn();
+    let spawned = opencode_command(&program, &env, &dir, limit).spawn();
     let Ok(child) = spawned else {
         return Run::Done(None);
     };
@@ -475,4 +452,38 @@ async fn run_opencode(
     let success = status.is_some_and(|s| s.success());
     let is_array = serde_json::from_slice::<Value>(&output).is_ok_and(|v| v.is_array());
     Run::Done((complete && success && is_array).then_some(output))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::*;
+
+    /// Security review, Q-4: a shell resets `PWD` to its real directory when it starts, so a
+    /// fake `opencode` script cannot show what it was given. The command itself is read.
+    #[test]
+    fn the_opencode_child_gets_its_directory_as_pwd_and_no_oldpwd() {
+        let env: Env = vec![
+            ("PATH".into(), "/bin".into()),
+            ("HOME".into(), "/home/u".into()),
+            ("PWD".into(), "/work/repo".into()),
+            ("OLDPWD".into(), "/work/other".into()),
+        ];
+        let command = opencode_command("opencode", &env, Path::new("/home/u"), 50);
+        let command = command.as_std();
+        assert_eq!(command.get_current_dir(), Some(Path::new("/home/u")));
+        let mut vars: Vec<_> = command.get_envs().collect();
+        vars.sort();
+        let set = |v: &'static str| Some(OsStr::new(v));
+        assert_eq!(
+            vars,
+            [
+                (OsStr::new("HOME"), set("/home/u")),
+                (OsStr::new("PATH"), set("/bin")),
+                (OsStr::new("PWD"), set("/home/u")),
+            ],
+            "the session's variables, `PWD` of the child's own directory, no `OLDPWD`"
+        );
+    }
 }

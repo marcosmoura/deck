@@ -2,3 +2,7 @@
 /.worktrees
 .DS_Store
 .opencode/model-profiles.jsonc
+.claude/settings.local.json
+.env*
+mise.local.toml
+.mise.local.toml

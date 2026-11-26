@@ -98,7 +98,8 @@ pub(crate) fn perform(paths: &DaemonPaths) -> anyhow::Result<Done> {
     if !control::lock_held(&paths.lock) {
         return Ok(Done::NoDaemon);
     }
-    let pid = control::read_pid(&paths.lock).context("cannot read the daemon's pid")?;
+    // Nothing in the runtime directory is trusted, and no signal sent, before this check.
+    let pid = control::daemon_pid(paths)?;
     let live = |m: &Marker| i64::from(m.pid) == i64::from(pid);
     if !Marker::read(&paths.marker_file()).is_some_and(|m| live(&m)) {
         return Ok(Done::NotUpgradable);

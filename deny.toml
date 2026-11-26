@@ -1,0 +1,55 @@
+# What `just audit` (cargo-deny) checks in the dependency graph: advisories, licences,
+# duplicate versions and sources. Keys are those of cargo-deny 0.22.1, pinned in `.mise.toml`.
+
+[graph]
+# The four release targets. A dependency of any of them counts, build dependencies included,
+# whatever the host is.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+]
+all-features = false
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+unmaintained = "all"
+# An accepted advisory is one entry: { id = "RUSTSEC-…", reason = "why, with a link" }.
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+allow = ["MIT", "Apache-2.0", "ISC", "BSD-3-Clause", "Zlib", "Unicode-3.0"]
+exceptions = [
+  # Linked into deck: ghostty-vt -> dirs -> option-ext.
+  { crate = "option-ext", allow = ["MPL-2.0"] },
+  # Build time only: the root certificates of ureq, which ghostty-vt-sys downloads with.
+  { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+  { crate = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
+
+[bans]
+multiple-versions = "deny"
+# The workspace crates depend on each other by path with no version, which counts as a
+# wildcard; it is allowed between crates that are `publish = false`, as all of them are.
+wildcards = "deny"
+allow-wildcard-paths = true
+# Second versions that only an upstream release removes. Each entry skips the older one.
+# Dev-dependencies are not counted (`multiple-versions-include-dev` is off by default).
+skip = [
+  { crate = "nix:<0.29", reason = "portable-pty 0.9; the newer nix is a build dependency of zip (ghostty-vt-sys)" },
+  { crate = "cfg_aliases:<0.2", reason = "nix 0.28" },
+  { crate = "thiserror:<2", reason = "filedescriptor, through portable-pty 0.9" },
+  { crate = "thiserror-impl:<2", reason = "thiserror 1" },
+  { crate = "miniz_oxide:<0.9", reason = "png 0.18; the newer one comes with flate2" },
+  { crate = "syn:<3", reason = "proc macros that are not on syn 3 yet" },
+  { crate = "getrandom:<0.3", reason = "ring, the TLS of ghostty-vt-sys's download on Linux (build time only)" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

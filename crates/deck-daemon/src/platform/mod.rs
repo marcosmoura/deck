@@ -103,9 +103,17 @@ pub fn wait_exit(pid: u32) -> std::io::Result<i32> {
     reap(pid, 0)?.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
 }
 
+/// The pid of one process for `waitpid` and `kill`. Zero and a negative number are refused:
+/// they would mean a process group, here the daemon's own.
+fn one_process(pid: u32) -> std::io::Result<libc::pid_t> {
+    libc::pid_t::try_from(pid)
+        .ok()
+        .filter(|pid| *pid > 0)
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+}
+
 fn reap(pid: u32, flags: libc::c_int) -> std::io::Result<Option<i32>> {
-    let pid = libc::pid_t::try_from(pid)
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let pid = one_process(pid)?;
     loop {
         let mut raw: libc::c_int = 0;
         // SAFETY: `raw` is a valid `c_int` that `waitpid` writes the status to; with
@@ -147,8 +155,7 @@ pub fn reap_children() -> Vec<(u32, i32)> {
 
 /// Sends `signal` to the process `pid`.
 pub fn signal(pid: u32, signal: libc::c_int) -> std::io::Result<()> {
-    let pid = libc::pid_t::try_from(pid)
-        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let pid = one_process(pid)?;
     // SAFETY: `kill` only takes two integers.
     if unsafe { libc::kill(pid, signal) } == 0 {
         Ok(())
@@ -157,22 +164,33 @@ pub fn signal(pid: u32, signal: libc::c_int) -> std::io::Result<()> {
     }
 }
 
-/// Waits up to `timeout` for `fd` to have something to read: `true` when it has data, hung
-/// up or failed (a read then says which), `false` on a timeout or an interrupted wait.
-pub fn poll_readable(fd: std::os::fd::RawFd, timeout: Duration) -> bool {
-    let mut entry = libc::pollfd {
+/// Waits for `fd` or `wake` to have something to read, for ever when `timeout` is `None`.
+/// The answer is `(fd, wake)`: whether each is readable, hung up or failed. Both `false` is
+/// a timeout or an interrupted wait.
+pub fn poll_readable_or_woken(
+    fd: std::os::fd::RawFd,
+    wake: std::os::fd::RawFd,
+    timeout: Option<Duration>,
+) -> (bool, bool) {
+    let new = |fd| libc::pollfd {
         fd,
         events: libc::POLLIN,
         revents: 0,
     };
-    let millis = libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX);
-    // SAFETY: `entry` is one valid `pollfd`, and the count passed is 1.
-    let rc = unsafe { libc::poll(&mut entry, 1, millis) };
-    match rc {
-        0 => false,
-        n if n > 0 => true,
-        _ => std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR),
+    let mut entries = [new(fd), new(wake)];
+    let millis = timeout.map_or(-1, |t| {
+        libc::c_int::try_from(t.as_millis()).unwrap_or(libc::c_int::MAX)
+    });
+    // SAFETY: `entries` holds two valid `pollfd`s, and the count passed is 2.
+    let rc = unsafe { libc::poll(entries.as_mut_ptr(), 2, millis) };
+    if rc < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+        // A failing poll: let the read say what is wrong.
+        return (true, false);
     }
+    if rc <= 0 {
+        return (false, false);
+    }
+    (entries[0].revents != 0, entries[1].revents != 0)
 }
 
 /// The machine's host name, empty when it cannot be read.
@@ -195,6 +213,18 @@ mod tests {
     use std::process::Command;
 
     use super::*;
+
+    #[test]
+    fn a_pid_that_means_a_process_group_is_refused() {
+        // Signal 0 to pid 0 would succeed: it asks about the caller's own group.
+        for pid in [0, u32::MAX] {
+            let refused = std::io::ErrorKind::InvalidInput;
+            assert_eq!(signal(pid, 0).unwrap_err().kind(), refused, "{pid}");
+            assert_eq!(wait_exit(pid).unwrap_err().kind(), refused, "{pid}");
+            assert_eq!(wait_status(pid).unwrap_err().kind(), refused, "{pid}");
+        }
+        assert!(signal(std::process::id(), 0).is_ok());
+    }
 
     #[test]
     fn a_raw_status_maps_to_an_exit_code() {

@@ -3,8 +3,9 @@
 
 use std::cell::Cell;
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -55,8 +56,14 @@ pub const DRAIN_SILENCE: Duration = Duration::from_millis(200);
 
 /// How the child is polled for its exit (the child stays killable).
 const WAIT_POLL_MIN: Duration = Duration::from_millis(10);
-const WAIT_POLL_MAX: Duration = Duration::from_millis(250);
-/// How often the reader thread looks at its pause switch while the PTY is quiet.
+const WAIT_POLL_MAX: Duration = Duration::from_secs(1);
+/// The writer thread joins queued input into one write up to this many bytes.
+const WRITE_BATCH: usize = 64 * 1024;
+/// A feed that takes the emulator longer than this ends the reader's batching of reads.
+const SLOW_FEED: Duration = Duration::from_millis(1);
+/// The reader reads on while output waits, up to this many bytes, before it feeds them.
+const READ_BATCH: usize = 16 * 1024;
+/// How long the reader holds the unfinished end of a chunk, waiting for the rest of it.
 const READ_POLL: Duration = Duration::from_millis(50);
 /// The longest `pause_reader` and `pause_waiter` wait for their thread to stop.
 const PAUSE_LIMIT: Duration = Duration::from_secs(1);
@@ -105,12 +112,21 @@ pub struct TermHandle {
     closed: AtomicBool,
     /// Counts `resize_pty` calls, so a recheck knows a newer resize replaced it.
     resizes: AtomicU64,
-    /// The shell reported its directory with OSC 7 at least once.
+    /// The directory comes from the shell's OSC 7 reports, not from the operating system.
     reports_cwd: AtomicBool,
+    /// A report arrived that the directory lookup has not counted yet.
+    cwd_reported: AtomicBool,
+    /// The directory the operating system last gave for the process.
+    os_cwd: Mutex<Option<PathBuf>>,
     /// What the agent state machine remembers between events and ticks.
     pub(crate) agent_rt: Mutex<AgentRt>,
     /// Pauses the `pty-reader` thread.
     reader_gate: Gate,
+    /// The display may be scrolled back from the live screen (true when unsure), so typing
+    /// has to ask the emulator; most of the time it is false and a key skips that round trip.
+    scrolled_back: AtomicBool,
+    /// Wakes the `pty-reader` thread out of its wait for output, for a pause.
+    reader_wake: Mutex<Option<std::os::unix::net::UnixStream>>,
     /// How long (nanoseconds) the reader holds an unfinished sequence back when no more
     /// output comes before it feeds it anyway: [`READ_POLL`], longer in tests.
     hold_quiet: AtomicU64,
@@ -251,6 +267,32 @@ impl TermHandle {
 
     pub fn set_reports_cwd(&self) {
         self.reports_cwd.store(true, Ordering::Release);
+        self.cwd_reported.store(true, Ordering::Release);
+    }
+
+    /// The reports stopped telling where the shell is: the operating system is believed again.
+    pub fn clear_reports_cwd(&self) {
+        self.reports_cwd.store(false, Ordering::Release);
+    }
+
+    /// Whether a report arrived since the last call with `take`, which also forgets it.
+    pub fn cwd_reported(&self, take: bool) -> bool {
+        if take {
+            self.cwd_reported.swap(false, Ordering::AcqRel)
+        } else {
+            self.cwd_reported.load(Ordering::Acquire)
+        }
+    }
+
+    /// Remembers the directory the operating system gave. True when it gave another one
+    /// before: the process changed directory.
+    pub fn os_moved(&self, cwd: &Path) -> bool {
+        let mut last = lock(&self.os_cwd);
+        let moved = last.as_deref().is_some_and(|last| last != cwd);
+        if moved || last.is_none() {
+            *last = Some(cwd.to_path_buf());
+        }
+        moved
     }
 
     /// The descriptor of the PTY master; `None` for a terminal that has no PTY any more.
@@ -341,6 +383,18 @@ impl TermHandle {
         }
     }
 
+    /// Notes that a scroll may have left the display scrolled back (or, with `false`, at the
+    /// bottom).
+    pub fn mark_scrolled(&self, scrolled: bool) {
+        self.scrolled_back.store(scrolled, Ordering::Release);
+    }
+
+    /// Whether the display may be scrolled back; typing then returns it to the bottom, so the
+    /// note is cleared.
+    pub fn take_scrolled(&self) -> bool {
+        self.scrolled_back.swap(false, Ordering::AcqRel)
+    }
+
     /// Stops the reader thread and returns once it has fed what it read to the emulator, or
     /// at the end of the stream. Output written meanwhile stays in the kernel.
     ///
@@ -350,9 +404,17 @@ impl TermHandle {
     /// still in the kernel. The reader keeps them: after `resume_reader` it goes on as if
     /// there had been no pause.
     pub fn pause_reader(&self) -> Result<Vec<u8>, PauseTimeout> {
-        self.reader_gate.pause(PAUSE_LIMIT).inspect_err(|_| {
-            tracing::warn!(terminal = %self.id, "the PTY reader did not stop");
-        })
+        let wake = || {
+            use std::io::Write as _;
+            if let Some(w) = lock(&self.reader_wake).as_ref() {
+                let _ = (&*w).write(&[0]);
+            }
+        };
+        self.reader_gate
+            .pause_waking(PAUSE_LIMIT, wake)
+            .inspect_err(|_| {
+                tracing::warn!(terminal = %self.id, "the PTY reader did not stop");
+            })
     }
 
     pub fn resume_reader(&self) {
@@ -563,7 +625,9 @@ impl Parts {
     /// The PTY and process of a terminal the old daemon handed over: the master's descriptor
     /// (which this takes over) and the pid of its child.
     pub fn adopted(fd: std::os::fd::RawFd, pid: u32) -> Result<Self, String> {
-        let master = AdoptedMaster::from_fd(crate::platform::own_fd(fd));
+        let owned = crate::platform::own_fd(fd)
+            .map_err(|e| format!("cannot use the PTY's descriptor {fd}: {e}"))?;
+        let master = AdoptedMaster::from_fd(owned);
         let reader = master
             .try_clone_reader()
             .map_err(|e| format!("cannot read the PTY: {e}"))?;
@@ -777,8 +841,12 @@ fn start_with(
         closed: AtomicBool::new(false),
         resizes: AtomicU64::new(0),
         reports_cwd: AtomicBool::new(seed.as_ref().is_some_and(|s| s.reports_cwd)),
+        cwd_reported: AtomicBool::new(false),
+        os_cwd: Mutex::new(None),
         agent_rt: Mutex::new(AgentRt::default()),
         reader_gate: Gate::default(),
+        scrolled_back: AtomicBool::new(true),
+        reader_wake: Mutex::new(None),
         hold_quiet: AtomicU64::new(nanos(READ_POLL)),
         waiter_gate: Gate::default(),
         reaped: Mutex::new(None),
@@ -838,9 +906,18 @@ fn spawn_writer(
     std::thread::Builder::new()
         .name("pty-writer".into())
         .spawn(move || {
-            while let Ok(bytes) = rx.recv() {
+            while let Ok(mut bytes) = rx.recv() {
+                // Keys queued while this one was written go out with it: a burst of typed
+                // keys is one send each.
+                let mut taken = bytes.len();
+                while bytes.len() < WRITE_BATCH
+                    && let Ok(more) = rx.try_recv()
+                {
+                    taken += more.len();
+                    bytes.extend_from_slice(&more);
+                }
                 let written = writer.write_all(&bytes).and_then(|()| writer.flush());
-                queued.give_back(bytes.len());
+                queued.give_back(taken);
                 if written.is_err() {
                     return;
                 }
@@ -877,6 +954,27 @@ fn spawn_reader(
     fd: Option<std::os::fd::RawFd>,
 ) {
     let (s, h) = (Arc::clone(shared), Arc::clone(handle));
+    // A pause wakes the reader through this pair, so it can wait for output without a timer.
+    let wake_rx = fd.and_then(|_| {
+        let made = std::os::unix::net::UnixStream::pair().and_then(|(rx, tx)| {
+            rx.set_nonblocking(true)?;
+            tx.set_nonblocking(true)?;
+            Ok((rx, tx))
+        });
+        match made {
+            Ok((rx, tx)) => {
+                *lock(&handle.reader_wake) = Some(tx);
+                Some(rx)
+            }
+            Err(e) => {
+                tracing::warn!(terminal = %handle.id, "cannot make the reader's wake pair: {e}");
+                None
+            }
+        }
+    });
+    // Without the pair there is no poll, so nothing is held back for a quiet that cannot
+    // be waited for: the reader reads like one without a descriptor.
+    let fd = fd.filter(|_| wake_rx.is_some());
     std::thread::Builder::new()
         .name("pty-reader".into())
         .spawn(move || {
@@ -890,6 +988,8 @@ fn spawn_reader(
             // An unfinished escape sequence or character at the end of the last chunk, which
             // waits for the rest of it.
             let mut carry: Vec<u8> = Vec::new();
+            // The last feed took the emulator longer than `SLOW_FEED`.
+            let mut slow_feed = false;
             let mut last_read = std::time::Instant::now();
             loop {
                 // Everything read so far is in the emulator here, bar what the carry and the
@@ -900,24 +1000,56 @@ fn spawn_reader(
                     held.extend_from_slice(&carry);
                     held
                 });
-                if let Some(fd) = fd
-                    && !crate::platform::poll_readable(fd, READ_POLL)
-                {
-                    // Quiet: the rest of a held sequence is not coming soon. Unless a pause
-                    // began meanwhile, which takes the carry as it is.
-                    let held_for = nanos(last_read.elapsed());
-                    if !carry.is_empty() && held_for >= h.hold_quiet.load(Ordering::Relaxed) {
-                        h.reader_gate.unless_requested(|| {
-                            pump.feed(&s, &h, &carry);
-                            carry.clear();
-                        });
+                if let (Some(fd), Some(wake)) = (fd, wake_rx.as_ref()) {
+                    // No timer while nothing is held: a pause wakes the wait itself.
+                    let timeout = (!carry.is_empty()).then_some(READ_POLL);
+                    let (readable, woken) =
+                        crate::platform::poll_readable_or_woken(fd, wake.as_raw_fd(), timeout);
+                    if woken {
+                        let mut sink = [0u8; 16];
+                        while matches!((&*wake).read(&mut sink), Ok(n) if n > 0) {}
                     }
-                    continue;
+                    if !readable {
+                        // Quiet: the rest of a held sequence is not coming soon. Unless a
+                        // pause began meanwhile, which takes the carry as it is.
+                        let held_for = nanos(last_read.elapsed());
+                        if !carry.is_empty()
+                            && !woken
+                            && held_for >= h.hold_quiet.load(Ordering::Relaxed)
+                        {
+                            h.reader_gate.unless_requested(|| {
+                                pump.feed(&s, &h, &carry);
+                                carry.clear();
+                            });
+                        }
+                        continue;
+                    }
                 }
                 match reader.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => {
+                    Ok(mut n) => {
                         last_read = std::time::Instant::now();
+                        // A PTY hands out about 1 KiB per read, and every feed is a round
+                        // trip to the emulator thread: what is already waiting is read first.
+                        // Not after a slow feed: output that costs the emulator that much must
+                        // not hold up the others waiting for it (a key, a listing).
+                        let batch = if slow_feed { 0 } else { READ_BATCH };
+                        if let (Some(fd), Some(wake)) = (fd, wake_rx.as_ref()) {
+                            while n < batch {
+                                let ready = crate::platform::poll_readable_or_woken(
+                                    fd,
+                                    wake.as_raw_fd(),
+                                    Some(Duration::ZERO),
+                                );
+                                let Some(room) = buf.get_mut(n..batch).filter(|_| ready.0) else {
+                                    break;
+                                };
+                                match reader.read(room) {
+                                    Ok(more) if more > 0 => n += more,
+                                    _ => break,
+                                }
+                            }
+                        }
                         let Some(bytes) = buf.get(..n) else {
                             break;
                         };
@@ -937,7 +1069,9 @@ fn spawn_reader(
                         };
                         let (now, held) = data.split_at(end);
                         carry.extend_from_slice(held);
+                        let fed = std::time::Instant::now();
                         pump.feed(&s, &h, now);
+                        slow_feed = fed.elapsed() > SLOW_FEED;
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                     // EIO once the child is gone (Linux), or any other end of the stream.
@@ -949,6 +1083,8 @@ fn spawn_reader(
             h.eof.store(true, Ordering::Release);
             h.reader_gate.finish();
             h.activity.notify_one();
+            // The child most likely ended: look for its status now, not at the next poll.
+            h.waiter_gate.poke();
         })
         .map_err(|e| tracing::error!("cannot start a PTY reader thread: {e}"))
         .ok();
@@ -984,8 +1120,12 @@ fn spawn_waiter(handle: &Arc<TermHandle>, mut reaped: Option<i32>) -> oneshot::R
                         return;
                     }
                     Ok(None) => {
-                        h.waiter_gate.sleep(poll);
-                        poll = (poll * 2).min(WAIT_POLL_MAX);
+                        // A poke is the end of the output: the exit is likely at hand.
+                        poll = if h.waiter_gate.sleep(poll) {
+                            WAIT_POLL_MIN
+                        } else {
+                            (poll * 2).min(WAIT_POLL_MAX)
+                        };
                     }
                     Err(e) => {
                         tracing::warn!(terminal = %h.id, "cannot wait for the child: {e}");

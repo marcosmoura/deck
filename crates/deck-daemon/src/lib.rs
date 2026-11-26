@@ -322,12 +322,16 @@ impl Daemon {
 
         let (locks, listener, loaded) = match &adoption {
             Some(file) => {
+                let own = |fd| {
+                    platform::own_fd(fd)
+                        .map_err(|e| DaemonError::io("cannot use an inherited descriptor", e))
+                };
                 let locks = startup::Locks::inherited(
-                    fs::File::from(platform::own_fd(file.lock_fd)),
-                    fs::File::from(platform::own_fd(file.state_lock_fd)),
+                    fs::File::from(own(file.lock_fd)?),
+                    fs::File::from(own(file.state_lock_fd)?),
                 );
-                let std_listener =
-                    std::os::unix::net::UnixListener::from(platform::own_fd(file.listener_fd));
+                startup::tighten(&paths, &locks);
+                let std_listener = std::os::unix::net::UnixListener::from(own(file.listener_fd)?);
                 std_listener
                     .set_nonblocking(true)
                     .map_err(|e| DaemonError::io("cannot use the inherited socket", e))?;

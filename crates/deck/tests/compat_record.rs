@@ -10,7 +10,8 @@
 mod support;
 
 use support::record::{
-    Scenario, Step, privacy_violations, recordings_dir, scenarios_dir, write_recording,
+    Scenario, Step, machine_names, privacy_violations, recordings_dir, scenarios_dir,
+    write_recording,
 };
 
 /// The recorder: plays `compat/scenarios/$DECK_RECORD.scenario` and writes the recording.
@@ -90,6 +91,50 @@ fn the_privacy_check_catches_a_home_and_a_users_path() {
             .is_empty()
     );
     assert!(privacy_violations(b"/tmp/deck-record/x/.gitconfig deck@example.invalid").is_empty());
+}
+
+/// Privacy review, Q-2: colours split a name, and a path can follow an escape sequence.
+#[test]
+fn the_privacy_check_sees_through_escape_sequences() {
+    for private in [
+        // fzf colours the letters that matched.
+        &b"/\x1b[1mUs\x1b[0mers/somebody"[..],
+        b"/ho\x1b[38;5;110mme/somebody",
+        b"\x1b[32m/srv/secret/key.pem",
+        b"in\x1b[0m/Volumes/client-x/notes",
+        b"\x1b]8;;file:///mnt/data/x\x07link\x1b]8;;\x07",
+        b"\x1b]7;file://deck/mnt/data\x1b\\",
+        b"\x1b]0;/srv/secret\x07",
+    ] {
+        assert!(
+            !privacy_violations(private).is_empty(),
+            "{}",
+            private.escape_ascii()
+        );
+    }
+    for fine in [
+        &b"\x1b[32m/usr/bin/env\x1b[0m \x1b[1msrc/\x1b[0mmain.rs"[..],
+        // The search prompt of `less`: a `/`, then what is typed.
+        b"\r\x1b[K/\x1b[Kl\x08l\x1b[Ki\x08i",
+        b"\x1b]8;;file:///tmp/deck-record/x/a\x07a\x1b]8;;\x07",
+        b"\x1b]8;;https://example.com/srv/x\x07link\x1b]8;;\x07",
+        b"\x1b]0;less a/b\x07",
+    ] {
+        let found = privacy_violations(fine);
+        assert!(found.is_empty(), "{}: {found:?}", fine.escape_ascii());
+    }
+}
+
+/// The recording machine's own names are looked for whatever their length: a short one as
+/// a whole word.
+#[test]
+fn the_recorder_checks_short_user_names_as_whole_words() {
+    assert!(!machine_names(b"somebodys-laptop", "somebody").is_empty());
+    assert!(!machine_names(b"owner: al\r\n", "al").is_empty());
+    assert!(!machine_names(b"\x1b[1ma\x1b[0ml@deck", "al").is_empty());
+    assert!(machine_names(b"alpha total small", "al").is_empty());
+    assert!(machine_names(b"deck@deck", "deck").is_empty());
+    assert!(machine_names(b"nothing here", "").is_empty());
 }
 
 #[test]

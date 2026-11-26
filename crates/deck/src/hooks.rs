@@ -7,7 +7,7 @@
 
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -185,20 +185,30 @@ fn deck_on_path(path: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The command a hook of `agent` runs, and whether it names the binary by path (then a
+/// The program a hook runs for the binary `exe` (a canonical path), and whether it is that
+/// binary itself (then a rebuild or a move makes the hook stale). When the first `deck` on
+/// `PATH` is this binary, the program is that entry as it is written, which an upgrade keeps
+/// pointing at the new version (`/opt/homebrew/bin/deck`). Never the bare name, and never a
+/// relative entry: an agent resolves a hook with its own `PATH` in the project's directory,
+/// where `./node_modules/.bin` or `.` would run a `deck` that the repository supplies.
+fn hook_program(exe: &Path, path: Option<&str>) -> (PathBuf, bool) {
+    let entry = path
+        .and_then(deck_on_path)
+        .filter(|entry| entry.is_absolute() && entry.canonicalize().is_ok_and(|real| real == exe));
+    match entry {
+        Some(entry) => (entry, false),
+        None => (exe.to_path_buf(), true),
+    }
+}
+
+/// The command a hook of `agent` runs, and whether it names the binary itself (then a
 /// rebuild or a move makes it stale).
 fn hook_command(agent: HookAgent, env: EnvLookup<'_>) -> anyhow::Result<(String, bool)> {
     let exe = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .context("cannot find the deck executable")?;
-    let on_path = env("PATH")
-        .and_then(|p| deck_on_path(&p))
-        .and_then(|p| p.canonicalize().ok());
-    let (program, absolute) = if on_path.as_deref() == Some(exe.as_path()) {
-        ("deck".to_string(), false)
-    } else {
-        (shell_quote(&exe.to_string_lossy()), true)
-    };
+    let (program, absolute) = hook_program(&exe, env("PATH").as_deref());
+    let program = shell_quote(&program.to_string_lossy());
     Ok((format!("{program}{MARKER}{}", agent.name()), absolute))
 }
 
@@ -375,11 +385,54 @@ fn backup_dir(env: EnvLookup<'_>) -> anyhow::Result<PathBuf> {
     Ok(paths::state_dir(env)?.join("backups"))
 }
 
-/// Writes a backup that does not exist yet: `<name>`, else `<name>-1`, `<name>-2`...
-fn write_backup(dir: &Path, name: &str, contents: &[u8]) -> anyhow::Result<()> {
+/// The backup directory, created with the state directory above it when missing, both for
+/// the user only: a backup is a copy of an agent's settings.
+fn private_backup_dir(env: EnvLookup<'_>) -> anyhow::Result<PathBuf> {
+    let dir = backup_dir(env)?;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .with_context(|| format!("cannot create {}", dir.display()))?;
+    Ok(dir)
+}
+
+/// How many backups of one file are kept: a backup is a whole copy of an agent's settings,
+/// which can hold keys, so old ones do not stay forever.
+const BACKUPS_KEPT: usize = 3;
+
+/// Deletes the backups of `stem` (`<agent>-<file>`) but `written`, the one just made, and
+/// the newest of the others, [`BACKUPS_KEPT`] in all. A backup is `<stem>-<unix seconds>`
+/// or `<stem>-<unix seconds>-<n>`.
+fn prune_backups(dir: &Path, stem: &str, written: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut found: Vec<((u64, u32), PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path() != written)
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let stamp = name.strip_prefix(stem)?.strip_prefix('-')?;
+            let (secs, n) = stamp.split_once('-').unwrap_or((stamp, "0"));
+            Some(((secs.parse().ok()?, n.parse().ok()?), e.path()))
+        })
+        .collect();
+    found.sort_by_key(|(stamp, _)| std::cmp::Reverse(*stamp));
+    for (_, old) in found.into_iter().skip(BACKUPS_KEPT - 1) {
+        if let Err(e) = fs::remove_file(&old) {
+            eprintln!("deck: cannot remove the old backup {}: {e}", old.display());
+        }
+    }
+}
+
+/// Writes a backup of `stem` (`<agent>-<file>`) that does not exist yet, `<stem>-<secs>`,
+/// else `<stem>-<secs>-1`, `-2`..., then deletes the oldest ones of that file.
+fn write_backup(dir: &Path, stem: &str, secs: u64, contents: &[u8]) -> anyhow::Result<()> {
+    let name = format!("{stem}-{secs}");
     for n in 0u32.. {
         let file = if n == 0 {
-            dir.join(name)
+            dir.join(&name)
         } else {
             dir.join(format!("{name}-{n}"))
         };
@@ -390,9 +443,10 @@ fn write_backup(dir: &Path, name: &str, contents: &[u8]) -> anyhow::Result<()> {
             .open(&file)
         {
             Ok(mut f) => {
-                return f
-                    .write_all(contents)
-                    .with_context(|| format!("cannot write the backup {}", file.display()));
+                f.write_all(contents)
+                    .with_context(|| format!("cannot write the backup {}", file.display()))?;
+                prune_backups(dir, stem, &file);
+                return Ok(());
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => {
@@ -423,9 +477,7 @@ fn write_safely(
         .and_then(|n| n.to_str())
         .context("the file has no name")?;
     if old.is_some() {
-        let backups = backup_dir(env)?;
-        fs::create_dir_all(&backups)
-            .with_context(|| format!("cannot create {}", backups.display()))?;
+        let backups = private_backup_dir(env)?;
         let secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
@@ -433,7 +485,8 @@ fn write_safely(
             fs::read(target).with_context(|| format!("cannot read {}", target.display()))?;
         write_backup(
             &backups,
-            &format!("{}-{name}-{secs}", agent.name()),
+            &format!("{}-{name}", agent.name()),
+            secs,
             &contents,
         )?;
     }
@@ -592,19 +645,19 @@ fn uninstall_plugin(path: &Path, env: EnvLookup<'_>) -> anyhow::Result<()> {
 
 /// Removes a plugin file (or the symlink to it) after a backup of its contents.
 fn write_safely_removing(path: &Path, text: &str, env: EnvLookup<'_>) -> anyhow::Result<()> {
-    let backups = backup_dir(env)?;
-    fs::create_dir_all(&backups).with_context(|| format!("cannot create {}", backups.display()))?;
+    let backups = private_backup_dir(env)?;
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     write_backup(
         &backups,
         &format!(
-            "opencode-{}-{secs}",
+            "opencode-{}",
             path.file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(PLUGIN_FILE)
         ),
+        secs,
         text.as_bytes(),
     )?;
     fs::remove_file(path).with_context(|| format!("cannot remove {}", path.display()))
@@ -633,6 +686,12 @@ fn plugin_status(path: &Path, env: EnvLookup<'_>) -> anyhow::Result<String> {
     if missing {
         return Ok(
             "stale: the deck binary of the plugin is gone; run \"deck hooks install opencode\" again"
+                .to_string(),
+        );
+    }
+    if !plugin_program(&text).is_some_and(|program| program.starts_with('/')) {
+        return Ok(
+            "stale: the plugin does not run deck by an absolute path; run \"deck hooks install opencode\" again"
                 .to_string(),
         );
     }
@@ -749,11 +808,16 @@ fn agent_status(agent: HookAgent, env: EnvLookup<'_>) -> anyhow::Result<String> 
     let wanted = hook_events(agent.kind());
     let events: Vec<&str> = found.iter().map(|(e, _)| e.as_str()).collect();
     let stale = found.iter().any(|(_, c)| binary_missing(c, env));
+    let bare = found.iter().any(|(_, c)| command_binary(c).is_none());
     let complete = wanted.iter().all(|e| events.contains(e));
     let mut line = if found.is_empty() {
         "not installed".to_string()
     } else if stale {
         "stale: the deck binary of a hook is gone; run \"deck hooks install\" again".to_string()
+    } else if bare {
+        // What deck 0.1 and 0.2 wrote: the agent's `PATH` chooses the `deck` that runs.
+        "stale: a hook does not run deck by an absolute path; run \"deck hooks install\" again"
+            .to_string()
     } else if !complete {
         "stale: some events have no hook; run \"deck hooks install\" again".to_string()
     } else if agent == HookAgent::Codex {
@@ -945,6 +1009,87 @@ mod tests {
         fs::write(&file, plugin_source("/bin/sh").unwrap()).unwrap();
         assert_eq!(plugin_status(&file, &env).unwrap(), "installed");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_hook_program_is_an_absolute_path_never_the_bare_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = |rest: &str| {
+            let path = tmp.path().join(rest);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "").unwrap();
+            path
+        };
+        let exe = file("cellar/1.0/deck").canonicalize().unwrap();
+        // What a package manager puts on `PATH`: a link to the current version.
+        let bin = tmp.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink(&exe, bin.join("deck")).unwrap();
+        let on_path = |dirs: &[&Path]| {
+            let path = std::env::join_paths(dirs).unwrap();
+            hook_program(&exe, path.to_str())
+        };
+
+        // The entry as written, not what it links to: it survives an upgrade.
+        assert_eq!(on_path(&[&bin]), (bin.join("deck"), false));
+        assert_ne!(bin.join("deck"), exe);
+        // A relative entry that runs the same binary is never written.
+        let cwd = std::env::current_dir().unwrap();
+        let up: PathBuf = cwd.components().skip(1).map(|_| "..").collect();
+        let relative = up.join(bin.strip_prefix("/").unwrap());
+        assert_eq!(relative.join("deck").canonicalize().unwrap(), exe);
+        assert_eq!(on_path(&[&relative, &bin]), (exe.clone(), true));
+        // Another deck comes first, or none is there: this binary, by its own path.
+        let other = file("other/deck");
+        assert_eq!(
+            on_path(&[other.parent().unwrap(), &bin]),
+            (exe.clone(), true)
+        );
+        assert_eq!(
+            on_path(&[Path::new("/nonexistent-dir")]),
+            (exe.clone(), true)
+        );
+        assert_eq!(hook_program(&exe, None), (exe.clone(), true));
+    }
+
+    /// Privacy review, P-5: a backup is a copy of an agent's settings, keys included.
+    #[test]
+    fn only_the_newest_three_backups_of_a_file_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let names = || {
+            let mut names: Vec<String> = fs::read_dir(dir.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .collect();
+            names.sort();
+            names
+        };
+        // Another file's backups, and a file that is no backup, are left alone.
+        for other in [
+            "claude-settings.local.json-100",
+            "codex-hooks.json-100",
+            "claude-settings.json-notes",
+        ] {
+            fs::write(dir.path().join(other), b"x").unwrap();
+        }
+        for secs in [100, 100, 100, 200, 90] {
+            write_backup(dir.path(), "claude-settings.json", secs, b"{}").unwrap();
+        }
+        // A clock that went back: the backup just made is never the one deleted.
+        assert!(dir.path().join("claude-settings.json-90").exists());
+        write_backup(dir.path(), "claude-settings.json", 1_000, b"{}").unwrap();
+        assert_eq!(
+            names(),
+            [
+                "claude-settings.json-100-2",
+                "claude-settings.json-1000",
+                "claude-settings.json-200",
+                "claude-settings.json-notes",
+                "claude-settings.local.json-100",
+                "codex-hooks.json-100",
+            ],
+            "the newest three, by time and then by number"
+        );
     }
 
     #[test]

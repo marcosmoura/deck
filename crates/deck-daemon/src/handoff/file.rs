@@ -11,6 +11,7 @@ use deck_core::protocol::{CellPx, NoticeLevel};
 use serde::{Deserialize, Serialize};
 
 use super::{HANDOFF_VERSION, b64};
+use crate::persist::json_error;
 
 /// What the old daemon hands to the new one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,8 +121,9 @@ pub fn read(mut from: File) -> Result<HandoffFile, String> {
     let mut bytes = Vec::new();
     from.read_to_end(&mut bytes)
         .map_err(|e| format!("cannot read the handoff file: {e}"))?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("the handoff file is not JSON: {e}"))?;
+    // The reasons go to the log: they say what kind of error it is, never what the file holds.
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("the handoff file is not JSON: {}", json_error(&e)))?;
     let version = value
         .get("handoff_version")
         .and_then(serde_json::Value::as_u64)
@@ -131,11 +133,12 @@ pub fn read(mut from: File) -> Result<HandoffFile, String> {
             "the handoff file has version {version}; this deck reads 1 to {HANDOFF_VERSION}"
         ));
     }
-    serde_json::from_value(value).map_err(|e| format!("the handoff file is not valid: {e}"))
+    serde_json::from_value(value)
+        .map_err(|e| format!("the handoff file is not valid: {}", json_error(&e)))
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use deck_core::model::{
         LaunchSpec, NameSource, Panel, PanelId, Project, ProjectId, Session, SessionId, Terminal,
     };
@@ -285,6 +288,28 @@ mod tests {
             fs::write(&path, text).unwrap();
             let err = read(File::open(&path).unwrap()).unwrap_err();
             assert!(err.contains(why), "{err}");
+        }
+    }
+
+    /// Privacy review, P-3: the reason is logged, and serde's message would quote the value.
+    #[test]
+    fn a_bad_file_is_reported_without_its_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        let mut wrong = serde_json::to_value(sample()).unwrap();
+        wrong["sessions"][0]["env"] = "API_TOKEN=handover-sk-12345".into();
+        for (text, why) in [
+            (wrong.to_string(), "not valid: unexpected value"),
+            (
+                "{\"token\": handover-sk-12345}".to_string(),
+                "not JSON: syntax error at line 1, column ",
+            ),
+        ] {
+            fs::write(&path, text).unwrap();
+            let err = read(File::open(&path).unwrap()).unwrap_err();
+            assert!(err.contains(why), "{err}");
+            assert!(!err.contains("handover"), "{err}");
+            assert!(!err.contains("API_TOKEN"), "{err}");
         }
     }
 }

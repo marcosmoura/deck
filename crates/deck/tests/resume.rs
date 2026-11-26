@@ -66,9 +66,14 @@ impl Fakes {
         let start = if sid.is_empty() {
             String::new()
         } else {
-            hook(
-                "SessionStart",
-                &format!(r#"{{"session_id":"{sid}","hook_event_name":"SessionStart"}}"#),
+            // The marker says the hook has returned: the daemon has answered the event.
+            format!(
+                "{}: > '{}'\n",
+                hook(
+                    "SessionStart",
+                    &format!(r#"{{"session_id":"{sid}","hook_event_name":"SessionStart"}}"#),
+                ),
+                self.path("claude.hooked").display()
             )
         };
         let end = hook("SessionEnd", r#"{"hook_event_name":"SessionEnd"}"#);
@@ -266,16 +271,25 @@ fn bad_id_is_dropped(sid: &str) {
     let fakes = Fakes::new();
     fakes.claude(sid, false);
     let mut h = builder(&fakes).deck();
-    start_agent(&mut h, &fakes, sid);
+    // The daemon refuses the id when the hook reports it: the agent is saved without one.
+    start_agent(&mut h, &fakes, "");
+    // An agent with no id is also what is saved before the hook arrives: wait until the hook
+    // has returned, so the daemon has had the id and refused it.
+    wait_until("the hook to return", TIMEOUT, || {
+        fakes.path("claude.hooked").exists()
+    });
     let home = here(h.home());
 
-    let (_again, _first) = restart(h, &fakes);
+    let (_again, first) = restart(h, &fakes);
     fakes.wait_lines("claude", 2);
     assert_eq!(
         fakes.lines("claude")[1],
         format!("{home}|--continue"),
         "{sid}"
     );
+    // The id was not saved either, by the daemon that stopped or by the one that restored.
+    let id = saved_agent(first.home()).map(|agent| agent["session_id"].clone());
+    assert!(matches!(id, None | Some(serde_json::Value::Null)), "{id:?}");
     // Nothing of the id was run by a shell.
     assert!(!Path::new(&home).join("PWNED").exists());
 }

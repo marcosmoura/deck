@@ -690,6 +690,12 @@ impl Shared {
             NoticeLevel::Warning => tracing::warn!("{text}"),
             NoticeLevel::Error => tracing::error!("{text}"),
         }
+        self.show(level, text);
+    }
+
+    /// [`Shared::notify`] without the log line: for text that holds a name the user chose
+    /// (or a title or prompt that became a panel name), which the caller logs by id.
+    pub fn show(&self, level: NoticeLevel, text: String) {
         let mut st = self.st();
         let mut delivered = false;
         for client in st.clients.values().filter(|c| c.session.is_some()) {
@@ -1093,21 +1099,24 @@ impl Shared {
         self.publish_colors(&st, sid);
         self.follow_viewport(&mut st, cid);
         // Focus reports are not typing.
-        if !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O") {
+        let report = matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O");
+        if !report {
             self.agent_answered(&mut st, &handle);
         }
-        // Typing returns the terminal to the live screen first; focus reports do not.
+        // The keys go to the program first: nothing below waits for the emulator before they do.
+        handle.write(bytes);
+        // Typing returns the terminal to the live screen; focus reports do not.
         let id = handle.id;
         let active = st.session(sid).is_some_and(|s| s.is_active(id));
         if active
-            && !matches!(bytes.as_slice(), b"\x1b[I" | b"\x1b[O")
+            && !report
+            && handle.take_scrolled()
             && let Some(shot) = st.shot(sid, &handle, move |e| {
                 e.scroll_to_bottom().then(|| e.full_frame(id))
             })
         {
             st.push_live(sid, &[shot]);
         }
-        handle.write(bytes);
     }
 
     /// Scrolls a terminal of the client's session and sends its screen in full.
@@ -1124,6 +1133,7 @@ impl Shared {
             tracing::debug!(%terminal, "scroll of a terminal outside the client's session ignored");
             return;
         };
+        handle.mark_scrolled(!matches!(to, ScrollTo::Bottom));
         let shot = st.shot(sid, &handle, move |e| {
             e.scroll(to);
             Some(e.full_frame(terminal))
@@ -1354,7 +1364,6 @@ impl Shared {
 
     fn title(self: &Arc<Self>, h: &Arc<TermHandle>, title: Option<String>) {
         let mut st = self.st();
-        let now = self.clock.now();
         let sid = h.session;
         let Some(sess) = st.session_mut(sid) else {
             return;
@@ -1376,6 +1385,13 @@ impl Shared {
         if !self.refresh_name_of(&mut st, sid, h.id) && animation {
             return;
         }
+        self.push_view_throttled(&mut st, sid);
+    }
+
+    /// Sends the session's view for a change a program's output makes at any rate, a title
+    /// or a directory: at most one per [`TITLE_VIEW_INTERVAL`], and a last one after a burst.
+    fn push_view_throttled(self: &Arc<Self>, st: &mut State, sid: SessionId) {
+        let now = self.clock.now();
         let Some(sess) = st.session_mut(sid) else {
             return;
         };
@@ -1411,13 +1427,31 @@ impl Shared {
     /// Turns the emulator's news into a frame for the session's clients. Returns how long
     /// until the pass that follows the timeout of a synchronized output the program holds.
     pub fn pump(&self, h: &Arc<TermHandle>) -> Option<Duration> {
-        let mut st = self.st();
         let sid = h.session;
-        let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id));
-        if !streamed || st.clients_of(sid).next().is_none() {
+        let mut st = self.st();
+        let streamed = st.session(sid).is_some_and(|s| s.is_active(h.id))
+            && st.clients_of(sid).next().is_some();
+        if !streamed {
+            // Nobody sees the damage: dropping it waits for the emulator, which is not done
+            // under the state lock.
+            drop(st);
             h.with_emu(|e| e.reset_damage());
+            // The terminal may have become streamed while the lock was free, and the reader
+            // may have fed output that the reset then wiped: those clients get a full frame.
+            let mut st = self.st();
+            let now_streamed = st.session(sid).is_some_and(|s| s.is_active(h.id))
+                && st.clients_of(sid).next().is_some();
+            if now_streamed {
+                let id = h.id;
+                if let Some(shot) = st.shot(sid, h, move |e| Some(e.full_frame(id))) {
+                    st.push_live(sid, &[shot]);
+                }
+            }
             return None;
         }
+        // The damage is read and pushed under one hold of the lock: a frame read outside it
+        // can reach the clients after a full frame (a scroll, a terminal's last output) that
+        // already shows newer output.
         let now = self.clock.now();
         let ids = st.sent_ids(sid, h.id);
         let (shot, hold) = h.with_emu({

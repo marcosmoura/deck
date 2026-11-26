@@ -66,6 +66,24 @@ pub(crate) fn remove_tmp(state: &Path) {
     }
 }
 
+/// What is wrong with a JSON text, without its contents: serde's own message quotes the
+/// value it stopped at, which can be an environment value, and this text goes to the log.
+pub(crate) fn json_error(e: &serde_json::Error) -> String {
+    use serde_json::error::Category;
+
+    let kind = match e.classify() {
+        Category::Io => "read error",
+        Category::Syntax => "syntax error",
+        Category::Data => "unexpected value",
+        Category::Eof => "unexpected end",
+    };
+    if e.line() == 0 {
+        kind.to_string()
+    } else {
+        format!("{kind} at line {}, column {}", e.line(), e.column())
+    }
+}
+
 fn newer_version(value: &serde_json::Value) -> Option<u32> {
     let version = value.get("version")?.as_u64()?;
     let version = u32::try_from(version).unwrap_or(u32::MAX);
@@ -87,12 +105,18 @@ pub(crate) fn load(paths: &DaemonPaths) -> Result<Loaded, DaemonError> {
         }
     };
     let parsed = serde_json::from_slice::<serde_json::Value>(&bytes)
-        .map_err(|e| e.to_string())
+        .map_err(|e| json_error(&e))
         .and_then(|value| match newer_version(&value) {
             Some(version) => Ok(Err(version)),
             None => serde_json::from_value::<StateFile>(value)
                 .map(Ok)
-                .map_err(|e| e.to_string()),
+                .map_err(|e| {
+                    // An error of a parsed value has no position: the text gives it.
+                    let e = serde_json::from_slice::<StateFile>(&bytes)
+                        .err()
+                        .unwrap_or(e);
+                    json_error(&e)
+                }),
         });
     match parsed {
         Ok(Err(version)) => Err(DaemonError::NewerState(version)),
@@ -222,6 +246,42 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert!(names.iter().any(|n| n.starts_with("state.json.bad-")));
+    }
+
+    /// Privacy review, P-3: serde's message would quote the value into `daemon.log`.
+    #[test]
+    fn a_bad_file_is_reported_without_its_contents() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = paths(home.path());
+        fs::create_dir_all(&paths.state_dir).unwrap();
+        // A whole state whose saved `--env` was edited by hand into the wrong shape.
+        let model = crate::handoff::file::tests::sample()
+            .sessions
+            .remove(0)
+            .model;
+        let mut value = serde_json::to_value(StateFile::new(5, vec![], [&model])).unwrap();
+        value["sessions"][0]["projects"][0]["panels"][0]["terminals"][0]["env"] =
+            serde_json::json!(["API_TOKEN=handedit-sk-12345"]);
+        let text = serde_json::to_string_pretty(&value).unwrap();
+        fs::write(paths.state_file(), &text).unwrap();
+        let Loaded::Bad(why) = load(&paths).unwrap() else {
+            panic!("bad")
+        };
+        assert!(!why.contains("handedit"), "{why}");
+        assert!(!why.contains("API_TOKEN"), "{why}");
+        let line = 1 + text.lines().position(|l| l.contains("handedit")).unwrap();
+        assert!(
+            why.contains(&format!("unexpected value at line {line}, column ")),
+            "{why}"
+        );
+
+        // Text that is not JSON at all: where it stops, not what it holds.
+        fs::write(paths.state_file(), b"{\"token\": handedit-sk-12345}").unwrap();
+        let Loaded::Bad(why) = load(&paths).unwrap() else {
+            panic!("bad")
+        };
+        assert!(!why.contains("handedit"), "{why}");
+        assert!(why.contains("syntax error at line 1, column "), "{why}");
     }
 
     #[test]

@@ -109,6 +109,8 @@ The user's yes to the repo flow, the approval of a spec, or a request for a back
 
 The release pull request that release-please opens on `main` is merged by the user, never by an agent.
 
+**`Cargo.lock`** changes only in a `chore(deps)` commit, or in a commit whose message names every version it bumps. A dependency the task adds, and the workspace version of a release, are the task's own changes. Anything else the lock picked up along the way (a `cargo update`, a build that resolved again) is undone with `git restore Cargo.lock` before the commit: a version nobody chose is code nobody reviewed.
+
 ## Keeping sessions cheap
 
 The cost of a session is its turns times its context.

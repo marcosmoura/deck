@@ -24,6 +24,7 @@ In any other outer terminal (Alacritty, WezTerm, tmux, ...) the image's cells sh
 - 64 MiB of image data per screen of each terminal; no animation; no sub-cell offsets (an image starts at its cell).
 - Images cover text, and are not kept across a daemon restart.
 - An image shows at most 297 columns by 297 rows; a placement past that is cut, and one whose pixels would pass 64 MiB (`cols x rows` cells at the client's cell size) is not drawn.
+- Many large placements are drawn a few at a time: the client scales at most 64 MiB of pixels per draw, the rest on the next draws, and keeps at most 128 MiB of scaled images in the outer terminal. A placement past that stays undrawn until others leave the screen.
 - A second client with a different cell size sees sizes computed for the first one.
 - Very large placements (hundreds of cells at large cell sizes) cost a lot of CPU and bytes when first drawn, and again after a cell size change.
 - The outer terminal's own image quota may evict images silently.

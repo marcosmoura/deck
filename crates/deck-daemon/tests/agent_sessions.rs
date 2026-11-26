@@ -265,6 +265,33 @@ async fn answer(c: &mut Client, kind: AgentKind, start: usize, within: Duration)
     }
 }
 
+/// The first `count` answers for `kind` that came after `log[start]`.
+async fn answers(c: &mut Client, kind: AgentKind, start: usize, count: usize) -> Vec<Listing> {
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let found: Vec<Listing> = c.log[start..]
+            .iter()
+            .filter_map(|m| match m {
+                ServerMsg::Response(Response::AgentSessions {
+                    kind: k,
+                    sessions,
+                    error,
+                }) if *k == kind => Some((sessions.clone(), error.clone())),
+                _ => None,
+            })
+            .collect();
+        if found.len() >= count {
+            return found;
+        }
+        let left = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or_else(|| panic!("{} of {count} {kind:?} answers in time", found.len()));
+        if c.recv(left).await.is_none() {
+            assert!(!c.eof, "the connection ended");
+        }
+    }
+}
+
 async fn send_list(c: &mut Client, kind: AgentKind, limit: u16) -> usize {
     let start = c.log.len();
     c.send(&ClientMsg::Request(Request::ListAgentSessions {
@@ -577,36 +604,52 @@ async fn opencode_runs_with_the_sessions_environment_and_path() {
             dir.display()
         )
     };
-    assert!(runs.contains(&want(&root)), "{runs:?}");
-    assert!(runs.contains(&want(&sb.home())), "{runs:?}");
+    assert_eq!(runs, [want(&sb.home())], "one run, in the home directory");
     daemon.stop().await.unwrap();
 }
 
+/// Security review, Q-4: OpenCode runs the plugins and MCP servers of its working directory,
+/// so the listing never runs in a space root.
 #[tokio::test(flavor = "multi_thread")]
-async fn opencode_runs_in_every_project_root_and_home_and_the_sessions_merge() {
+async fn opencode_runs_only_in_the_home_directory_never_in_a_space_root() {
     let sb = Sb::new();
-    let (r1, r2, other) = (sb.root("one"), sb.root("two"), sb.root("other"));
+    let (r1, r2) = (sb.root("one"), sb.root("two"));
     let home = sb.home();
     let item = |id: &str, updated: u64| {
         format!(
             "{{\"id\":\"{id}\",\"title\":\"T {id}\",\"updated\":{updated},\"directory\":\"/w\"}}"
         )
     };
-    // An array only in the project roots and the home directory.
+    // A different array in each directory: only the home's may be shown.
     fake_opencode(
         &sb,
         &format!(
-            "case \"$(pwd -P)\" in\n'{r1}') printf '[{a},{shared}]';;\n'{r2}') printf '[{b},{shared}]';;\n'{home}') printf '[{c}]';;\n*) printf 'nothing here';;\nesac",
+            "case \"$(pwd -P)\" in\n'{r1}') printf '[{a}]';;\n'{r2}') printf '[{b}]';;\n'{home}') printf '[{c},{d}]';;\n*) printf 'nothing here';;\nesac",
             r1 = r1.display(),
             r2 = r2.display(),
             home = home.display(),
-            a = item("ses_a", 1_766_000_001),
-            b = item("ses_b", 1_766_000_003),
-            c = item("ses_c", 1_766_000_004),
-            shared = item("ses_shared", 1_766_000_002),
+            a = item("ses_a", 1_766_000_009),
+            b = item("ses_b", 1_766_000_008),
+            c = item("ses_c", 1_766_000_001),
+            d = item("ses_d", 1_766_000_002),
         ),
     );
-    let (daemon, _stats, mut c) = attached(&sb, &r1, &sb.path_with_system()).await;
+    // The session was created by a shell in a space root: its `PWD` and `OLDPWD` say so. A
+    // `/bin/sh` fake cannot show what it gets of them (a shell resets `PWD` to its real
+    // directory when it starts); a unit test of `listing.rs` reads the command for that.
+    let mut env = sb.env(&sb.path_with_system());
+    env.push(("PWD".into(), r1.clone().into()));
+    env.push(("OLDPWD".into(), r2.clone().into()));
+    let (daemon, _stats) = daemon_with_stats().await;
+    let mut c = Client::attach(
+        &daemon.paths.socket,
+        Attach {
+            cwd: r1.clone(),
+            env,
+            ..Attach::default()
+        },
+    )
+    .await;
     c.action(Action::NewProject {
         name: "two".into(),
         root: r2.clone(),
@@ -618,21 +661,59 @@ async fn opencode_runs_in_every_project_root_and_home_and_the_sessions_merge() {
     assert_eq!(error, None);
     assert_eq!(
         ids(&sessions),
-        ["ses_c", "ses_b", "ses_shared", "ses_a"],
-        "merged, newest first, no duplicate"
+        ["ses_d", "ses_c"],
+        "the home's, newest first"
     );
-    let mut dirs: Vec<String> = opencode_runs(&sb)
+    let dirs: Vec<String> = opencode_runs(&sb)
         .iter()
         .filter_map(|l| l.split('|').nth(2).map(str::to_string))
         .collect();
-    dirs.sort();
-    let mut want: Vec<String> = [&r1, &r2, &home].map(|p| p.display().to_string()).to_vec();
-    want.sort();
     assert_eq!(
-        dirs, want,
-        "one run per project root and the home directory"
+        dirs,
+        [home.display().to_string()],
+        "one run, in the home directory, and none in a space root"
     );
-    assert!(!dirs.contains(&other.display().to_string()));
+    daemon.stop().await.unwrap();
+}
+
+/// A session whose `HOME` is missing, empty or relative has no directory to list in: a
+/// relative one would name a directory under the daemon's own.
+#[tokio::test(flavor = "multi_thread")]
+async fn opencode_does_not_run_without_an_absolute_home() {
+    let sb = Sb::new();
+    fake_opencode(
+        &sb,
+        "printf '[{\"id\":\"ses_one\",\"title\":\"T\",\"updated\":1766000000,\"directory\":\"/w\"}]'",
+    );
+    let (daemon, _stats) = daemon_with_stats().await;
+    let path = sb.path_with_system();
+    for (session, home) in [
+        ("missing", None),
+        ("empty", Some("")),
+        ("relative", Some(".")),
+    ] {
+        let mut env = sb.env(&path);
+        env.retain(|(k, _)| k != "HOME");
+        if let Some(home) = home {
+            env.push(("HOME".into(), home.into()));
+        }
+        let mut c = Client::attach(
+            &daemon.paths.socket,
+            Attach {
+                session: Some(session.into()),
+                cwd: sb.root(session),
+                env,
+                ..Attach::default()
+            },
+        )
+        .await;
+        assert_eq!(
+            list(&mut c, AgentKind::OpenCode, 50).await,
+            (Vec::new(), None),
+            "{session}: an empty answer"
+        );
+    }
+    assert_eq!(opencode_runs(&sb), Vec::<String>::new(), "no run at all");
     daemon.stop().await.unwrap();
 }
 
@@ -640,20 +721,19 @@ async fn opencode_runs_in_every_project_root_and_home_and_the_sessions_merge() {
 async fn at_most_two_opencode_children_run_at_once() {
     let sb = Sb::new();
     fake_opencode(&sb, "/bin/sleep 0.3\nprintf '[]'");
-    let first = sb.root("r0");
-    let (daemon, stats, mut c) = attached(&sb, &first, &sb.path_with_system()).await;
-    for i in 1..6 {
-        c.action(Action::NewProject {
-            name: format!("r{i}"),
-            root: sb.root(&format!("r{i}")),
-        })
-        .await
-        .unwrap();
-    }
+    let (daemon, stats, mut c) = attached(&sb, &sb.root("r0"), &sb.path_with_system()).await;
 
-    let (sessions, error) = list(&mut c, AgentKind::OpenCode, 50).await;
-    assert_eq!((sessions.len(), error), (0, None), "empty arrays are fine");
-    assert_eq!(opencode_runs(&sb).len(), 7, "six roots and the home");
+    // One child per request: several requests at once still run two at a time.
+    let start = send_list(&mut c, AgentKind::OpenCode, 50).await;
+    for _ in 1..7 {
+        send_list(&mut c, AgentKind::OpenCode, 50).await;
+    }
+    let answers = answers(&mut c, AgentKind::OpenCode, start, 7).await;
+    assert!(
+        answers.iter().all(|(s, e)| s.is_empty() && e.is_none()),
+        "empty arrays are fine: {answers:?}"
+    );
+    assert_eq!(opencode_runs(&sb).len(), 7, "one run per request");
     assert_eq!(stats.max_children.load(Ordering::Relaxed), 2);
     daemon.stop().await.unwrap();
 }
@@ -984,8 +1064,8 @@ async fn closing_the_connection_during_a_listing_kills_its_children() {
     let (daemon, _stats, mut c) = attached(&sb, &sb.root("p"), &sb.path_with_system()).await;
     send_list(&mut c, AgentKind::OpenCode, 50).await;
     let deadline = Instant::now() + Duration::from_secs(5);
-    while opencode_pids(&sb).len() < 2 {
-        assert!(Instant::now() < deadline, "the children did not start");
+    while opencode_pids(&sb).is_empty() {
+        assert!(Instant::now() < deadline, "the child did not start");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let pids = opencode_pids(&sb);
@@ -1010,18 +1090,15 @@ async fn the_two_children_limit_holds_across_concurrent_requests() {
         },
     )
     .await;
+    // Two requests from each client: four children in all, one per request.
     let (sa, sb_start) = (
         send_list(&mut a, AgentKind::OpenCode, 50).await,
         send_list(&mut b, AgentKind::OpenCode, 50).await,
     );
-    answer(&mut a, AgentKind::OpenCode, sa, Duration::from_secs(12)).await;
-    answer(
-        &mut b,
-        AgentKind::OpenCode,
-        sb_start,
-        Duration::from_secs(12),
-    )
-    .await;
+    send_list(&mut a, AgentKind::OpenCode, 50).await;
+    send_list(&mut b, AgentKind::OpenCode, 50).await;
+    answers(&mut a, AgentKind::OpenCode, sa, 2).await;
+    answers(&mut b, AgentKind::OpenCode, sb_start, 2).await;
     assert_eq!(opencode_runs(&sb).len(), 4);
     assert_eq!(stats.max_children.load(Ordering::Relaxed), 2);
     daemon.stop().await.unwrap();

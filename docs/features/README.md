@@ -6,6 +6,7 @@ One page per feature, written by the work that ships it and kept current by ever
 
 - [Sessions](sessions.md): attach, detach, the default session, `deck new`, `deck ls`, `deck kill-session`, `deck rename-session`, `deck kill-server`, the session picker, the exit messages.
 - [Persistence](persistence.md): what survives a daemon restart, `deck kill-server --forget`, the state file.
+- [Privacy](privacy.md): what deck keeps in memory and on disk, for how long, what it reads and passes on, what it never does, how to delete it.
 - [Sidebar](sidebar.md): the sidebar, panels and spaces, prompts, confirmations and help.
 - [Layout](layout.md): several terminals in a panel, the grid, adding, closing and focusing terminals.
 - [Keys](keys.md): the prefix, the bindings and how to change them.

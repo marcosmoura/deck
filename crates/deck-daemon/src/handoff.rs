@@ -262,7 +262,17 @@ fn read_adoption(
 ) -> Result<file::HandoffFile, String> {
     use crate::platform;
     platform::set_cloexec(fd, true).map_err(|e| format!("cannot use descriptor {fd}: {e}"))?;
-    let file = file::read(fs::File::from(platform::own_fd(fd)))?;
+    let owned = platform::own_fd(fd).map_err(|e| format!("cannot use descriptor {fd}: {e}"))?;
+    let file = file::read(fs::File::from(owned))?;
+    // Each descriptor gets one owner (`platform::own_fd`): none may be named twice.
+    let mut seen = std::collections::HashSet::new();
+    let twice = [file.lock_fd, file.state_lock_fd, file.listener_fd]
+        .into_iter()
+        .chain(file.terminals.iter().filter_map(|t| t.fd))
+        .find(|fd| !seen.insert(*fd));
+    if let Some(fd) = twice {
+        return Err(format!("the handoff names descriptor {fd} twice"));
+    }
     for (what, fd, path) in [
         ("the daemon lock", file.lock_fd, &paths.lock),
         ("the state lock", file.state_lock_fd, &paths.state_lock),
@@ -322,6 +332,28 @@ mod tests {
             terminals: 12,
             upgrading: false,
         }
+    }
+
+    #[test]
+    fn a_handoff_that_names_a_descriptor_twice_is_refused() {
+        use std::os::fd::IntoRawFd;
+        let dir = tempfile::tempdir().unwrap();
+        let mut handed = file::tests::sample();
+        handed.listener_fd = handed.lock_fd;
+        let fd = file::write(dir.path(), &handed).unwrap().into_raw_fd();
+        let paths = crate::DaemonPaths {
+            runtime_dir: dir.path().into(),
+            socket: dir.path().join("deck.sock"),
+            lock: dir.path().join("deck.lock"),
+            state_dir: dir.path().into(),
+            state_lock: dir.path().join("state.lock"),
+            log_file: dir.path().join("deck.log"),
+        };
+        let why = read_adoption(fd, &paths).unwrap_err();
+        assert_eq!(
+            why,
+            format!("the handoff names descriptor {} twice", handed.lock_fd)
+        );
     }
 
     #[test]

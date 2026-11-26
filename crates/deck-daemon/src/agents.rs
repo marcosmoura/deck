@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use deck_core::agents::{
-    AgentKind, AgentSource, AgentState, AgentStatus, OpenCodeTracker, clip_prompt,
+    AgentKind, AgentSource, AgentState, AgentStatus, OpenCodeTracker, clip_prompt, valid_session_id,
 };
 
 /// Output within this long makes a process-detected agent `active`.
@@ -152,7 +152,9 @@ pub fn apply_event(
     }
     state.status = status;
     state.source = AgentSource::Hooks;
-    if let Some(id) = &event.session_id
+    // An id that could never be resumed is not kept: it would be copied into every view and
+    // into `state.json`, whatever its size.
+    if let Some(id) = event.session_id.as_ref().filter(|id| valid_session_id(id))
         && state.session_id.as_ref() != Some(id)
     {
         state.session_id = Some(id.clone());
@@ -364,6 +366,32 @@ mod tests {
         let state = agent.unwrap();
         assert_eq!(state.status, AgentStatus::Idle);
         assert_eq!(state.session_id.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn a_session_id_that_could_not_be_resumed_is_dropped() {
+        let (mut agent, mut rt) = (None, AgentRt::default());
+        let with = |id: String| Event {
+            session_id: Some(id),
+            ..event(Some(AgentStatus::Working))
+        };
+        // Oversized, or with characters no agent's id has: the status still applies.
+        for bad in [
+            "a".repeat(129),
+            "x".repeat(1 << 20),
+            "a b".into(),
+            "-a".into(),
+        ] {
+            apply_event(&mut agent, &mut rt, &with(bad), secs(1));
+            let state = agent.clone().unwrap();
+            assert_eq!(state.status, AgentStatus::Working);
+            assert_eq!(state.session_id, None);
+        }
+        apply_event(&mut agent, &mut rt, &with("ses_1".into()), secs(2));
+        assert_eq!(agent.clone().unwrap().session_id.as_deref(), Some("ses_1"));
+        // A bad id after a good one changes nothing.
+        apply_event(&mut agent, &mut rt, &with("a b".into()), secs(3));
+        assert_eq!(agent.unwrap().session_id.as_deref(), Some("ses_1"));
     }
 
     #[test]

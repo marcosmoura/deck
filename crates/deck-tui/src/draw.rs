@@ -283,12 +283,12 @@ fn draw_panel(buf: &mut Buffer, panel: Rect, app: &App) -> Option<Position> {
     let (cw, ch) = (vw.min(panel.width), vh.min(panel.height));
     for y in 0..ch {
         for x in 0..cw {
-            let cell = &tmp[(x, y)];
+            let cell = std::mem::take(&mut tmp[(x, y)]);
             // A wide character cut in half by the crop would spill over.
             if x + 1 == cw && x + 1 < vw && width(cell.symbol()) > 1 {
                 buf[(panel.x + x, panel.y + y)].set_symbol(" ");
             } else {
-                buf[(panel.x + x, panel.y + y)] = cell.clone();
+                buf[(panel.x + x, panel.y + y)] = cell;
             }
         }
     }
@@ -411,15 +411,31 @@ fn draw_terminal(buf: &mut Buffer, area: Rect, term: Option<&TermMirror>) {
             if run.col >= area.width {
                 break;
             }
-            buf.set_stringn(
-                area.x + run.col,
-                y,
-                blank_placeholders(&run.text),
-                usize::from(area.width - run.col),
-                style(run.style),
-            );
+            let (x, max) = (area.x + run.col, usize::from(area.width - run.col));
+            if !put_ascii(buf, (x, y), &run.text, max, style(run.style)) {
+                buf.set_stringn(x, y, blank_placeholders(&run.text), max, style(run.style));
+            }
         }
     }
+}
+
+/// Writes a run of printable ASCII, one cell per byte, without the grapheme segmentation of
+/// `set_stringn`, which is most of a draw's time. `false` (nothing written) for any other text.
+fn put_ascii(buf: &mut Buffer, (x, y): (u16, u16), text: &str, max: usize, style: Style) -> bool {
+    if !text.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        return false;
+    }
+    for (i, byte) in text.bytes().take(max).enumerate() {
+        let Ok(offset) = u16::try_from(i) else { break };
+        let Some(col) = x.checked_add(offset) else {
+            break;
+        };
+        let Some(cell) = buf.cell_mut((col, y)) else {
+            break;
+        };
+        cell.set_char(char::from(byte)).set_style(style);
+    }
+    true
 }
 
 /// `text` with every Unicode placeholder cell (U+10EEEE and its diacritics) replaced by a
@@ -851,6 +867,16 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
+
+    #[test]
+    fn ascii_text_past_the_buffer_edge_is_cut_not_a_panic() {
+        let mut buf = Buffer::empty(ratatui::layout::Rect::new(0, 0, 4, 1));
+        assert!(put_ascii(&mut buf, (2, 0), "abcdef", 6, Style::default()));
+        assert_eq!(buf[(2, 0)].symbol(), "a");
+        assert_eq!(buf[(3, 0)].symbol(), "b");
+        // A row that is not there writes nothing and does not panic.
+        assert!(put_ascii(&mut buf, (0, 5), "x", 1, Style::default()));
+    }
 
     #[test]
     fn the_outer_cursor_blinks_when_the_program_asked() {

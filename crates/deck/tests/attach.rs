@@ -18,6 +18,29 @@ fn attached() -> Harness {
     h
 }
 
+#[test]
+fn a_burst_of_typed_keys_reaches_the_program_whole() {
+    let mut h = attached();
+    let target = h.home().path().join("typed.txt");
+    h.send_keys(&format!("cat > '{}'\r", target.display()));
+    // The shell opens the file before it runs `cat`; what comes after its line is `cat`'s.
+    wait_until("cat to start", TIMEOUT, || target.exists());
+    // 64 KiB as keys, without the bracketed-paste markers: more than the outer terminal's
+    // input buffer holds, so the sender waits for deck to read on.
+    let line = format!("{}\n", "k".repeat(99));
+    let text = line.repeat(655);
+    assert!(
+        h.send_bytes_within(text.as_bytes(), Duration::from_secs(20)),
+        "deck stopped reading its input"
+    );
+    wait_until(
+        "the whole burst in the file",
+        Duration::from_secs(20),
+        || fs::metadata(&target).is_ok_and(|m| m.len() == text.len() as u64),
+    );
+    h.send_keys("\x04");
+}
+
 /// The prefix, then `key`.
 fn prefixed(h: &mut Harness, key: &str) {
     h.send_bytes(b"\x1b ");

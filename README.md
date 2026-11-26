@@ -25,7 +25,7 @@ Shell completion (subcommands, flags, session names, ids), in your shell's start
 
 ```sh
 source <(COMPLETE=zsh deck)          # ~/.zshrc
-source <(COMPLETE=bash deck)         # ~/.bashrc
+eval "$(COMPLETE=bash deck)"         # ~/.bashrc
 COMPLETE=fish deck | source          # ~/.config/fish/config.fish
 ```
 

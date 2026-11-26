@@ -26,6 +26,8 @@ struct Inner {
     state: State,
     /// What the thread handed over when it parked.
     pending: Vec<u8>,
+    /// `poke` was called and `sleep` has not seen it yet.
+    poked: bool,
 }
 
 #[derive(Debug, Default)]
@@ -69,13 +71,20 @@ impl Gate {
 
     /// For the looping thread: sleeps up to `time`, and wakes at once when a pause is asked
     /// for.
-    pub fn sleep(&self, time: Duration) {
+    /// Returns whether it was cut short by `poke`.
+    pub fn sleep(&self, time: Duration) -> bool {
         let inner = self.inner();
-        drop(
-            self.changed
-                .wait_timeout_while(inner, time, |i| i.state == State::Running)
-                .unwrap_or_else(PoisonError::into_inner),
-        );
+        let (mut inner, _) = self
+            .changed
+            .wait_timeout_while(inner, time, |i| i.state == State::Running && !i.poked)
+            .unwrap_or_else(PoisonError::into_inner);
+        std::mem::take(&mut inner.poked)
+    }
+
+    /// Ends the thread's current or next `sleep` at once.
+    pub fn poke(&self) {
+        self.inner().poked = true;
+        self.changed.notify_all();
     }
 
     /// For the looping thread, when it ends: nobody has to wait for it any more.
@@ -89,11 +98,22 @@ impl Gate {
     /// Asks the thread to stop and waits until it has (or ended), at most `limit`. Returns
     /// what the thread handed over when it parked.
     pub fn pause(&self, limit: Duration) -> Result<Vec<u8>, PauseTimeout> {
+        self.pause_waking(limit, || {})
+    }
+
+    /// Like `pause`, and runs `wake` once the pause is requested, for a thread that waits
+    /// on something other than this gate.
+    pub fn pause_waking(
+        &self,
+        limit: Duration,
+        wake: impl FnOnce(),
+    ) -> Result<Vec<u8>, PauseTimeout> {
         let mut inner = self.inner();
         if inner.state == State::Running {
             inner.state = State::Requested;
             self.changed.notify_all();
         }
+        wake();
         let (inner, _) = self
             .changed
             .wait_timeout_while(inner, limit, |i| i.state == State::Requested)
@@ -112,5 +132,20 @@ impl Gate {
             inner.pending.clear();
             self.changed.notify_all();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_poke_ends_the_sleep_at_once_and_only_once() {
+        let gate = Gate::default();
+        gate.poke();
+        let start = std::time::Instant::now();
+        assert!(gate.sleep(Duration::from_secs(5)));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(!gate.sleep(Duration::from_millis(5)));
     }
 }

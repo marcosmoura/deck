@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use deck_core::agents::{AgentKind, map_hook_event};
+use deck_core::agents::{AgentKind, clip_prompt, map_hook_event};
 use deck_core::model::TerminalId;
 use deck_core::protocol::Request;
 use serde_json::Value;
@@ -105,7 +105,8 @@ fn request(
         kind,
         status: Some(update.status),
         session_id: update.session_id,
-        prompt: update.prompt,
+        // The daemon keeps the first line, clipped: nothing more of the prompt is sent.
+        prompt: update.prompt.as_deref().and_then(clip_prompt),
         raw: None,
     })
 }
@@ -216,6 +217,19 @@ mod tests {
             request(t, AgentKind::Claude, Some("PreToolUse"), payload),
             None
         );
+
+        // Only what the daemon keeps of a prompt is sent: its first line, 200 characters.
+        let long = serde_json::json!({
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "abc",
+            "prompt": format!("\n  {}\nsecond line with a secret", "p".repeat(500)),
+        })
+        .to_string();
+        let sent = request(t, AgentKind::Claude, None, long.as_bytes());
+        assert!(matches!(
+            sent,
+            Some(Request::AgentEvent { prompt: Some(ref p), .. }) if *p == "p".repeat(200)
+        ));
     }
 
     #[test]

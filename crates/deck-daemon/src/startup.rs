@@ -1,8 +1,8 @@
 //! Start-up: the runtime and state directories and the two locks.
 
-use std::fs::{self, DirBuilder, File, TryLockError};
+use std::fs::{self, DirBuilder, File, Permissions, TryLockError};
 use std::io::{self, Write};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use deck_core::paths::{self, EnvLookup, PathError};
@@ -102,6 +102,38 @@ pub(crate) fn prepare(paths: &DaemonPaths, uid: u32) -> Result<Locks, DaemonErro
     Ok(Locks { runtime, state })
 }
 
+/// Makes what a daemon took over from an older image private, as a fresh start does: an
+/// older deck left the state directory `0755`, and its log and its locks `0644`. A mode that
+/// cannot be changed is logged and does not stop the daemon, which holds the sessions by now.
+pub(crate) fn tighten(paths: &DaemonPaths, locks: &Locks) {
+    let results = [
+        (
+            &paths.state_dir,
+            fs::set_permissions(&paths.state_dir, Permissions::from_mode(0o700)),
+        ),
+        (
+            &paths.lock,
+            locks.runtime.set_permissions(Permissions::from_mode(0o600)),
+        ),
+        (
+            &paths.state_lock,
+            locks.state.set_permissions(Permissions::from_mode(0o600)),
+        ),
+        (
+            &paths.log_file,
+            fs::set_permissions(&paths.log_file, Permissions::from_mode(0o600)),
+        ),
+    ];
+    for (path, result) in results {
+        match result {
+            Ok(()) => {}
+            // A daemon started by hand has no log file.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("cannot make {} private: {e}", path.display()),
+        }
+    }
+}
+
 fn unsafe_dir(path: &Path, reason: impl Into<String>) -> DaemonError {
     DaemonError::UnsafeRuntimeDir {
         path: path.to_path_buf(),
@@ -116,45 +148,66 @@ fn private_dir(path: &Path) -> io::Result<()> {
 /// `lstat` first: a missing directory is created with mode `0700`; an existing one must be
 /// a directory (not a link) owned by us with exactly that mode.
 fn prepare_runtime_dir(path: &Path, uid: u32) -> Result<(), DaemonError> {
+    prepare_runtime_dir_with(path, uid, private_dir)
+}
+
+/// [`prepare_runtime_dir`] with the step that creates the directory. Creating succeeds too
+/// when another user put a directory, or a link to one, at the path after the `lstat`, so
+/// what is there afterwards is checked like a directory that existed.
+fn prepare_runtime_dir_with(
+    path: &Path,
+    uid: u32,
+    create: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<(), DaemonError> {
+    let inspect = |e| DaemonError::io(format!("cannot inspect {}", path.display()), e);
     match fs::symlink_metadata(path) {
-        Ok(meta) => {
-            if !meta.file_type().is_dir() {
-                let what = if meta.file_type().is_symlink() {
-                    "a symbolic link"
-                } else {
-                    "not a directory"
-                };
-                return Err(unsafe_dir(path, what));
-            }
-            if meta.uid() != uid {
-                return Err(unsafe_dir(
-                    path,
-                    format!("owned by uid {}, not {uid}", meta.uid()),
-                ));
-            }
-            let mode = meta.mode() & 0o777;
-            if mode != 0o700 {
-                return Err(unsafe_dir(path, format!("mode is {mode:04o}, not 0700")));
-            }
-            Ok(())
+        Ok(meta) => check_runtime_dir_meta(path, uid, &meta),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            create(path)
+                .map_err(|e| DaemonError::io(format!("cannot create {}", path.display()), e))?;
+            let meta = fs::symlink_metadata(path).map_err(inspect)?;
+            check_runtime_dir_meta(path, uid, &meta)
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => private_dir(path)
-            .map_err(|e| DaemonError::io(format!("cannot create {}", path.display()), e)),
-        Err(e) => Err(DaemonError::io(
-            format!("cannot inspect {}", path.display()),
-            e,
-        )),
+        Err(e) => Err(inspect(e)),
     }
 }
 
+fn check_runtime_dir_meta(path: &Path, uid: u32, meta: &fs::Metadata) -> Result<(), DaemonError> {
+    if !meta.file_type().is_dir() {
+        let what = if meta.file_type().is_symlink() {
+            "a symbolic link"
+        } else {
+            "not a directory"
+        };
+        return Err(unsafe_dir(path, what));
+    }
+    if meta.uid() != uid {
+        return Err(unsafe_dir(
+            path,
+            format!("owned by uid {}, not {uid}", meta.uid()),
+        ));
+    }
+    let mode = meta.mode() & 0o777;
+    if mode != 0o700 {
+        return Err(unsafe_dir(path, format!("mode is {mode:04o}, not 0700")));
+    }
+    Ok(())
+}
+
+/// Opens and locks a lock file that only the user can read: it is created `0600`, and one
+/// that was left `0644` is tightened.
 fn lock_file(path: &Path, busy: impl FnOnce() -> DaemonError) -> Result<File, DaemonError> {
+    let err = |e| DaemonError::io(format!("cannot open {}", path.display()), e);
     let file = File::options()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
+        .mode(0o600)
         .open(path)
-        .map_err(|e| DaemonError::io(format!("cannot open {}", path.display()), e))?;
+        .map_err(err)?;
+    file.set_permissions(Permissions::from_mode(0o600))
+        .map_err(err)?;
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(TryLockError::WouldBlock) => Err(busy()),
@@ -176,7 +229,61 @@ fn write_pid(mut file: &File, path: &Path) -> Result<(), DaemonError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn the_lock_files_are_private_even_when_they_were_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().mode() & 0o777;
+
+        let new = tmp.path().join("deck.lock");
+        drop(lock_file(&new, || DaemonError::AlreadyRunning).unwrap());
+        assert_eq!(mode(&new), 0o600);
+
+        // One that an earlier version created.
+        let old = tmp.path().join("state.lock");
+        fs::write(&old, "").unwrap();
+        fs::set_permissions(&old, fs::Permissions::from_mode(0o644)).unwrap();
+        drop(lock_file(&old, || DaemonError::AlreadyRunning).unwrap());
+        assert_eq!(mode(&old), 0o600);
+    }
+
+    #[test]
+    fn a_daemon_that_takes_over_makes_what_it_inherits_private() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().mode() & 0o777;
+        let state_dir = tmp.path().join("state");
+        fs::create_dir(&state_dir).unwrap();
+        let paths = DaemonPaths {
+            runtime_dir: tmp.path().to_path_buf(),
+            socket: tmp.path().join("deck.sock"),
+            lock: tmp.path().join("deck.lock"),
+            state_lock: state_dir.join("state.lock"),
+            log_file: state_dir.join("daemon.log"),
+            state_dir,
+        };
+        // What an older deck left; the new image gets the locks as open descriptors.
+        let files = [&paths.lock, &paths.state_lock, &paths.log_file];
+        for file in files {
+            fs::write(file, "").unwrap();
+            fs::set_permissions(file, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        fs::set_permissions(&paths.state_dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let locks = Locks::inherited(
+            File::open(&paths.lock).unwrap(),
+            File::open(&paths.state_lock).unwrap(),
+        );
+
+        tighten(&paths, &locks);
+        assert_eq!(mode(&paths.state_dir), 0o700);
+        for file in files {
+            assert_eq!(mode(file), 0o600, "{}", file.display());
+        }
+
+        // A daemon started by hand has no log: nothing to do, and no failure.
+        fs::remove_file(&paths.log_file).unwrap();
+        tighten(&paths, &locks);
+        assert_eq!(mode(&paths.lock), 0o600);
+    }
 
     #[tokio::test]
     async fn uid_matches_a_file_we_create() {
@@ -209,6 +316,36 @@ mod tests {
         std::os::unix::fs::symlink(&dir, &link).unwrap();
         let err = prepare_runtime_dir(&link, uid).unwrap_err();
         assert!(err.to_string().contains("symbolic link"), "{err}");
+    }
+
+    #[test]
+    fn a_runtime_dir_planted_while_it_was_created_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let uid = fs::metadata(tmp.path()).unwrap().uid();
+
+        // Another user's directory: creating it "succeeds" because it is there.
+        let open = tmp.path().join("open");
+        let err = prepare_runtime_dir_with(&open, uid, |path| {
+            fs::create_dir(path)?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o777))
+        })
+        .unwrap_err();
+        assert!(matches!(err, DaemonError::UnsafeRuntimeDir { .. }), "{err}");
+        assert!(err.to_string().contains("0777"), "{err}");
+
+        // A link to a private directory elsewhere.
+        let target = tmp.path().join("target");
+        private_dir(&target).unwrap();
+        let link = tmp.path().join("link");
+        let err =
+            prepare_runtime_dir_with(&link, uid, |path| std::os::unix::fs::symlink(&target, path))
+                .unwrap_err();
+        assert!(matches!(err, DaemonError::UnsafeRuntimeDir { .. }), "{err}");
+        assert!(err.to_string().contains("symbolic link"), "{err}");
+
+        // What the daemon creates itself passes.
+        let own = tmp.path().join("own");
+        prepare_runtime_dir_with(&own, uid, private_dir).unwrap();
     }
 
     #[test]

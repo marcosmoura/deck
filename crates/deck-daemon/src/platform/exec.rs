@@ -14,14 +14,24 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 const HANDOFF_SIGNALS: [libc::c_int; 4] =
     [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGUSR2];
 
-/// Takes ownership of a descriptor this process inherited.
+/// Takes ownership of a descriptor this process inherited: one the handoff file names, which
+/// the old image left open on purpose. Fails for a standard descriptor and for a number
+/// that is not open.
 ///
-/// The caller promises the number is an open descriptor that nothing else in the process
-/// owns: the handoff file names the ones the old image left open on purpose.
-pub fn own_fd(fd: RawFd) -> OwnedFd {
-    // SAFETY: by the contract above `fd` is open and owned by nobody else, so the new
-    // `OwnedFd` is its only owner and closes it once.
-    unsafe { OwnedFd::from_raw_fd(fd) }
+/// That nothing else in the process owns the number cannot be checked here. It holds
+/// because `prepare_adoption` refuses a handoff file that names a descriptor twice, and
+/// each named descriptor is taken once.
+pub fn own_fd(fd: RawFd) -> io::Result<OwnedFd> {
+    if fd <= libc::STDERR_FILENO {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    // SAFETY: `fcntl` with `F_GETFD` takes only the descriptor.
+    if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `fd` is open (checked above) and, by the note above, owned by nobody else, so
+    // the new `OwnedFd` is its only owner and closes it once.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 /// Sets or clears `FD_CLOEXEC` on `fd`.
@@ -76,13 +86,18 @@ pub fn is_listening_socket(fd: RawFd) -> bool {
     if rc == 0 {
         return on != 0;
     }
-    // macOS does not answer `SO_ACCEPTCONN` for Unix sockets, and has no other way to ask
-    // that leaves the socket alone. `listen` on a socket that already listens only sets
-    // its backlog (here the value tokio uses, so nothing changes), and fails with
-    // `EINVAL` on a connected or unbound socket and `ENOTSOCK` on anything else: the
-    // answer is the same, and the daemon has not accepted anything yet.
-    // SAFETY: `listen` takes a descriptor and a backlog.
-    unsafe { libc::listen(fd, 1024) == 0 }
+    // macOS does not answer `SO_ACCEPTCONN` for Unix sockets. `connect` tells instead and
+    // changes nothing: a socket that listens refuses it with `EOPNOTSUPP` whatever the
+    // address, and any other descriptor fails another way (`ENOTSOCK`, `EISCONN`, or for the
+    // address, which names no socket). `listen` would answer too, but it makes a socket
+    // that is only bound listen.
+    // SAFETY: zero bytes are a valid `sockaddr_un`: an address with an empty path.
+    let mut addr = unsafe { std::mem::MaybeUninit::<libc::sockaddr_un>::zeroed().assume_init() };
+    addr.sun_family = libc::sa_family_t::try_from(libc::AF_UNIX).unwrap_or(1);
+    let len = libc::socklen_t::try_from(size_of::<libc::sockaddr_un>()).unwrap_or(0);
+    // SAFETY: `addr` is a valid `sockaddr_un` of `len` bytes that `connect` only reads.
+    let rc = unsafe { libc::connect(fd, (&raw const addr).cast(), len) };
+    rc != 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EOPNOTSUPP)
 }
 
 fn mask(how: libc::c_int) -> io::Result<()> {
@@ -260,6 +275,52 @@ mod tests {
         assert!(!is_listening_socket(a.as_raw_fd()));
         let file = std::fs::File::open("/dev/null").unwrap();
         assert!(!is_listening_socket(file.as_raw_fd()));
+    }
+
+    #[test]
+    fn asking_whether_a_bound_socket_listens_does_not_make_it_listen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s");
+        // A stream socket that is bound and does not listen, which std cannot make.
+        // SAFETY: `socket` takes three integers.
+        let socket = own_fd(unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) }).unwrap();
+        // SAFETY: zero bytes are a valid `sockaddr_un`.
+        let mut addr =
+            unsafe { std::mem::MaybeUninit::<libc::sockaddr_un>::zeroed().assume_init() };
+        addr.sun_family = libc::sa_family_t::try_from(libc::AF_UNIX).unwrap();
+        let bytes = path.as_os_str().as_bytes();
+        assert!(
+            bytes.len() < addr.sun_path.len(),
+            "the path fits with its NUL"
+        );
+        for (to, from) in addr.sun_path.iter_mut().zip(bytes) {
+            *to = libc::c_char::from_ne_bytes([*from]);
+        }
+        let len = libc::socklen_t::try_from(size_of::<libc::sockaddr_un>()).unwrap();
+        // SAFETY: `addr` is a valid `sockaddr_un` of `len` bytes that `bind` only reads.
+        let rc = unsafe { libc::bind(socket.as_raw_fd(), (&raw const addr).cast(), len) };
+        assert_eq!(rc, 0, "{}", io::Error::last_os_error());
+
+        assert!(!is_listening_socket(socket.as_raw_fd()));
+        // Still not listening: a connection is refused.
+        let err = std::os::unix::net::UnixStream::connect(&path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionRefused);
+    }
+
+    #[test]
+    fn only_an_open_descriptor_above_the_standard_ones_can_be_owned() {
+        use std::os::fd::IntoRawFd;
+        for fd in [-1, 0, 1, 2] {
+            assert_eq!(
+                own_fd(fd).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput,
+                "{fd}"
+            );
+        }
+        let fd = std::fs::File::open("/dev/null").unwrap().into_raw_fd();
+        drop(own_fd(fd).unwrap());
+        // Closed by the drop above: the number is no descriptor any more.
+        assert_eq!(own_fd(fd).unwrap_err().raw_os_error(), Some(libc::EBADF));
     }
 
     #[test]

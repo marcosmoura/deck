@@ -186,6 +186,50 @@ fn an_unsafe_runtime_dir_is_refused() {
     assert!(!home.daemon_running());
 }
 
+/// What `deck` answers to bash's completion script for the last word of `line`, run in `dir`.
+#[expect(
+    clippy::unwrap_used,
+    reason = "this integration-test helper requires the command to run"
+)]
+fn bash_candidates(home: &Home, dir: &std::path::Path, line: &[&str]) -> Vec<String> {
+    let mut args = vec!["--"];
+    args.extend(line);
+    let out = home
+        .deck_command(&args)
+        .current_dir(dir)
+        .env("COMPLETE", "bash")
+        .env("_CLAP_COMPLETE_INDEX", (line.len() - 1).to_string())
+        .env("_CLAP_IFS", "\x0b")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let mut candidates: Vec<String> = stdout(&out).split('\x0b').map(str::to_owned).collect();
+    candidates.sort_unstable();
+    candidates
+}
+
+#[test]
+fn bash_completion_offers_no_directory_that_needs_quoting() {
+    let home = Home::new();
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["ok", "src$(touch PWNED)", "a b", "vt\x0bsplit"] {
+        fs::create_dir(dir.path().join(name)).unwrap();
+    }
+    // bash would insert each answer as it is: only the plain names are offered.
+    assert_eq!(
+        bash_candidates(&home, dir.path(), &["deck", "new-terminal", "--cwd", ""]),
+        [".", "ok/"]
+    );
+    assert_eq!(
+        bash_candidates(&home, dir.path(), &["deck", "new-terminal", "--cwd", "sr"]),
+        [""]
+    );
+    assert_eq!(
+        bash_candidates(&home, dir.path(), &["deck", "kill-ses"]),
+        ["kill-session"]
+    );
+}
+
 /// Attaches to the running daemon and kills its session, then reads until the daemon says
 /// goodbye: the last session has ended and the daemon is shutting down.
 #[expect(

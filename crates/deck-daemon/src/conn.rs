@@ -295,10 +295,17 @@ async fn dispatch(
             let response = shared.control(request).await;
             queue.push_msg(ServerMsg::Response(response));
         }
-        Ok(ClientMsg::Request(
-            request @ (Request::Send { .. } | Request::SendKeys { .. } | Request::Capture { .. }),
-        )) => {
+        Ok(ClientMsg::Request(request @ (Request::Send { .. } | Request::SendKeys { .. }))) => {
             queue.push_msg(ServerMsg::Response(shared.terminal_io(request)));
+        }
+        Ok(ClientMsg::Request(request @ Request::Capture { .. })) => {
+            // It waits for the emulator thread, which can be busy: off the async workers,
+            // still in order.
+            let shared = Arc::clone(shared);
+            let response = tokio::task::spawn_blocking(move || shared.terminal_io(request))
+                .await
+                .unwrap_or_else(|e| Response::Error(format!("the capture failed: {e}")));
+            queue.push_msg(ServerMsg::Response(response));
         }
         Ok(ClientMsg::Request(request @ (Request::Search { .. } | Request::Text { .. }))) => {
             // Reading a long history takes a while: off the async workers, still in order.
