@@ -59,7 +59,14 @@ fn contents(extra: &str) -> String {
     } else {
         NO_ARGS
     };
-    format!("{SHELL}{args}{extra}")
+    // Like the harness: a reload must not bring back the `system` default, which would show
+    // real notifications.
+    let notify = if extra.contains("notify") {
+        ""
+    } else {
+        "notify = \"terminal\"\n"
+    };
+    format!("{SHELL}{args}{notify}{extra}")
 }
 
 fn prefixed(h: &mut Harness, key: &str) {
@@ -131,8 +138,9 @@ fn an_invalid_file_shows_its_location_and_keeps_the_previous_config() {
     let h = running(&[("theme", "{ accent = \"green\" }")]);
     wait_accent(&h, GREEN);
     write(&h, "[theme]\naccent = \"purple\"\n");
-    h.wait_for_text("config.toml:4:10:", TIMEOUT);
-    let (row, col) = find(&h, "config.toml:4:10:");
+    // Line 5: `shell`, `shell_args` and `notify` come first.
+    h.wait_for_text("config.toml:5:10:", TIMEOUT);
+    let (row, col) = find(&h, "config.toml:5:10:");
     assert_eq!(row, 23);
     assert_eq!(h.cell(row, col).fg, RED, "the error colour");
     assert_eq!(accent(&h), GREEN);
@@ -197,7 +205,8 @@ fn an_invalid_file_at_start_runs_with_the_defaults_and_shows_the_error() {
         .config("theme", "{ accent = \"purple\" }")
         .env("SHELL", "/bin/sh")
         .deck();
-    h.wait_for_text("config.toml:3:20:", TIMEOUT);
+    // Line 4: the harness writes `shell`, `shell_args` and `notify` first.
+    h.wait_for_text("config.toml:4:20:", TIMEOUT);
     wait_accent(&h, BLUE);
     h.capture("start-invalid");
 }

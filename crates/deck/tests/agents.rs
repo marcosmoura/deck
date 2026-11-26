@@ -526,6 +526,66 @@ fn an_agent_that_needs_you_in_another_panel_is_marked_counted_and_notified() {
 }
 
 #[test]
+fn a_system_notification_opens_its_panel_when_clicked() {
+    let bin = fake_agent("claude");
+    // Fake notifiers that record their arguments and "click" at once: terminal-notifier runs
+    // its `-execute` command through `sh`; notify-send prints its `default` action.
+    let record = bin.path().join("notified");
+    let notifier = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{rec}'\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = -execute ]; then sh -c \"$2\"; fi\n  shift\ndone\n",
+        rec = record.display()
+    );
+    let notify_send = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{rec}'\necho default\n",
+        rec = record.display()
+    );
+    for (name, body) in [
+        ("terminal-notifier", &notifier),
+        ("notify-send", &notify_send),
+    ] {
+        let file = bin.path().join(name);
+        fs::write(&file, body).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut h = Harness::builder(SIZE)
+        .config_unset("sidebar")
+        .config("notify", "\"system\"")
+        .env("PATH", &path)
+        // A desktop session (Linux needs its bus) and not over ssh: deck's own notifier.
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent")
+        .env_remove("SSH_CONNECTION")
+        .env_remove("SSH_TTY")
+        .env("DECK_TEST_AGENT_POLL_MS", "100")
+        .deck();
+    h.wait_for_text("│$", TIMEOUT);
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    let (project, _, terminal) = inactive_first_panel(&mut h);
+
+    let before = h.raw_output().len();
+    event(&h, terminal, AgentStatus::Working, "s1");
+    event(&h, terminal, AgentStatus::Waiting, "s1");
+    // The click ran `deck focus` on the agent's panel: it is the active one again.
+    wait_until("the agent's panel opened by the click", TIMEOUT, || {
+        h.is_active_row(3)
+    });
+    h.capture("system-notification-opened");
+    let notified = fs::read_to_string(&record).unwrap();
+    let panel = panel_name(&h);
+    assert!(
+        notified.contains(&format!("claude needs you · {project} › {panel}")),
+        "{notified}"
+    );
+    // deck's own notification only: nothing went to the outer terminal.
+    assert!(!contains(&written_since(&h, before), b"\x1b]9;"));
+}
+
+#[test]
 fn notify_bell_rings_and_none_stays_silent() {
     for (mode, rings) in [("bell", true), ("none", false)] {
         let bin = fake_agent("claude");

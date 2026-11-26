@@ -257,13 +257,16 @@ pub const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 20..=60;
 /// The blank rows between spaces accepted by `sidebar_space_gap`.
 pub const SIDEBAR_SPACE_GAP_RANGE: std::ops::RangeInclusive<u8> = 0..=3;
 
-/// How the client tells the user, through the outer terminal, that an agent needs them.
+/// How the client tells the user that an agent needs them or finished.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NotifyMode {
-    /// OSC 9, a desktop notification in terminals that know it.
+    /// deck's own desktop notification (`terminal-notifier` on macOS, `notify-send` on
+    /// Linux), which opens its panel when clicked; `Terminal` when neither is installed.
     #[default]
-    Osc9,
+    System,
+    /// OSC 9 to the outer terminal, a desktop notification in terminals that know it.
+    Terminal,
     Bell,
     None,
 }
@@ -271,7 +274,9 @@ pub enum NotifyMode {
 impl NotifyMode {
     fn parse(text: &str) -> Option<Self> {
         match text {
-            "osc9" => Some(Self::Osc9),
+            "system" => Some(Self::System),
+            // `osc9` is the old name of `terminal`.
+            "terminal" | "osc9" => Some(Self::Terminal),
             "bell" => Some(Self::Bell),
             "none" => Some(Self::None),
             _ => None,
@@ -572,10 +577,12 @@ fn apply(
                 .ok_or_else(|| bad(key, format!("must be between {min} and {max}, got {n}")))?;
         }
         "notify" => {
-            config.notify = value
-                .as_str()
-                .and_then(NotifyMode::parse)
-                .ok_or_else(|| bad(key, "expected \"osc9\", \"bell\" or \"none\""))?;
+            config.notify = value.as_str().and_then(NotifyMode::parse).ok_or_else(|| {
+                bad(
+                    key,
+                    "expected \"system\", \"terminal\", \"bell\" or \"none\"",
+                )
+            })?;
         }
         "resume_agents" => {
             config.resume_agents = value
@@ -829,10 +836,13 @@ mod tests {
     }
 
     #[test]
-    fn notify_defaults_to_osc9_and_takes_three_values() {
-        assert_eq!(Config::default().notify, NotifyMode::Osc9);
+    fn notify_defaults_to_system_and_takes_its_values() {
+        assert_eq!(Config::default().notify, NotifyMode::System);
         for (text, mode) in [
-            ("osc9", NotifyMode::Osc9),
+            ("system", NotifyMode::System),
+            ("terminal", NotifyMode::Terminal),
+            // The old name of `terminal`.
+            ("osc9", NotifyMode::Terminal),
             ("bell", NotifyMode::Bell),
             ("none", NotifyMode::None),
         ] {

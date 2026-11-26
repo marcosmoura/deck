@@ -84,6 +84,9 @@ impl Home {
             // The sidebar is off unless a test turns it on (`config_unset("sidebar")` brings
             // back the product default), so the panel area keeps the whole window.
             ("sidebar".into(), "false".into()),
+            // Tests never show a real desktop notification: the terminal's OSC 9 unless a test
+            // asks for deck's own, with a fake notifier on its `PATH`.
+            ("notify".into(), "\"terminal\"".into()),
         ];
         for (key, value) in config {
             if *value == UNSET {

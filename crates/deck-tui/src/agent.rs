@@ -142,7 +142,12 @@ pub fn panel_attention(panel: &PanelView) -> Option<TerminalId> {
 }
 
 /// The text a desktop notification carries: what the agent did, and where.
-fn alert_body(kind: AgentKind, status: AgentStatus, project: &str, panel: &str) -> Option<String> {
+pub(crate) fn alert_body(
+    kind: AgentKind,
+    status: AgentStatus,
+    project: &str,
+    panel: &str,
+) -> Option<String> {
     let what = match status {
         AgentStatus::Waiting => "needs you",
         AgentStatus::Idle => "finished",
@@ -168,7 +173,8 @@ pub fn alert_bytes(
     match mode {
         NotifyMode::None => Vec::new(),
         NotifyMode::Bell => b"\x07".to_vec(),
-        NotifyMode::Osc9 => alert_body(kind, status, project, panel)
+        // `System` writes it only when deck cannot show its own notification.
+        NotifyMode::Terminal | NotifyMode::System => alert_body(kind, status, project, panel)
             .map(|body| format!("\x1b]9;{body}\x07").into_bytes())
             .unwrap_or_default(),
     }

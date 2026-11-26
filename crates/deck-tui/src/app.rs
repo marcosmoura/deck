@@ -9,7 +9,7 @@ use crate::agent::SPIN_FPS;
 use crate::graphics::{Images, SPINNER_FRAMES};
 use crate::placed::Piece;
 use deck_core::action::Action as Act;
-use deck_core::config::Config;
+use deck_core::config::{Config, NotifyMode};
 use deck_core::keys::{KeyCode, KeyEvent, KeyEventKind, Modifiers, encode, encode_key};
 use deck_core::layout;
 use deck_core::model::{PanelId, ProjectId, TerminalId};
@@ -70,6 +70,9 @@ pub enum Out {
     Send(ClientMsg),
     /// Bytes for the outer terminal (an OSC 52 copy).
     Clipboard(Vec<u8>),
+    /// deck's own desktop notification (`notify = "system"`); its fallback bytes go to the
+    /// outer terminal when it cannot be shown.
+    SystemNotify(crate::notify::SystemAlert),
     /// Bytes for the outer terminal that notify the user (OSC 9 or a bell).
     Notify(Vec<u8>),
     Exit(Exit),
@@ -197,6 +200,8 @@ pub struct App {
     /// The last draw showed a spinner (true until one has drawn): while none shows, no timer
     /// runs and nothing is redrawn for it.
     pub(crate) spinner_seen: std::cell::Cell<bool>,
+    /// The client can show deck's own notifications (a notifier was found at start).
+    pub(crate) own_notifications: bool,
     /// The texts of the sidebar's rows as the last draw put them, for the hover tooltip.
     pub(crate) sidebar_texts: std::cell::RefCell<Vec<crate::sidebar::Drawn>>,
     /// The row the pointer rests on and when its tooltip shows (`TIP_DELAY` after it got
@@ -299,6 +304,7 @@ impl App {
             started: Instant::now(),
             spin_frame: 0,
             spinner_seen: std::cell::Cell::new(true),
+            own_notifications: false,
             sidebar_texts: std::cell::RefCell::default(),
             tip: None,
             tip_up: false,
@@ -1728,7 +1734,20 @@ impl App {
                 panel_id,
             } => {
                 let bytes = agent::alert_bytes(self.config.notify, kind, status, &project, &panel);
-                if bytes.is_empty() {
+                // deck's own notification opens its panel when clicked: no jump on focus.
+                // Without a notifier here, `system` is `terminal`, the jump included.
+                let own = (self.config.notify == NotifyMode::System && self.own_notifications)
+                    .then(|| agent::alert_body(kind, status, &project, &panel))
+                    .flatten()
+                    .zip(self.mirror.view().map(|v| v.name.clone()));
+                if let Some((body, session)) = own {
+                    vec![Out::SystemNotify(crate::notify::SystemAlert {
+                        body,
+                        session,
+                        panel: panel_id,
+                        fallback: bytes,
+                    })]
+                } else if bytes.is_empty() {
                     Vec::new()
                 } else {
                     if !self.focused {
@@ -2548,7 +2567,8 @@ mod tests {
     fn an_alert_notifies_through_the_outer_terminal_as_configured() {
         use deck_core::agents::AgentStatus;
         let waiting = alert(AgentStatus::Waiting, "proj", "review");
-        let mut a = app();
+        let config = Config::parse("notify = \"terminal\"").unwrap().config;
+        let mut a = App::new(&config, (80, 24), &[]);
         assert_eq!(
             a.on_server(waiting.clone()),
             [Out::Notify(
@@ -2654,6 +2674,49 @@ mod tests {
     fn unfocus_and_alert(a: &mut App, panel: u64, status: deck_core::agents::AgentStatus) {
         a.on_event(ct::Event::FocusLost, Instant::now());
         a.on_server(alert_for(panel, status));
+    }
+
+    #[test]
+    fn a_system_alert_is_decks_own_notification_and_needs_no_jump() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, v) = jump_app("system");
+        a.own_notifications = true;
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        let outs = a.on_server(alert_for(4, AgentStatus::Waiting));
+        assert_eq!(
+            outs,
+            [Out::SystemNotify(crate::notify::SystemAlert {
+                body: "claude needs you · proj › p".into(),
+                session: v.name.clone(),
+                panel: PanelId(4),
+                fallback: "\x1b]9;claude needs you · proj › p\x07".as_bytes().to_vec(),
+            })]
+        );
+        // A click opens the panel: coming back to the terminal does not jump.
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        assert!(
+            !outs
+                .iter()
+                .any(|o| matches!(o, Out::Send(ClientMsg::Action(_)))),
+            "{outs:?}"
+        );
+    }
+
+    #[test]
+    fn system_without_a_notifier_is_the_terminals_notification_with_its_jump() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("system");
+        assert!(!a.own_notifications);
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        assert_eq!(
+            a.on_server(alert_for(4, AgentStatus::Waiting)),
+            [Out::Notify(
+                "\x1b]9;claude needs you · proj › p\x07".as_bytes().to_vec()
+            )]
+        );
+        let mut outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        outs.retain(|o| matches!(o, Out::Send(ClientMsg::Action(_))));
+        assert_eq!(outs, jump_to(1, 4, 41));
     }
 
     #[test]

@@ -10,7 +10,6 @@ Every open task, in the order the user set on 22 Nov 2026. "The next task" is pi
 
 7. DECK-41 Flaky test of the output pause during an upgrade
 8. DECK-49 Hardening for daily use
-9. DECK-51 Notifications that open their panel
 
 ### Not ordered yet
 
@@ -67,7 +66,7 @@ Open tasks the user has not placed in the queue:
 | DECK-48 | Collapsed sidebar                                | done       | —                                                             | [collapsed-sidebar](specs/2026-11-25-collapsed-sidebar/00-overview.md)       |
 | DECK-49 | Hardening for daily use                          | ready      | DECK-26, DECK-41                                              | [hardening](specs/2026-11-26-hardening/00-overview.md)                       |
 | DECK-50 | Agent activity in the sidebar                    | done       | —                                                             | [agent-activity](specs/2026-11-26-agent-activity/00-overview.md)             |
-| DECK-51 | Notifications that open their panel              | todo       | —                                                             | —                                                                            |
+| DECK-51 | Notifications that open their panel              | done       | —                                                             | —                                                                            |
 
 ### Withdrawn
 

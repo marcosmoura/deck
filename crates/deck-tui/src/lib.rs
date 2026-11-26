@@ -41,6 +41,7 @@ mod menu;
 mod menu_tests;
 mod mirror;
 mod modal;
+mod notify;
 mod picker;
 mod placed;
 #[cfg(test)]
@@ -335,11 +336,13 @@ async fn run_async(mut options: Options, uid: u32) -> Exit {
 
     let ctx = Ctx {
         socket: options.socket.clone(),
+        notifier: notify::available(),
         uid,
         cwd,
         colors: probe.colors,
         outer_name: probe.xtversion.clone(),
     };
+    app.own_notifications = ctx.notifier.is_some();
     let hello = ctx.hello(&app, options.session.clone(), options.create);
     let mut link = match Link::open(&ctx.socket, ctx.uid, hello).await {
         Ok(link) => link,
@@ -505,6 +508,7 @@ async fn run_async(mut options: Options, uid: u32) -> Exit {
                     let _ = stdout.write_all(&bytes);
                     let _ = stdout.flush();
                 }
+                Out::SystemNotify(alert) => system_notify(&alert, &ctx),
                 Out::Exit(exit) => break 'run exit,
             }
         }
@@ -608,6 +612,8 @@ async fn recv_font(rx: &mut Option<mpsc::UnboundedReceiver<bool>>) -> Option<boo
 /// What a connection's `Hello` needs besides the session.
 struct Ctx {
     socket: PathBuf,
+    /// What shows deck's own notifications here, if anything (`notify = "system"`).
+    notifier: Option<notify::Notifier>,
     /// The user the client runs as, who must own the daemon too.
     uid: u32,
     cwd: PathBuf,
@@ -754,6 +760,7 @@ async fn attach_to(ctx: &Ctx, app: &mut App, name: &str) -> Result<Link, Refused
                                     let _ = stdout.write_all(&bytes);
                                     let _ = stdout.flush();
                                 }
+                                Out::SystemNotify(alert) => system_notify(&alert, ctx),
                                 _ => {}
                             }
                         }
@@ -867,6 +874,19 @@ async fn next_session(ctx: &Ctx, skip: &[String]) -> Option<String> {
         .await
         .ok()
         .flatten()
+}
+
+/// Shows deck's own notification, or writes the terminal's (OSC 9) when it cannot be shown.
+fn system_notify(alert: &notify::SystemAlert, ctx: &Ctx) {
+    let shown = ctx
+        .notifier
+        .as_ref()
+        .is_some_and(|n| notify::show(n, alert, &ctx.socket));
+    if !shown {
+        let mut stdout = io::stdout();
+        let _ = stdout.write_all(&alert.fallback);
+        let _ = stdout.flush();
+    }
 }
 
 #[cfg(test)]

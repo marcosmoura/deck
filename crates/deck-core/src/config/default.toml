@@ -20,8 +20,11 @@ sidebar_width = 28
 sidebar_collapsed = false
 sidebar_space_gap = 0
 
-# How deck alerts you when an agent needs you: "osc9" (desktop notification), "bell" or "none".
-notify = "osc9"
+# How deck alerts you when an agent needs you or finishes: "system" (deck's own desktop
+# notification, which opens the panel when clicked; it needs terminal-notifier on macOS or
+# notify-send on Linux, else it is "terminal"), "terminal" (the terminal's notification,
+# OSC 9), "bell" or "none".
+notify = "system"
 
 # Reopen your coding agents' conversations after a restart or reboot.
 resume_agents = true

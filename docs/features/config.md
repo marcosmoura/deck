@@ -36,7 +36,7 @@ Save the file and, within about a second, the colours, border style, key binding
 
 `[keys]` covers the prefix bindings only. A key you set for an action replaces the same key on another action's default keys, with a warning. A key you set for two actions is an error naming both actions and the key. `detach = []` unbinds an action. See [keys](keys.md). `restore = "R"` (the [restore dialog](agents.md#the-restore-dialog)) is one of them.
 
-`notify` (`"osc9"`, the default, `"bell"` or `"none"`) is how the client tells you through the outer terminal that an agent needs you or finished while you were not looking; see [agents](agents.md#attention).
+`notify` (`"system"`, the default, `"terminal"`, `"bell"` or `"none"`; `"osc9"` is the old name of `"terminal"`) is how the client tells you that an agent needs you or finished while you were not looking: `"system"` with deck's own desktop notification, which opens the panel when clicked (it needs `terminal-notifier` on macOS or `notify-send` on Linux, and is `"terminal"` without them), `"terminal"` with the outer terminal's notification (OSC 9); see [agents](agents.md#attention).
 
 ## Sidebar colours
 
