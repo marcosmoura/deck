@@ -6,8 +6,9 @@ use deck_core::agents::{AgentStatus, describe_status};
 use deck_core::icons::{Icon, IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::layout::{self, COLLAPSED_SIDEBAR_WIDTH};
+use deck_core::model::NameSource;
 use deck_core::model::{PanelId, PanelView, ProjectId, SessionView, TerminalId, TerminalView};
-use deck_core::naming::{source_terminal_view, title_core};
+use deck_core::naming::{NameInput, full_auto_name, source_terminal_view, title_core};
 use deck_core::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event as ct;
@@ -182,6 +183,18 @@ impl Sel {
             Self::Project(p) | Self::Panel(p, _) | Self::Terminal(p, _, _) => p,
         }
     }
+}
+
+/// A text of a sidebar row as the last draw put it: where it starts, all of it, and
+/// whether it was cut with `…`. The hover tooltip draws it again in full.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Drawn {
+    pub owner: Sel,
+    pub x: u16,
+    pub y: u16,
+    pub full: String,
+    pub cut: bool,
+    pub style: Style,
 }
 
 /// One row of the sidebar's list.
@@ -1143,6 +1156,7 @@ pub fn dimmed_style(theme: &Theme, base: Style) -> Style {
 /// Draws the sidebar in `area` (its columns, without the separator) and the separator
 /// column after it.
 pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
+    app.sidebar_texts.borrow_mut().clear();
     let Some(view) = app.mirror.view() else {
         return;
     };
@@ -1320,6 +1334,19 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 style,
             );
         };
+        // Every text of a row is remembered with its full form, for the hover tooltip.
+        let note = |x: u16, full: &str, shown: &str, style: Style| {
+            if let Some(owner) = owner {
+                app.sidebar_texts.borrow_mut().push(Drawn {
+                    owner,
+                    x: area.x + shift + x,
+                    y,
+                    full: full.to_string(),
+                    cut: shown != full,
+                    style,
+                });
+            }
+        };
         // The right-aligned count, if any, takes its room off the name.
         let side = |text: String| -> (String, u16) {
             let n = width(&text);
@@ -1364,6 +1391,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 }
                 let name = truncate(&p.name, room);
                 put(buf, y, 1, &name, style);
+                note(1, &p.name, &name, style);
                 if let Some(badge) = badge {
                     let warning = Style::new()
                         .fg(color(theme.warning))
@@ -1436,6 +1464,26 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 .unwrap_or_default();
                 let name = truncate(&p.name, room.saturating_sub(width(&exited)));
                 put(buf, y, name_x, &name, style);
+                // A name deck chose is cut to 32 cells when it is made: the tooltip shows
+                // what it was made from, in full. A name the user gave is shown as given.
+                let full = (p.name_source != NameSource::Manual)
+                    .then(|| source_terminal_view(p))
+                    .flatten()
+                    .and_then(|t| {
+                        full_auto_name(&NameInput {
+                            agent: t.agent.as_ref(),
+                            title: t.title.as_deref(),
+                            program: &t.program,
+                        })
+                    })
+                    // Only for a name that was cut, and only the form it was cut from.
+                    .filter(|full| {
+                        p.name
+                            .strip_suffix('…')
+                            .is_some_and(|kept| full.starts_with(kept) && full.len() > kept.len())
+                    })
+                    .unwrap_or_else(|| p.name.clone());
+                note(name_x, &full, &name, style);
                 let exited = truncate(&exited, room.saturating_sub(width(&name)));
                 put(
                     buf,
@@ -1494,8 +1542,10 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     .exit_status
                     .map(|code| format!(" · exited {code}"))
                     .unwrap_or_default();
-                let label = truncate(&terminal_label(t), room.saturating_sub(width(&exited)));
+                let full = terminal_label(t);
+                let label = truncate(&full, room.saturating_sub(width(&exited)));
                 put(buf, y, TERMINAL_LABEL_X, &label, style);
+                note(TERMINAL_LABEL_X, &full, &label, style);
                 let exited = truncate(&exited, room.saturating_sub(width(&label)));
                 put(
                     buf,
@@ -1541,7 +1591,8 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                 if text.is_empty() {
                     text = describe_status(agent.status).to_string();
                 }
-                let text = truncate(&text, w.saturating_sub(x + 1));
+                let full = text;
+                let text = truncate(&full, w.saturating_sub(x + 1));
                 let style = if band {
                     keep(row_style)
                 } else if agent.status == AgentStatus::Waiting && !dimmed {
@@ -1550,6 +1601,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     keep(row_style.patch(muted))
                 };
                 put(buf, y, x, &text, style);
+                note(x, &full, &text, style);
             }
             Row::NoPanels => put(buf, y, 3, "no panels", keep(row_style.patch(muted))),
             Row::Gap | Row::Rule => {}
@@ -1582,6 +1634,47 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
 /// Draws the collapsed sidebar in `area`: the expand chip, one entry per terminal (its mark and
 /// its number) with a rule between spaces, and the `+` chip. The background and the separator
 /// are drawn.
+/// The hover tooltip: once the pointer rested on a row long enough, a row with a text cut
+/// with `…` is drawn again with every text in full, from where each starts, across the
+/// sidebar's edge and over the panels, cut only at the window's edge. Its lines share one
+/// right edge, a cell past the longest text.
+pub(crate) fn draw_tip(buf: &mut Buffer, app: &App) {
+    let Some(owner) = app.tip_shown() else {
+        return;
+    };
+    let texts = app.sidebar_texts.borrow();
+    let lines: Vec<&Drawn> = texts.iter().filter(|d| d.owner == owner).collect();
+    if !lines.iter().any(|d| d.cut) {
+        return;
+    }
+    let edge = buf.area.x + buf.area.width;
+    let right = lines
+        .iter()
+        .map(|d| d.x.saturating_add(width(&d.full)).saturating_add(1))
+        .max()
+        .unwrap_or(0)
+        .min(edge);
+    for d in lines {
+        if d.x >= right {
+            continue;
+        }
+        let room = right - d.x;
+        // The box is blanked first: whatever was drawn there (the panel's text, an image's
+        // placeholders, the row's status slot) must not show through after the text.
+        for x in d.x..right {
+            buf[(x, d.y)].reset();
+            buf[(x, d.y)].set_style(d.style);
+        }
+        // The cell just past the box may be the second half of a wide character whose first
+        // half was blanked: it becomes a blank of its own.
+        if right < edge && buf[(right, d.y)].symbol().is_empty() {
+            buf[(right, d.y)].reset();
+        }
+        let text = truncate(&d.full, room);
+        buf.set_stringn(d.x, d.y, &text, usize::from(room), d.style);
+    }
+}
+
 fn draw_collapsed(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     let Some(view) = app.mirror.view() else {
         return;

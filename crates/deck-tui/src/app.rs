@@ -36,6 +36,9 @@ use crate::select::{self, MULTI_CLICK_MS, TextSel, Unit};
 use crate::sidebar::{Hover, Reorder, RowDrag, Sel};
 use crate::tier::Tier;
 
+/// How long the pointer rests on a sidebar row before its cut texts are shown in full.
+pub(crate) const TIP_DELAY: Duration = Duration::from_millis(750);
+
 /// Below this many columns or rows the client shows only a message.
 pub const MIN_SIZE: (u16, u16) = (20, 5);
 /// How long a flash message replaces the hints.
@@ -194,6 +197,12 @@ pub struct App {
     /// The last draw showed a spinner (true until one has drawn): while none shows, no timer
     /// runs and nothing is redrawn for it.
     pub(crate) spinner_seen: std::cell::Cell<bool>,
+    /// The texts of the sidebar's rows as the last draw put them, for the hover tooltip.
+    pub(crate) sidebar_texts: std::cell::RefCell<Vec<crate::sidebar::Drawn>>,
+    /// The row the pointer rests on and when its tooltip shows (`TIP_DELAY` after it got
+    /// there), and whether it shows.
+    tip: Option<(Sel, Instant)>,
+    tip_up: bool,
     /// The outer terminal has focus, as far as its focus events told.
     focused: bool,
     /// The first line of the help overlay shown.
@@ -290,6 +299,9 @@ impl App {
             started: Instant::now(),
             spin_frame: 0,
             spinner_seen: std::cell::Cell::new(true),
+            sidebar_texts: std::cell::RefCell::default(),
+            tip: None,
+            tip_up: false,
             focused: true,
             help_scroll: 0,
             focus_seen: false,
@@ -529,10 +541,17 @@ impl App {
     /// the spinner moves.
     pub fn wake_deadline(&self) -> Option<Instant> {
         let edge = self.edge.as_ref().map(|e| e.next);
-        [self.flash_deadline(), self.resize_until, self.spin_at, edge]
-            .into_iter()
-            .flatten()
-            .min()
+        let tip = self.tip.filter(|_| !self.tip_up).map(|(_, at)| at);
+        [
+            self.flash_deadline(),
+            self.resize_until,
+            self.spin_at,
+            edge,
+            tip,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     /// The font check's answer: a late `Nerd` upgrade redraws. Only the first answer counts.
@@ -580,8 +599,50 @@ impl App {
         self.started + Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
     }
 
+    /// The row whose hover tooltip shows: the pointer rested on it for `TIP_DELAY` and is
+    /// still there.
+    pub(crate) fn tip_shown(&self) -> Option<Sel> {
+        let (sel, _) = self.tip.filter(|_| self.tip_up)?;
+        (self.hover == Some(Hover::Row(sel))).then_some(sel)
+    }
+
+    /// Follows the pointer for the hover tooltip after an event: moving onto a row starts its
+    /// delay, and anything else (another row, leaving the rows, a key, a click, the wheel)
+    /// takes the tooltip down.
+    fn follow_tip(&mut self, moved: bool, now: Instant) {
+        // Only a row with a cut text has a tooltip: any other row starts no timer and no draw.
+        let cut = |sel: Sel| {
+            self.sidebar_texts
+                .borrow()
+                .iter()
+                .any(|d| d.owner == sel && d.cut)
+        };
+        let row = match self.hover {
+            Some(Hover::Row(sel)) if moved && cut(sel) => Some(sel),
+            _ => None,
+        };
+        if row.is_some() && row == self.tip.map(|(sel, _)| sel) {
+            return;
+        }
+        if std::mem::take(&mut self.tip_up) {
+            self.dirty = true;
+        }
+        self.tip = row.map(|sel| (sel, now + TIP_DELAY));
+    }
+
     /// Moves the spinner and drops an expired flash message.
     pub fn tick(&mut self, now: Instant) -> Vec<Out> {
+        if let Some((sel, at)) = self.tip
+            && !self.tip_up
+            && now >= at
+        {
+            if self.hover == Some(Hover::Row(sel)) {
+                self.tip_up = true;
+                self.dirty = true;
+            } else {
+                self.tip = None;
+            }
+        }
         if self.spin_at.is_some_and(|at| now >= at) {
             self.spin = self.spin.wrapping_add(1);
             self.spin_frame = self.frame_at(now);
@@ -616,7 +677,12 @@ impl App {
     }
 
     pub fn on_event(&mut self, event: ct::Event, now: Instant) -> Vec<Out> {
+        let moved = matches!(
+            &event,
+            ct::Event::Mouse(m) if m.kind == ct::MouseEventKind::Moved
+        );
         let outs = self.handle_event(event, now);
+        self.follow_tip(moved && !self.overlay_open(), now);
         // A prompt or an overlay that opened ends the hover.
         if self.overlay_open() {
             self.set_hover(None);

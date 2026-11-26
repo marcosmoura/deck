@@ -102,8 +102,18 @@ pub fn refresh_panel(session: &mut Session, id: PanelId) -> bool {
 /// that is only a product name, then by the first line of its first prompt. Any other
 /// program is named by its title, else by its own name.
 pub fn auto_name(input: &NameInput) -> Option<String> {
+    named(input, NAME_MAX_CELLS)
+}
+
+/// [`auto_name`] without the cut to [`NAME_MAX_CELLS`]: what a name cut with `…` stands for.
+pub fn full_auto_name(input: &NameInput) -> Option<String> {
+    named(input, usize::MAX)
+}
+
+fn named(input: &NameInput, max: usize) -> Option<String> {
+    let finish = |text: &str| finish(text, max);
     match input.agent {
-        Some(agent) => agent_name(agent, input),
+        Some(agent) => agent_name(agent, input, max),
         // An agent's title seen before the agent is recognised ("✳ Claude Code") is named
         // without its glyphs, so the name the agent then keeps is clean.
         None => input
@@ -126,7 +136,8 @@ pub fn auto_name(input: &NameInput) -> Option<String> {
     }
 }
 
-fn agent_name(agent: &AgentState, input: &NameInput) -> Option<String> {
+fn agent_name(agent: &AgentState, input: &NameInput, max: usize) -> Option<String> {
+    let finish = |text: &str| finish(text, max);
     let from_title = input.title.and_then(|t| {
         let clean: String = t.chars().filter(|c| !c.is_control()).collect();
         let stripped = strip_agent_prefix(clean.trim_start_matches(|c: char| !c.is_alphanumeric()));
@@ -145,21 +156,21 @@ fn agent_name(agent: &AgentState, input: &NameInput) -> Option<String> {
     })
 }
 
-/// Trims, drops control characters and cuts to [`NAME_MAX_CELLS`]; `None` when empty.
-fn finish(text: &str) -> Option<String> {
+/// Trims, drops control characters and cuts to `max` cells; `None` when empty.
+fn finish(text: &str, max: usize) -> Option<String> {
     let clean: String = text.chars().filter(|c| !c.is_control()).collect();
     let clean = clean.trim();
     if clean.is_empty() {
         return None;
     }
     let width = |c: char| c.width().unwrap_or(0);
-    if clean.chars().map(width).sum::<usize>() <= NAME_MAX_CELLS {
+    if clean.chars().map(width).sum::<usize>() <= max {
         return Some(clean.to_string());
     }
     let mut out = String::new();
     let mut used = 0;
     for c in clean.chars() {
-        if used + width(c) > NAME_MAX_CELLS - 1 {
+        if used + width(c) > max - 1 {
             break;
         }
         used += width(c);
@@ -297,6 +308,19 @@ mod tests {
             name(None, Some("✳ Fix login bug"), "zsh").as_deref(),
             Some("✳ Fix login bug")
         );
+    }
+
+    #[test]
+    fn the_full_name_is_not_cut() {
+        let a = agent(None);
+        let long = "x".repeat(50);
+        let input = NameInput {
+            agent: Some(&a),
+            title: Some(&long),
+            program: "claude",
+        };
+        assert_eq!(auto_name(&input).map(|n| n.chars().count()), Some(32));
+        assert_eq!(full_auto_name(&input), Some(long.clone()));
     }
 
     #[test]

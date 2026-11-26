@@ -85,6 +85,8 @@ pub(crate) fn draw_screen(frame: &mut Frame, app: &App) -> Option<Position> {
     } else {
         draw_panel(frame.buffer_mut(), panel, app)
     };
+    // The hover tooltip of a sidebar row goes over the panels, under every overlay.
+    sidebar::draw_tip(frame.buffer_mut(), app);
     if matches!(app.modal, Some(Modal::Help)) {
         draw_help(frame.buffer_mut(), area, app, theme);
     }

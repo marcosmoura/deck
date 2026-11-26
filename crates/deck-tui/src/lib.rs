@@ -75,6 +75,8 @@ mod sidebar_reorder_tests;
 mod sidebar_terminal_tests;
 #[cfg(test)]
 mod sidebar_tests;
+#[cfg(test)]
+mod sidebar_tip_tests;
 mod term;
 #[cfg(test)]
 mod theme_tests;
