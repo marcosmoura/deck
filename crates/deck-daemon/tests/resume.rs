@@ -403,6 +403,8 @@ async fn hook(
             session_id: id.map(Into::into),
             prompt: None,
             raw: None,
+            activity: deck_core::agents::Activity::Keep,
+            at_ms: 0,
         })
         .await;
     assert!(matches!(r, Response::Ok), "{r:?}");

@@ -26,13 +26,16 @@ const LEFT: ct::MouseButton = ct::MouseButton::Left;
 const RIGHT: ct::MouseButton = ct::MouseButton::Right;
 
 // The rows with `grid()` (no gap): 2 terminal-multiplexer, 3 editor (active, terminals 31 to
-// 33), 4 zsh, 5 Write tests, 6 main.rs, 7 claude, 8 tests, 9 budget, 10 api.
+// 33), 4 zsh, 5 Write tests, 6 its activity line, 7 main.rs, 8 claude, 9 tests, 10 budget,
+// 11 api.
 const EDITOR: u16 = 3;
 const T31: u16 = 4;
 const T32: u16 = 5;
-const T33: u16 = 6;
-const CLAUDE: u16 = 7;
-const BUDGET: u16 = 9;
+/// The activity line under the waiting agent's terminal row.
+const A32: u16 = 6;
+const T33: u16 = 7;
+const CLAUDE: u16 = 8;
+const BUDGET: u16 = 10;
 
 /// `mockup()` with three terminals in panel 3 (the active one): a shell, an agent waiting
 /// for the user (focused) and an editor.
@@ -144,6 +147,7 @@ fn kinds(rows: &[Row]) -> String {
             Row::Project(_) => "P".to_string(),
             Row::Panel(_, p) => format!("p{}", p.0),
             Row::Terminal(_, _, t) => format!("t{}", t.0),
+            Row::Activity(_) => "a".into(),
             Row::NoPanels => "n".into(),
             Row::Gap => "_".into(),
             Row::Rule => "-".into(),
@@ -172,9 +176,9 @@ fn only_panels_with_two_terminals_or_more_have_terminal_rows() {
     assert_eq!(
         kinds(&rows(&grid(), 0))
             .split(' ')
-            .take(7)
+            .take(8)
             .collect::<Vec<_>>(),
-        ["P", "p3", "t31", "t32", "t33", "p4", "p5"]
+        ["P", "p3", "t31", "t32", "a", "t33", "p4", "p5"]
     );
 }
 
@@ -194,19 +198,19 @@ fn a_panel_reorder_moves_the_terminal_rows_along() {
     };
     let moved = kinds(&rows_with(&grid(), 0, Some(reorder)));
     assert_eq!(
-        moved.split(' ').take(7).collect::<Vec<_>>(),
-        ["P", "p4", "p5", "p3", "t31", "t32", "t33"]
+        moved.split(' ').take(8).collect::<Vec<_>>(),
+        ["P", "p4", "p5", "p3", "t31", "t32", "a", "t33"]
     );
 }
 
 #[test]
 fn adding_and_closing_terminals_changes_the_rows_at_once() {
     let mut a = app();
-    assert_eq!(a.sidebar_rows().len(), 12);
+    assert_eq!(a.sidebar_rows().len(), 13);
     let mut view = grid();
     view.projects[0].panels[0].terminals.pop();
     a.on_server(ServerMsg::SessionView(view));
-    assert_eq!(a.sidebar_rows().len(), 11);
+    assert_eq!(a.sidebar_rows().len(), 12);
     let mut view = grid();
     view.projects[0].panels[0].terminals.truncate(1);
     a.on_server(ServerMsg::SessionView(view));
@@ -222,6 +226,8 @@ fn terminal_rows_are_drawn_under_their_panel() {
     assert_eq!(line(&buf, T31, 29), "  ├ ❯  zsh                  │");
     // The title without its status glyph, and the agent's own status.
     assert_eq!(line(&buf, T32, 29), "  ├ ✻  Write tests       !  │");
+    // The agent's line sits under its terminal's label; the tree continues to the last row.
+    assert_eq!(line(&buf, A32, 29), "  │    needs you            │");
     assert_eq!(line(&buf, T33, 29), "  └ ✎  main.rs              │");
     // A single-terminal panel is one row, unchanged.
     assert_eq!(line(&buf, CLAUDE, 29), " ❯  claude                  │");
@@ -487,7 +493,7 @@ fn a_selection_on_a_terminal_row_below_the_list_scrolls_it_into_view() {
         key(&mut a, ct::KeyCode::Down);
     }
     assert_eq!(a.selection, Some(sel_terminal(33)));
-    assert_eq!(a.sidebar_offset, 1);
+    assert_eq!(a.sidebar_offset, 2);
     // The last terminal row is the list's last line, row 5 of the sidebar.
     assert_eq!(a.hover_at(8, 5), Some(Hover::Row(sel_terminal(33))));
 }

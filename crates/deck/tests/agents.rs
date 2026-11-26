@@ -107,6 +107,8 @@ fn event(h: &Harness, terminal: TerminalId, status: AgentStatus, session_id: &st
         session_id: Some(session_id.into()),
         prompt: Some("refactor the layout engine".into()),
         raw: None,
+        activity: deck_core::agents::Activity::Keep,
+        at_ms: 0,
     });
     stream.write_all(&encode(&hello).unwrap()).unwrap();
     stream.write_all(&encode(&request).unwrap()).unwrap();
@@ -124,6 +126,132 @@ fn event(h: &Harness, terminal: TerminalId, status: AgentStatus, session_id: &st
             n => reader.push(&buf[..n]),
         }
     }
+}
+
+/// Runs `deck agent-event --agent claude` the way a Claude Code hook does.
+fn hook(h: &Harness, terminal: TerminalId, payload: &Value) {
+    let mut cmd = h.home().deck_command(&["agent-event", "--agent", "claude"]);
+    let mut child = cmd
+        .env("DECK_TERMINAL_ID", terminal.0.to_string())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn a_hook_sequence_shows_its_activity_in_ls() {
+    let bin = fake_agent("claude");
+    let mut h = attached(&bin);
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    let terminal = terminal_id(&h);
+    let wait_line = |want: &str| {
+        wait_until(want, TIMEOUT, || agent_json(&h)["activity"] == want);
+    };
+    let base = |name: &str| serde_json::json!({"hook_event_name": name, "session_id": "s1"});
+
+    let mut prompt = base("UserPromptSubmit");
+    prompt["prompt"] = "fix it".into();
+    hook(&h, terminal, &prompt);
+    wait_line("thinking");
+
+    let mut tool = base("PreToolUse");
+    tool["tool_name"] = "Bash".into();
+    tool["tool_input"] =
+        serde_json::json!({"command": "cargo test", "description": "Run the tests"});
+    hook(&h, terminal, &tool);
+    wait_line("run the tests");
+    hook(&h, terminal, &base("PostToolUse"));
+    // PostToolUse keeps the line; the status is still working.
+    wait_until("working", TIMEOUT, || agent_json(&h)["status"] == "working");
+    assert_eq!(agent_json(&h)["activity"], "run the tests");
+
+    let mut stop = base("Stop");
+    stop["last_assistant_message"] = "## Done with **the fix**\nmore text".into();
+    hook(&h, terminal, &stop);
+    wait_line("Done with the fix");
+    assert_eq!(agent_json(&h)["status"], "idle");
+
+    hook(&h, terminal, &base("SessionEnd"));
+    wait_until("the agent is gone", TIMEOUT, || {
+        agent_json(&h)["activity"].is_null()
+    });
+}
+
+/// The sidebar's line under the first panel's row, from column 4 to the margin.
+fn activity_line(h: &Harness) -> String {
+    let rows = rows(h);
+    let line: String = rows
+        .get(4)
+        .map_or("", String::as_str)
+        .chars()
+        .take(28)
+        .collect();
+    line.chars()
+        .skip(4)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+#[test]
+fn a_hook_sequence_changes_the_activity_line_in_the_sidebar() {
+    let bin = fake_agent("claude");
+    let mut h = attached(&bin);
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    let terminal = terminal_id(&h);
+    let wait_line = |want: &str| {
+        wait_until(want, TIMEOUT, || activity_line(&h) == want);
+    };
+    let base = |name: &str| serde_json::json!({"hook_event_name": name, "session_id": "s1"});
+
+    let mut prompt = base("UserPromptSubmit");
+    prompt["prompt"] = "fix it".into();
+    hook(&h, terminal, &prompt);
+    wait_line("thinking");
+    assert!(
+        rows(&h)[3].starts_with(" ✻  "),
+        "the row stays: {}",
+        rows(&h)[3]
+    );
+    h.capture("activity-thinking");
+
+    let mut tool = base("PreToolUse");
+    tool["tool_name"] = "Bash".into();
+    tool["tool_input"] =
+        serde_json::json!({"command": "cargo test", "description": "Run the tests"});
+    hook(&h, terminal, &tool);
+    wait_line("run the tests");
+    h.capture("activity-tool");
+
+    let mut ask = base("PermissionRequest");
+    ask["tool_name"] = "Bash".into();
+    ask["tool_input"] = serde_json::json!({"command": "rm -rf target"});
+    hook(&h, terminal, &ask);
+    // Cut with an ellipsis before the sidebar's margin.
+    wait_line("needs permission: runn…");
+    h.capture("activity-permission");
+
+    let mut stop = base("Stop");
+    stop["last_assistant_message"] = "All 12 tests pass\nmore text".into();
+    hook(&h, terminal, &stop);
+    wait_line("All 12 tests pass");
+    h.capture("activity-finished");
+
+    // The hook agent ends: its activity is gone and the last message leaves the screen. The
+    // fake `claude` still runs, so row 4 may show a process-detected status word or nothing.
+    hook(&h, terminal, &base("SessionEnd"));
+    wait_until("no activity", TIMEOUT, || {
+        agent_json(&h)["activity"].is_null() && !rows(&h)[4].contains("All 12 tests pass")
+    });
 }
 
 #[test]
@@ -220,7 +348,10 @@ fn inactive_first_panel(h: &mut Harness) -> (String, String, TerminalId) {
     let terminal = terminal_id(h);
     h.send_bytes(PREFIX);
     h.send_keys("c");
-    wait_until("a second panel", TIMEOUT, || h.is_active_row(4));
+    // The first panel's agent may have a line under it, which moves the second panel down.
+    wait_until("a second panel", TIMEOUT, || {
+        !h.is_active_row(3) && (h.is_active_row(4) || h.is_active_row(5))
+    });
     let out = h.run_deck(&["ls", "--json"]);
     let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
     let project = &doc["sessions"][0]["spaces"][0];
@@ -362,6 +493,40 @@ fn the_active_panel_alerts_only_after_the_outer_terminal_lost_focus() {
 }
 
 #[test]
+fn coming_back_to_the_outer_terminal_after_an_alert_shows_the_panel() {
+    let bin = fake_agent("claude");
+    let mut h = attached(&bin);
+    h.send_keys("claude\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    let terminal = terminal_id(&h);
+    // A second panel to be in while the agent finishes.
+    h.send_bytes(PREFIX);
+    h.send_keys("c");
+    wait_until("the second panel", TIMEOUT, || h.is_active_row(5));
+
+    // Focus out; the new terminal (a grid appears) is the sync point, as in the test above.
+    h.send_bytes(b"\x1b[O");
+    h.send_bytes(PREFIX);
+    h.send_keys("t");
+    wait_until("a grid", TIMEOUT, || {
+        rows(&h).iter().any(|r| r.contains('╭'))
+    });
+    let before = h.raw_output().len();
+    event(&h, terminal, AgentStatus::Working, "s1");
+    event(&h, terminal, AgentStatus::Idle, "s1");
+    wait_until("the unseen mark", TIMEOUT, || rows(&h)[3].contains(" •"));
+    wait_until("the notification", TIMEOUT, || {
+        contains(&written_since(&h, before), b"\x1b]9;claude finished")
+    });
+    assert!(h.is_active_row(5));
+
+    // The notification is clicked: the outer terminal gains focus.
+    h.send_bytes(b"\x1b[I");
+    wait_until("the agent's panel", TIMEOUT, || h.is_active_row(3));
+    h.capture("alert-jump");
+}
+
+#[test]
 fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
     let bin = fake_agent("claude");
     let mut h = attached(&bin);
@@ -374,12 +539,20 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
         h.send_bytes(PREFIX);
         h.send_keys("c");
         let count = ids.len() + 1;
-        wait_until("a new panel", TIMEOUT, || h.is_active_row(2 + count));
-        let out = h.run_deck(&["ls", "--json"]);
-        let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
-        let panels = doc["sessions"][0]["spaces"][0]["panels"]
-            .as_array()
-            .unwrap();
+        // The first panel's agent may already have a line, so rows are not counted here.
+        let found = std::cell::RefCell::new(Vec::new());
+        wait_until("a new panel", TIMEOUT, || {
+            let out = h.run_deck(&["ls", "--json"]);
+            let doc: Value = serde_json::from_str(&support::stdout(&out)).unwrap();
+            let panels = doc["sessions"][0]["spaces"][0]["panels"]
+                .as_array()
+                .unwrap()
+                .clone();
+            let done = panels.len() == count;
+            *found.borrow_mut() = panels;
+            done
+        });
+        let panels = found.into_inner();
         let last = panels.last().unwrap();
         ids.push(TerminalId(last["terminals"][0]["id"].as_u64().unwrap()));
     }
@@ -390,12 +563,13 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
     event(&h, ids[0], AgentStatus::Waiting, "s");
     event(&h, ids[1], AgentStatus::Idle, "s");
     event(&h, ids[2], AgentStatus::Waiting, "s");
+    // Each panel row has its agent's line under it: the panels are on rows 3, 5 and 7.
     let waiting = |h: &Harness, row: usize| {
         rows(h)
             .get(row)
             .is_some_and(|r| r.chars().nth(25) == Some('!'))
     };
-    wait_until("two waiting", TIMEOUT, || waiting(&h, 3) && waiting(&h, 5));
+    wait_until("two waiting", TIMEOUT, || waiting(&h, 3) && waiting(&h, 7));
 
     // From the third panel (active): wraps to the first, then back to the third.
     h.send_bytes(PREFIX);
@@ -404,17 +578,17 @@ fn the_jump_cycles_waiting_agents_then_unseen_idle_ones_then_flashes() {
     h.capture("jump");
     h.send_bytes(PREFIX);
     h.send_keys("a");
-    wait_until("the third panel", TIMEOUT, || h.is_active_row(5));
+    wait_until("the third panel", TIMEOUT, || h.is_active_row(7));
 
     // Nobody waits any more: the unseen idle panel, then the flash.
     event(&h, ids[0], AgentStatus::Working, "s");
     event(&h, ids[2], AgentStatus::Working, "s");
     wait_until("no one waiting", TIMEOUT, || {
-        !waiting(&h, 3) && !waiting(&h, 5)
+        !waiting(&h, 3) && !waiting(&h, 7)
     });
     h.send_bytes(PREFIX);
     h.send_keys("a");
-    wait_until("the idle panel", TIMEOUT, || h.is_active_row(4));
+    wait_until("the idle panel", TIMEOUT, || h.is_active_row(5));
     h.send_bytes(PREFIX);
     h.send_keys("a");
     wait_until("the flash", TIMEOUT, || {

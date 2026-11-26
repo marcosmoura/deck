@@ -543,12 +543,12 @@ fn rows_and_chips_under_the_pointer_have_the_hover_background() {
     // The glyph is muted when idle and the sidebar text under the pointer.
     assert_eq!(buf[(25, 6)].fg, color(a.theme.sidebar_fg));
     assert_eq!(draw_app(&app())[(25, 6)].fg, color(a.theme.muted));
-    moved(&mut a, 5, 10);
+    moved(&mut a, 5, 11);
     let buf = draw_app(&a);
-    assert_eq!(buf[(23, 10)].symbol(), "2");
-    assert_eq!(buf[(23, 10)].fg, color(a.theme.sidebar_fg));
-    assert_eq!(buf[(26, 10)].bg, hover);
-    // A panel row.
+    assert_eq!(buf[(23, 11)].symbol(), "2");
+    assert_eq!(buf[(23, 11)].fg, color(a.theme.sidebar_fg));
+    assert_eq!(buf[(26, 11)].bg, hover);
+    // A panel row, and its activity line under the same hover.
     moved(&mut a, 5, 7);
     assert_eq!(
         a.hover,
@@ -556,6 +556,12 @@ fn rows_and_chips_under_the_pointer_have_the_hover_background() {
     );
     let buf = draw_app(&a);
     assert!((0..28).all(|x| buf[(x, 7)].bg == hover));
+    assert!((0..28).all(|x| buf[(x, 8)].bg == hover));
+    moved(&mut a, 5, 8);
+    assert_eq!(
+        a.hover,
+        Some(Hover::Row(Sel::Panel(ProjectId(2), PanelId(6))))
+    );
     // The chips: their own cells only.
     for (x, y, from, to) in [(CHIP, 0, 13, 27), (5, BAR, 1, 9), (20, BAR, 16, 27)] {
         moved(&mut a, x, y);
@@ -649,6 +655,7 @@ fn with_agent(mut view: SessionView, panel: u64, status: AgentStatus) -> Session
                 session_id: None,
                 first_prompt: None,
                 since: std::time::Duration::ZERO,
+                activity: None,
             });
         }
     }

@@ -909,7 +909,7 @@ mod tests {
         )
         .unwrap();
         let found = deck_hooks(&root);
-        assert_eq!(found.len(), 7);
+        assert_eq!(found.len(), hook_events(AgentKind::Claude).len());
         assert!(found.iter().all(|(_, c)| c.starts_with("/new/deck")));
     }
 
@@ -918,7 +918,10 @@ mod tests {
         let before =
             r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"mine"}]}]},"a":1}"#;
         let mut root = installed(before);
-        assert_eq!(remove_from(&mut root, HookAgent::Claude), 7);
+        assert_eq!(
+            remove_from(&mut root, HookAgent::Claude),
+            hook_events(AgentKind::Claude).len()
+        );
         assert_eq!(root, serde_json::from_str::<Value>(before).unwrap());
         let mut bare = installed("{}");
         remove_from(&mut bare, HookAgent::Claude);
@@ -945,7 +948,10 @@ mod tests {
     fn uninstall_leaves_the_users_own_empty_lists_and_groups() {
         let before = r#"{"hooks":{"Custom":[],"Stop":[{"hooks":[]}]}}"#;
         let mut root = installed(before);
-        assert_eq!(remove_from(&mut root, HookAgent::Claude), 7);
+        assert_eq!(
+            remove_from(&mut root, HookAgent::Claude),
+            hook_events(AgentKind::Claude).len()
+        );
         assert_eq!(root, serde_json::from_str::<Value>(before).unwrap());
     }
 
@@ -991,6 +997,89 @@ mod tests {
     }
 
     #[test]
+    fn the_plugin_sends_a_tool_once_and_never_a_text_chunk() {
+        let text = plugin_source("deck").unwrap();
+        for part in [
+            "\"session.tool.called\"",
+            "sent.has(call)",
+            "const MAX = 256;",
+            "\"deck.text\"",
+            "\"session.text.ended\"",
+        ] {
+            assert!(text.contains(part), "{part}");
+        }
+        // Streamed chunks are not an event the plugin subscribes to.
+        assert!(!text.contains("text.delta") && !text.contains("tool.input.delta"));
+    }
+
+    /// Runs the plugin under node (skipped when there is none) with a fake `deck` that logs
+    /// its calls: a streamed answer of 500 chunks and 3 tool calls (one repeated) starts
+    /// 3 + 1 processes beyond the status events, and only for the plugin's own session.
+    #[test]
+    fn a_streamed_answer_starts_few_processes() {
+        use std::process::Command;
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("log");
+        let fake = dir.path().join("deck");
+        fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho \"$@\" >> {0:?}\ncat >> {0:?}\necho >> {0:?}\n",
+                log
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let plugin = dir.path().join("plugin.mjs");
+        fs::write(&plugin, plugin_source(fake.to_str().unwrap()).unwrap()).unwrap();
+        let driver = dir.path().join("driver.mjs");
+        let import = format!("import plugin from {:?};", plugin.display().to_string());
+        let body = r#"
+let handler;
+const ctx = {
+  ui: { router: { current: () => ({ type: "session", sessionID: "s1" }) } },
+  data: { session: { root: (id) => (id === "sub" ? "s1" : id) }, listen: (h) => { handler = h; return () => {}; } },
+};
+plugin.setup(ctx);
+const ev = (type, data) => handler({ details: { type, data } });
+ev("session.status", { sessionID: "s1", status: { type: "busy" } });
+for (let n = 0; n < 500; n++) {
+  ev("session.text.delta", { sessionID: "s1", delta: "x" });
+  ev("session.tool.input.delta", { sessionID: "s1", id: "c0", delta: "x" });
+}
+for (const id of ["c1", "c2", "c3"]) {
+  ev("session.tool.input.started", { sessionID: "s1", id, name: "bash" });
+  ev("session.tool.called", { sessionID: "s1", id, input: { command: "ls", content: "SECRET" } });
+  ev("session.tool.called", { sessionID: "s1", id, input: { command: "ls" } });
+}
+ev("session.tool.called", { sessionID: "other", id: "c9", input: {} });
+ev("session.created", { sessionID: "sub", parentID: "s1" });
+ev("session.tool.called", { sessionID: "sub", id: "c8", input: { command: "SUBSECRET" } });
+ev("session.text.ended", { sessionID: "s1", text: "All done\nSECOND" });
+ev("session.status", { sessionID: "s1", status: { type: "idle" } });
+await new Promise((r) => setTimeout(r, 2500));
+"#;
+        fs::write(&driver, format!("{import}{body}")).unwrap();
+        let out = Command::new("node").arg(&driver).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let log = fs::read_to_string(&log).unwrap();
+        assert_eq!(log.matches("agent-event").count(), 2 + 1 + 3 + 1, "{log}");
+        assert_eq!(log.matches("session.tool.called").count() / 2, 3, "{log}");
+        assert!(
+            log.contains(r#""name":"bash""#) && log.contains("deck.text"),
+            "{log}"
+        );
+        assert!(!log.contains("SECRET") && !log.contains("SECOND"), "{log}");
+    }
+
+    #[test]
     fn an_old_v1_plugin_is_stale_and_goes_with_an_install() {
         let dir = std::env::temp_dir().join(format!("deck-hooks-v1-{}", std::process::id()));
         let file = dir.join("plugins/deck/tui.js");
@@ -1009,6 +1098,30 @@ mod tests {
         fs::write(&file, plugin_source("/bin/sh").unwrap()).unwrap();
         assert_eq!(plugin_status(&file, &env).unwrap(), "installed");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_plugin_without_the_activity_events_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("plugins/deck/tui.js");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let env = |_: &str| None;
+        let current = plugin_source("/bin/sh").unwrap();
+        for event in [
+            "session.tool.input.started",
+            "session.tool.called",
+            "session.text.ended",
+        ] {
+            // The plugin of an earlier deck: the same file without this event.
+            fs::write(&file, current.replace(&format!("\"{event}\""), "\"x\"")).unwrap();
+            let status = plugin_status(&file, &env).unwrap();
+            assert!(
+                status.starts_with("stale") && status.contains("lacks some events"),
+                "{status}"
+            );
+        }
+        fs::write(&file, &current).unwrap();
+        assert_eq!(plugin_status(&file, &env).unwrap(), "installed");
     }
 
     #[test]

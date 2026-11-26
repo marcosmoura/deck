@@ -1016,6 +1016,7 @@ fn kinds(rows: &[Row]) -> String {
             Row::Project(_) => 'P',
             Row::Panel(..) => 'p',
             Row::Terminal(..) => 't',
+            Row::Activity(_) => 'a',
             Row::NoPanels => 'n',
             Row::Gap => '_',
             Row::Rule => '-',

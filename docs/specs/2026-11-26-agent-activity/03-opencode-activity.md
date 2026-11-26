@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 03 — OpenCode activity
@@ -35,3 +35,4 @@ OpenCode sessions get the same line as Claude Code and Codex. The user tries it 
 ## Notes
 
 - If v2 has no event for a running tool that the TUI plugin can see, the line shows `thinking`/`ready`/`needs you` from the existing events, and the worker reports it; that is acceptable.
+- Built without a live OpenCode run (no model available to the worker): tool names and input keys were checked against `anomalyco/opencode@dev` `packages/core/src/tool/plugin` and the installed binary on 26 Nov 2026. The live acceptance criterion stays open until the user tries it.

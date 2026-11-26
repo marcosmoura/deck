@@ -62,6 +62,8 @@ mod select;
 mod select_tests;
 mod sidebar;
 #[cfg(test)]
+mod sidebar_activity_tests;
+#[cfg(test)]
 mod sidebar_bar_tests;
 #[cfg(test)]
 mod sidebar_collapsed_tests;

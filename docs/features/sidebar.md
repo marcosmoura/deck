@@ -9,11 +9,16 @@ A session holds spaces, a space holds panels, and a panel shows one or more term
                             │
  terminal-multiplexer    ▾  │
  ✎  editor                  │
- ✻  claude               !  │
- ❯  api + tests          !  │
-  ├ ❯  zsh                  │
-  ├ ✻  Write tests       !  │
-  └ ✎  main.rs              │
+ ✻  claude               ⠹  │
+    editing sidebar.rs      │
+ ✻  Fix login bug        !  │
+    needs permission: Bash  │
+ ❯  api + tests             │
+  ├ ❯  zsh               ⠹  │
+  ├ ✻  Write tests       ●  │
+  │    All 12 tests pass…   │
+  └ ◎  codex             ○  │
+       quiet                │
  budget                  ▾  │
    no panels                │
  dotfiles              2 ▸  │
@@ -21,7 +26,7 @@ A session holds spaces, a space holds panels, and a panel shows one or more term
   +  New         ↻  Resume  │
 ```
 
-- The header starts with a `«` chip that [collapses the sidebar](#collapsed-sidebar): the icon (two cells) with one cell of clickable padding on each side, columns 0 to 3. The session's name (accent, bold) starts at column 4, with a `+ New space` chip at the right, with one cell of clickable padding on each side and a one-cell margin at the right edge. The chip is an icon (`+`, two cells, like every icon: an image where images are on) and the label; it shows only the icon when the sidebar is under 26 columns wide. The name is cut with `…` to leave room for the chip, and a rename of the session shows at once. Each space is a row with its name and, at the right, `▾` (expanded) or `▸` (collapsed) in a two-cell slot before the one-cell margin and, when collapsed, its panel count before it. Each panel of an expanded space is a row with its name; a panel with two or more terminals is followed by one [terminal row](#terminal-rows) per terminal. A space with no panels shows a muted `no panels`. Names that do not fit end in `…`.
+- The header starts with a `«` chip that [collapses the sidebar](#collapsed-sidebar): the icon (two cells) with one cell of clickable padding on each side, columns 0 to 3. The session's name (accent, bold) starts at column 4, with a `+ New space` chip at the right, with one cell of clickable padding on each side and a one-cell margin at the right edge. The chip is an icon (`+`, two cells, like every icon: an image where images are on) and the label; it shows only the icon when the sidebar is under 26 columns wide. The name is cut with `…` to leave room for the chip, and a rename of the session shows at once. Each space is a row with its name and, at the right, `▾` (expanded) or `▸` (collapsed) in a two-cell slot before the one-cell margin and, when collapsed, its panel count before it. Each panel of an expanded space is a row with its name; a panel with two or more terminals is followed by one [terminal row](#terminal-rows) per terminal. A space with no panels shows a muted `no panels`. Names that do not fit end in `…`. A panel or terminal with an agent has a second line under its row, the [activity line](#the-activity-line).
 - The active panel's row is a band across the sidebar's full width in the selection colours (`selection_fg` and `selection_bg`, reversed while both are `default`), bold, with the status glyph, counts and notes in the row's text colour while the selection colours are the default reversed pair; the active space's name is bold. In sidebar focus only the selected row has the band, and the active panel's row is drawn in the accent colour, bold, with no band. The row or chip under the pointer gets the `hover` background (a row across the full width, a chip over its own cells), and muted text on it turns `sidebar_fg`; the `no panels` row, blank rows and the header's session name do not hover, and a row with the band keeps it under the pointer. The status slot at the right of a row shows the agent status of the panel's most urgent terminal (see [agents](agents.md)). A panel whose agent needed you while you were not looking is bold with a `•` after its name, and a collapsed space shows `!<n>` (always the Unicode `!`) for its waiting panels ([attention](agents.md#attention)).
 - With more rows than fit, the list scrolls to keep the active panel (or, in sidebar focus, the selection) in view. The wheel scrolls it too, three rows a notch.
 - The last row of the sidebar is a bottom bar with a `+ New` chip at the left (the `+` icon alone when the sidebar is under 26 columns wide), and the row above it is blank, so the list is two rows shorter. A sidebar under 8 rows tall draws neither. The right-hand end has the `Resume` button (the `↻` icon and `Resume`, or the icon alone under 26 columns), which opens the [restore dialog](agents.md#the-restore-dialog). All chips, the header's included, are muted and get the `hover` background under the pointer; a click is a press and a release on the same chip. With no space, `+ New` flashes `no space` and `Resume` flashes `no space to restore into`.
@@ -44,6 +49,15 @@ After the prefix (see [keys](keys.md)): `c` new panel, `n` / `p` next and previo
 - A new space asks `Directory` (prefilled with the directory deck was started in), then `Space name` (prefilled with the directory's name: `~` for the home directory, `root` for `/`). `~` and relative paths are resolved by the client, against that start directory. Its first panel starts with it.
 - Closing a panel or a space asks `Close panel "<name>" and its terminal?` first, in a centered dialog with `y yes  n no` under the question. `y` confirms; `n` or `Esc` cancels; any other key is ignored.
 - Closing the last panel of a space leaves the space empty. The panel area then shows `No panels in <space> — <key> to create one` (or `No spaces — <key> to add one`), and typing goes nowhere.
+
+### The activity line
+
+Every row of a panel with one terminal, or of a terminal in a panel with several, whose terminal has an agent is followed by a second line that says what the agent does (see [agents](agents.md)). A panel row that is followed by terminal rows has none: the lines are under the terminal rows. A panel or terminal without an agent stays one line, and the [collapsed sidebar](#collapsed-sidebar) and a collapsed space have no lines.
+
+- The text is the agent's activity (`running cargo test`, `needs permission: Bash`, the first line of its last message), else its status in words: `working`, `needs you`, `ready`, `printing`, `quiet` (an agent found only by its process has no activity). Control characters are removed, and the text is cut with `…` by display width (wide characters and emoji take two cells) before the one-cell right margin. It starts under the name: column 4 under a panel row, column 7 under a terminal row. A sidebar too narrow to show a cell of it shows nothing on the line. The line has no icon and no status slot; the cells around the text are blank, except the tree glyph of a terminal's line, which continues as `│` while another terminal row follows and is blank after the last one.
+- The line is `muted`, or `warning` while the agent waits for you. On the band (the active panel outside sidebar focus, or the selected row in sidebar focus) the line is part of the band, in the band's colours and not bold. It is drawn from the same session view as the rest of the row, so it changes when the daemon sends a new view (the daemon limits how often); it has no timer.
+- The line is not a row of its own for the keyboard: `Up`/`Down` skip it. For the mouse it is part of its row: hovering it hovers both rows, a click, a right click or the start of a drag on it acts on its row, a drop target counts it as part of its row, and a dragged row is dimmed with its line.
+- With more rows than fit, scrolling keeps a row and its line in view together when there is room.
 
 ### Terminal rows
 

@@ -107,6 +107,8 @@ fn prompt_event(h: &Harness, terminal: TerminalId, prompt: &str) {
         session_id: Some("s1".into()),
         prompt: Some(prompt.into()),
         raw: None,
+        activity: deck_core::agents::Activity::Keep,
+        at_ms: 0,
     });
     stream.write_all(&encode(&hello).unwrap()).unwrap();
     stream.write_all(&encode(&request).unwrap()).unwrap();
@@ -255,11 +257,12 @@ fn an_agent_has_its_own_icon_and_a_shell_the_terminal_icon() {
     // A second panel with a shell: its row starts with the terminal icon.
     h.send_bytes(PREFIX);
     h.send_keys("c");
-    wait_row(&h, 4, "the second panel", |r| r.starts_with(" \u{276f} "));
+    // The agent's row has its activity line under it, so the second panel is on row 5.
+    wait_row(&h, 5, "the second panel", |r| r.starts_with(" \u{276f} "));
     let first = rows(&h)[3].clone();
     // Names start at the same column whatever the icon.
     assert_eq!(first.chars().nth(4), Some('F'), "{first}");
-    assert_eq!(rows(&h)[4].chars().nth(4), Some('s'), "{}", rows(&h)[4]);
+    assert_eq!(rows(&h)[5].chars().nth(4), Some('s'), "{}", rows(&h)[5]);
     assert!(
         first.chars().take(4).collect::<String>() == " \u{273b}  ",
         "{first}"

@@ -43,10 +43,10 @@ Clicking a desktop notification of deck (`needs you`, `finished`) brings you to 
 
 | Sub-spec                      | Type       | Crate              | Summary                                                                           | Depends | Status |
 | ----------------------------- | ---------- | ------------------ | --------------------------------------------------------------------------------- | ------- | ------ |
-| [01](01-activity-state.md)    | foundation | core, daemon, deck | `activity` in the state and protocol, Claude Code and Codex hooks, `ls`, alert id | —       | todo   |
-| [02](02-sidebar-line.md)      | shippable  | tui                | The second line under agent panel and terminal rows                               | 01      | todo   |
-| [03](03-opencode-activity.md) | shippable  | core, deck         | OpenCode tool and permission events feed the line                                 | 01      | todo   |
-| [04](04-notification-jump.md) | shippable  | tui                | Returning to the terminal after a notification focuses the panel it is about      | 01      | todo   |
+| [01](01-activity-state.md)    | foundation | core, daemon, deck | `activity` in the state and protocol, Claude Code and Codex hooks, `ls`, alert id | —       | done   |
+| [02](02-sidebar-line.md)      | shippable  | tui                | The second line under agent panel and terminal rows                               | 01      | done   |
+| [03](03-opencode-activity.md) | shippable  | core, deck         | OpenCode tool and permission events feed the line                                 | 01      | done   |
+| [04](04-notification-jump.md) | shippable  | tui                | Returning to the terminal after a notification focuses the panel it is about      | 01      | done   |
 
 ## Affected docs
 

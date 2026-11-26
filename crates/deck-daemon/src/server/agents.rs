@@ -25,6 +25,14 @@ fn resume_of(agent: Option<&AgentState>) -> Option<AgentResume> {
     })
 }
 
+/// A state without its activity line, to tell a change of the line alone.
+fn without_activity(agent: Option<&AgentState>) -> Option<AgentState> {
+    agent.map(|a| AgentState {
+        activity: None,
+        ..a.clone()
+    })
+}
+
 impl Shared {
     /// Every `every`, asks the operating system for the foreground process of each terminal
     /// and updates its agent state and whether it runs a command. One blocking call covers
@@ -163,16 +171,13 @@ impl Shared {
     pub fn agent_event(
         self: &Arc<Self>,
         terminal: TerminalId,
-        kind: AgentKind,
-        status: Option<AgentStatus>,
-        session_id: Option<String>,
-        prompt: Option<String>,
+        event: Event,
         raw: Option<String>,
     ) -> Response {
         // Parsed before the locks are taken.
         let doc = raw
             .as_deref()
-            .filter(|_| kind == AgentKind::OpenCode)
+            .filter(|_| event.kind == AgentKind::OpenCode)
             .map(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
         let mut st = self.st();
         if st.shutting_down || st.upgrading {
@@ -189,12 +194,6 @@ impl Shared {
         if handle.has_exited() {
             return Response::Ok;
         }
-        let event = Event {
-            kind,
-            status,
-            session_id,
-            prompt,
-        };
         let now = self.clock.now();
         let sid = handle.session;
         let tid = handle.id;
@@ -209,6 +208,15 @@ impl Shared {
         });
         if moved {
             let after = self.agent_of(&mut st, &handle);
+            // Only the line changed: a tool call every few milliseconds must not flood the
+            // clients with views, so it goes through the title throttle.
+            if before.is_some()
+                && without_activity(before.as_ref()) == without_activity(after.as_ref())
+            {
+                self.push_view_throttled(&mut st, sid);
+                self.bump();
+                return Response::Ok;
+            }
             self.raise_attention(&mut st, &handle, before.as_ref(), after.as_ref());
             if resume_of(before.as_ref()) != resume_of(after.as_ref()) {
                 self.mark_dirty(&mut st);
@@ -256,7 +264,7 @@ impl Shared {
         {
             return;
         }
-        let Some((project, name)) = self.mark_unseen(st, handle) else {
+        let Some((project, panel_id, name)) = self.mark_unseen(st, handle) else {
             return;
         };
         if let Some(client) = st.active_client(handle.session) {
@@ -265,13 +273,18 @@ impl Shared {
                 status: after.status,
                 project,
                 panel: name,
+                panel_id,
             });
         }
     }
 
     /// Marks the panel of a terminal unseen, unless a focused client shows it. Returns its
-    /// project's name and its own when it marked it.
-    fn mark_unseen(&self, st: &mut State, handle: &TermHandle) -> Option<(String, String)> {
+    /// project's name, its id and its name when it marked it.
+    fn mark_unseen(
+        &self,
+        st: &mut State,
+        handle: &TermHandle,
+    ) -> Option<(String, PanelId, String)> {
         let focused = st.session_focused(handle.session);
         let sess = st.session_mut(handle.session)?;
         let (project, panel, name): (String, PanelId, String) =
@@ -286,7 +299,7 @@ impl Shared {
             return None;
         }
         sess.unseen.insert(panel);
-        Some((project, name))
+        Some((project, panel, name))
     }
 
     /// Runs `f` on a terminal's agent state and what the daemon remembers beside it.

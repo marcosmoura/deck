@@ -38,6 +38,8 @@ async fn event(client: &mut Client, terminal: TerminalId, status: AgentStatus) {
             session_id: None,
             prompt: None,
             raw: None,
+            activity: deck_core::agents::Activity::Keep,
+            at_ms: 0,
         })
         .await;
     assert_eq!(r, Response::Ok);

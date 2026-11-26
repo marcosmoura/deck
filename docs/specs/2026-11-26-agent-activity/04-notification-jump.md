@@ -1,6 +1,6 @@
 ---
 type: shippable
-status: todo
+status: done
 ---
 
 # 04 — Notification click brings you to the panel
@@ -32,5 +32,6 @@ When deck's desktop notification (`<kind> needs you · <space> › <panel>`, `<k
 
 ## Notes
 
-- A precise click needs a notification protocol that reports activation. kitty's OSC 99 does (`a=focus,report` with an id; the terminal sends back `OSC 99 ; i=<id> ; ST`). The worker checks, from each terminal's docs or source, whether Ghostty, iTerm2 and WezTerm support OSC 99 with click reports, and records the result in this note. If none of them does, the focus return stays the only way. Using OSC 99 is a separate task.
+- Checked on 26 Nov 2026, from each terminal's source on its default branch: none of the three reports a click on an OSC 99 notification, so the focus return stays the only way. Ghostty (`ghostty-org/ghostty`): the OSC parser has a `kitty_desktop_notification` command (`src/terminal/osc/parsers/kitty_desktop_notification.zig`, which reads the `a=focus,report` options), but the stream handlers only act on OSC 9 and 777 (`show_desktop_notification`), and the feature issue "OSC 99 style desktop notifications" (#5634) is still open. iTerm2 (`gnachman/iTerm2`): the OSC table in `sources/VT100/VT100XtermParser.m` maps 9 to `ITERM_USER_NOTIFICATION` and has no entry for 99. WezTerm (`wezterm/wezterm`): `wezterm-escape-parser/src/osc.rs` knows OSC 9 (`SystemNotification`) and 777, not 99; its changelog does not mention it. Read from source only; no terminal was run.
+- A precise click needs a notification protocol that reports activation. kitty's OSC 99 does (`a=focus,report` with an id; the terminal sends back `OSC 99 ; i=<id> ; ST`). Using OSC 99 is a separate task.
 - In a terminal with several windows or tabs, clicking the notification makes the terminal bring forward a window of its own choosing. deck cannot pick it.

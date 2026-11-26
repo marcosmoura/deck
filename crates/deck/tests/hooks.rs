@@ -147,6 +147,7 @@ fn claude_install_keeps_hooks_backs_up_and_is_idempotent() {
     for event in [
         "SessionStart",
         "UserPromptSubmit",
+        "PreToolUse",
         "PostToolUse",
         "PermissionRequest",
         "Notification",
@@ -296,6 +297,7 @@ fn codex_install_writes_the_hooks_json_wrapper_and_status_sees_config_toml() {
     for event in [
         "SessionStart",
         "UserPromptSubmit",
+        "PreToolUse",
         "PostToolUse",
         "PermissionRequest",
         "Stop",
@@ -412,6 +414,33 @@ fn hooks_that_run_the_bare_name_are_stale_also_with_deck_on_path() {
     let again = status();
     assert!(again.contains("claude: installed"), "{again}");
     assert!(again.contains("opencode: installed"), "{again}");
+}
+
+#[test]
+fn an_install_without_pre_tool_use_is_stale_until_installed_again() {
+    let sb = Sandbox::new();
+    for agent in ["claude", "codex"] {
+        sb.ok(&["hooks", "install", agent]);
+    }
+    let strip = |path: std::path::PathBuf| {
+        let mut doc = read_json(&path);
+        doc["hooks"].as_object_mut().unwrap().remove("PreToolUse");
+        write(&path, &doc.to_string());
+    };
+    strip(sb.claude_file());
+    strip(sb.path("home/.codex/hooks.json"));
+    let status = sb.ok(&["hooks", "status"]);
+    for agent in ["claude", "codex"] {
+        let line = status.lines().find(|l| l.starts_with(agent)).unwrap();
+        assert!(line.contains("stale: some events have no hook"), "{status}");
+    }
+    sb.ok(&["hooks", "install", "claude", "codex"]);
+    let again = sb.ok(&["hooks", "status"]);
+    assert!(again.contains("claude: installed"), "{again}");
+    assert!(again.contains("codex: installed"), "{again}");
+    for path in [sb.claude_file(), sb.path("home/.codex/hooks.json")] {
+        assert!(read_json(&path)["hooks"]["PreToolUse"].is_array());
+    }
 }
 
 #[test]
@@ -628,13 +657,16 @@ fn opencode_install_writes_the_plugin_once_and_uninstall_removes_it() {
         "permission.asked",
         "permission.replied",
         "session.inbox.enqueued",
+        "session.tool.input.started",
+        "session.tool.called",
+        "session.text.ended",
     ] {
         assert!(text.contains(&format!("\"{event}\"")), "{event}");
     }
     assert!(text.contains("export default {"), "{text}");
     assert!(text.contains("\"agent-event\", \"--agent\", \"opencode\", \"--event\""));
-    // It forwards events as they are: no interpreting of what they say.
-    for logic in ["properties", "role", "\"busy\"", "\"idle\""] {
+    // It interprets nothing of what an event says (only the turn's end, to send its text).
+    for logic in ["properties", "role"] {
         assert!(!text.contains(logic), "{logic}");
     }
     assert!(sb.ok(&["hooks", "status"]).contains("opencode: installed"));

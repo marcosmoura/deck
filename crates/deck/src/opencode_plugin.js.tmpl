@@ -1,13 +1,43 @@
 @MARKER@; do not edit.
 // An OpenCode v2 TUI plugin: it forwards the events of this terminal's own sessions to deck,
-// which does all the interpreting. It runs in the TUI process, so DECK_TERMINAL_ID is this
-// terminal's, even when several TUIs share one OpenCode server.
+// which does all the interpreting; `deck agent-event` cuts a tool or text event down to one
+// line. It runs in the TUI process, so DECK_TERMINAL_ID is this terminal's, even when several
+// TUIs share one OpenCode server.
 import { spawn } from "node:child_process";
 
 const DECK = @PROGRAM@;
 const EVENTS = new Set([
 @EVENTS@
 ]);
+
+// What the plugin remembers is bounded: this many call ids, and as many sessions.
+const MAX = 256;
+// The only parts of a tool's input that leave this process.
+const INPUT = [
+  "command",
+  "description",
+  "filePath",
+  "file_path",
+  "path",
+  "agent",
+  "patchText",
+];
+
+const remember = (map, key, value) => {
+  if (map.size >= MAX) map.delete(map.keys().next().value);
+  map.set(key, value);
+};
+const slim = (input) => {
+  const out = {};
+  for (const key of INPUT) {
+    if (typeof input?.[key] === "string") out[key] = input[key].slice(0, 1000);
+  }
+  const header = input?.questions?.[0]?.header;
+  if (typeof header === "string") out.header = header.slice(0, 200);
+  return out;
+};
+const firstLine = (text) =>
+  (text.split("\n").find((line) => line.trim()) ?? "").trim().slice(0, 200);
 
 // One queue keeps the events in order; nothing waits for it.
 let queue = Promise.resolve();
@@ -42,6 +72,23 @@ export default {
         }
       } catch {}
     };
+    // Tool call ids to tool names (a call event has no name) and the ids already sent, so a
+    // tool starts at most one `deck agent-event`; each root session's last assistant text, as
+    // its first line only, to send once with the idle status. Streamed chunks are never sent.
+    const names = new Map();
+    const sent = new Map();
+    const texts = new Map();
+    // Subagent sessions give no line: only the root's tools and text are sent.
+    const isRoot = (id) => {
+      try {
+        return ctx.data.session.root(id) === id;
+      } catch {
+        return true;
+      }
+    };
+    const forward = (event) => {
+      queue = queue.then(() => send(event)).then(() => {}, () => {});
+    };
     return ctx.data.listen(({ details: event }) => {
       if (!EVENTS.has(event.type)) return;
       if (own.size > 512) own.clear();
@@ -49,7 +96,32 @@ export default {
       const id = event.data?.sessionID;
       if (event.type === "session.created" && own.has(event.data?.parentID)) claim(id);
       if (!own.has(id)) return;
-      queue = queue.then(() => send(event)).then(() => {}, () => {});
+      const data = event.data;
+      if (event.type === "session.tool.input.started") {
+        if (typeof data.id === "string") remember(names, data.id, data.name);
+        return;
+      }
+      if (event.type === "session.tool.called") {
+        const call = data.id;
+        if (typeof call !== "string" || sent.has(call) || !isRoot(id)) return;
+        remember(sent, call, true);
+        const name = names.get(call) ?? data.name;
+        names.delete(call);
+        forward({ type: event.type, data: { sessionID: id, id: call, name, input: slim(data.input) } });
+        return;
+      }
+      if (event.type === "session.text.ended") {
+        if (typeof data.text !== "string") return;
+        if (isRoot(id)) remember(texts, id, firstLine(data.text));
+        return;
+      }
+      const state = data.status?.type;
+      if (state === "busy") texts.delete(id);
+      if ((event.type === "session.idle" || state === "idle") && texts.has(id)) {
+        forward({ type: "deck.text", data: { sessionID: id, text: texts.get(id) } });
+        texts.delete(id);
+      }
+      forward(event);
     });
   },
 };

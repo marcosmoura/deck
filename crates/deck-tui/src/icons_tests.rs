@@ -25,6 +25,7 @@ pub(crate) fn agent(kind: AgentKind, status: AgentStatus) -> AgentState {
         session_id: None,
         first_prompt: None,
         since: Duration::ZERO,
+        activity: None,
     }
 }
 
@@ -102,17 +103,19 @@ fn the_sidebar_of_the_spec_at_28_columns() {
     assert_eq!(side[1], pad(""));
     assert_eq!(side[2], pad(" terminal-multiplexer    ▾"));
     assert_eq!(side[3], pad(&st(" ✻  Fix login bug", "⠋")));
-    assert_eq!(side[4], pad(" ✎  nvim"));
-    assert_eq!(side[5], pad(&st(" ◎  Review the API chan…", "!")));
-    assert_eq!(side[6], pad(" ❯  ~/Projects/terminal-mu…"));
-    assert_eq!(side[7], pad(" ±  api"));
+    assert_eq!(side[4], pad("    working"));
+    assert_eq!(side[5], pad(" ✎  nvim"));
+    assert_eq!(side[6], pad(&st(" ◎  Review the API chan…", "!")));
+    assert_eq!(side[7], pad("    needs you"));
+    assert_eq!(side[8], pad(" ❯  ~/Projects/terminal-mu…"));
+    assert_eq!(side[9], pad(" ±  api"));
     // The icon has the style of its row: the selection band, bold, for the active panel.
     assert!(
         buf[(1, 3)]
             .modifier
             .contains(Modifier::BOLD | Modifier::REVERSED)
     );
-    assert!(!buf[(1, 4)].modifier.contains(Modifier::REVERSED));
+    assert!(!buf[(1, 5)].modifier.contains(Modifier::REVERSED));
 }
 
 #[test]
@@ -123,7 +126,7 @@ fn a_grid_panel_has_no_count_and_a_long_name_leaves_room_for_the_icon() {
     view.projects[0].panels[1].terminals.push(extra);
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad(" ✎  a-very-long-panel-name…"));
+    assert_eq!(sidebar(&rows)[5], pad(" ✎  a-very-long-panel-name…"));
 }
 
 #[test]
@@ -134,12 +137,12 @@ fn the_nerd_tier_draws_the_nerd_glyphs_in_the_same_cells() {
     let side = sidebar(&rows);
     assert_eq!(side[2], pad(" terminal-multiplexer    \u{eab4}"));
     assert_eq!(side[3], pad(&st(" \u{ec82}  Fix login bug", "\u{ee06}")));
-    assert_eq!(side[4], pad(" \u{f040}  nvim"));
+    assert_eq!(side[5], pad(" \u{f040}  nvim"));
     assert_eq!(
-        side[5],
+        side[6],
         pad(&st(" \u{ec81}  Review the API chan…", "\u{f06a}"))
     );
-    assert_eq!(side[7], pad(" \u{f126}  api"));
+    assert_eq!(side[9], pad(" \u{f126}  api"));
 }
 
 #[test]
@@ -149,7 +152,7 @@ fn the_image_tier_without_a_sent_image_draws_the_nerd_glyphs() {
     let (_, rows) = render(&a);
     let side = sidebar(&rows);
     assert_eq!(side[3], pad(&st(" \u{ec82}  Fix login bug", "\u{ee06}")));
-    assert_eq!(side[4], pad(" \u{f040}  nvim"));
+    assert_eq!(side[5], pad(" \u{f040}  nvim"));
 }
 
 #[test]
@@ -184,7 +187,7 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].active_panel = Some(PanelId(7));
     let mut a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad(" ±  api"));
+    assert_eq!(sidebar(&rows)[9], pad(" ±  api"));
 
     // The program ends: the name stays, the icon follows what is left.
     let mut view = a.mirror.view().unwrap().clone();
@@ -192,7 +195,7 @@ fn a_manually_named_panel_keeps_its_name_with_the_live_icon_and_shows_the_title(
     view.projects[0].panels[4].terminals[0].title = Some("api".into());
     a.on_server(ServerMsg::SessionView(view));
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[7], pad(" ❯  api"));
+    assert_eq!(sidebar(&rows)[9], pad(" ❯  api"));
 }
 
 #[test]
@@ -202,7 +205,7 @@ fn a_panel_without_terminals_has_no_icon() {
     view.projects[0].panels[1].focused_terminal = None;
     let a = app_with("", view);
     let (_, rows) = render(&a);
-    assert_eq!(sidebar(&rows)[4], pad("    nvim"));
+    assert_eq!(sidebar(&rows)[5], pad("    nvim"));
 }
 
 #[test]
@@ -219,8 +222,8 @@ fn agent_icons_take_their_icon_colour() {
         assert_eq!(buf[(1, 3)].bg, claude, "{tier:?}");
         assert_ne!(buf[(4, 3)].bg, claude);
         // Codex takes the row's colour, so does an editor.
+        assert_eq!(buf[(1, 6)].fg, buf[(4, 6)].fg);
         assert_eq!(buf[(1, 5)].fg, buf[(4, 5)].fg);
-        assert_eq!(buf[(1, 4)].fg, buf[(4, 4)].fg);
         // Outside the band the colour is the text's.
         let mut view = titled();
         view.active_panel = Some(PanelId(4));
@@ -234,8 +237,8 @@ fn agent_icons_take_their_icon_colour() {
         let mut a = app_with("", view);
         a.tier = tier;
         let (buf, _) = render(&a);
-        assert_eq!(buf[(1, 5)].fg, buf[(4, 5)].fg);
-        assert_eq!(buf[(1, 5)].bg, buf[(4, 5)].bg);
+        assert_eq!(buf[(1, 6)].fg, buf[(4, 6)].fg);
+        assert_eq!(buf[(1, 6)].bg, buf[(4, 6)].bg);
     }
 }
 
@@ -253,8 +256,8 @@ fn the_status_marks_keep_their_roles() {
     }));
     use crate::draw::color;
     assert_eq!(buf[(25, 3)].fg, color(a.theme.accent));
-    assert_eq!(buf[(25, 5)].fg, color(a.theme.warning));
-    assert!(buf[(25, 5)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(25, 6)].fg, color(a.theme.warning));
+    assert!(buf[(25, 6)].modifier.contains(Modifier::BOLD));
     // The caret of a space is muted.
     assert_eq!(buf[(25, 2)].symbol(), "▾");
     assert_eq!(buf[(25, 2)].fg, color(a.theme.muted));

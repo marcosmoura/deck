@@ -159,6 +159,7 @@ impl Shared {
                         session_id: resume.session_id.clone(),
                         first_prompt: None,
                         since: now,
+                        activity: None,
                     });
                 }
             }

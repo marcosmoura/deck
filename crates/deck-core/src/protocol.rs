@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, ActionError};
 use crate::agent_sessions::AgentSession;
-use crate::agents::{AgentKind, AgentStatus};
+use crate::agents::{Activity, AgentKind, AgentStatus};
 use crate::config::Config;
 use crate::keys::KeySpec;
 use crate::model::{LaunchSpec, PanelId, SessionId, SessionView, TerminalId};
 
-pub const PROTOCOL_VERSION: u32 = 28;
+pub const PROTOCOL_VERSION: u32 = 29;
 
 /// Largest accepted payload.
 pub const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
@@ -248,8 +248,11 @@ pub enum Request {
     },
     /// An agent's state, from its hooks (or a test): sets the terminal's agent state with
     /// `source: Hooks`. `status: None` leaves the status as it is; `raw` is an agent's own
-    /// event, still to be interpreted (OpenCode). Answered by `Ok`, or an error for a
-    /// terminal that does not exist.
+    /// event, still to be interpreted (OpenCode). `activity` is what the event does to the
+    /// activity line (the daemon cleans and cuts a `Set` again); `at_ms` is when the event
+    /// began, in Unix milliseconds (0 for a caller that has none: never older than anything),
+    /// so an event that arrives late cannot overwrite a newer line. Answered by `Ok`, or an
+    /// error for a terminal that does not exist.
     AgentEvent {
         terminal: TerminalId,
         kind: AgentKind,
@@ -257,6 +260,8 @@ pub enum Request {
         session_id: Option<String>,
         prompt: Option<String>,
         raw: Option<String>,
+        activity: Activity,
+        at_ms: u64,
     },
     /// Lists an agent's recent sessions, newest first, at most `limit` (clamped to 1 to 100).
     /// Needs an attached session. Answered by `Response::AgentSessions`, which is not in
@@ -383,6 +388,8 @@ pub enum ServerMsg {
         status: AgentStatus,
         project: String,
         panel: String,
+        /// The alerted panel (names are not unique).
+        panel_id: PanelId,
     },
     /// One piece of an image's pixels, for a client that attached with `images`. The pieces of
     /// one image come in order, `data` at most [`MAX_IMAGE_PIECE`] bytes at byte `offset` of
@@ -803,6 +810,7 @@ mod tests {
                             session_id: Some("s1".into()),
                             first_prompt: Some("fix".into()),
                             since: std::time::Duration::from_millis(1500),
+                            activity: Some("running x ✓".into()),
                         }),
                         busy: true,
                     }],
@@ -1066,6 +1074,8 @@ mod tests {
                 session_id: Some("ses_1".into()),
                 prompt: Some("fix the bug".into()),
                 raw: Some("{\"type\":\"x\"}".into()),
+                activity: Activity::Set("running x ✓".into()),
+                at_ms: 1_764_000_000_123,
             }),
             ClientMsg::Request(Request::AgentEvent {
                 terminal: TerminalId(4),
@@ -1074,6 +1084,18 @@ mod tests {
                 session_id: None,
                 prompt: None,
                 raw: None,
+                activity: Activity::Clear,
+                at_ms: 0,
+            }),
+            ClientMsg::Request(Request::AgentEvent {
+                terminal: TerminalId(4),
+                kind: AgentKind::Codex,
+                status: None,
+                session_id: None,
+                prompt: None,
+                raw: None,
+                activity: Activity::Keep,
+                at_ms: u64::MAX,
             }),
             ClientMsg::Request(Request::ListAgentSessions {
                 kind: AgentKind::OpenCode,
@@ -1148,6 +1170,7 @@ mod tests {
                 status: AgentStatus::Waiting,
                 project: "p ✓".into(),
                 panel: "e".into(),
+                panel_id: PanelId(9),
             },
             ServerMsg::SessionView(view()),
             ServerMsg::Frame(frame()),

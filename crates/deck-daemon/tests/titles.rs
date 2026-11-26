@@ -96,6 +96,8 @@ async fn prompt_event(c: &mut Client, prompt: &str) {
             session_id: Some("s1".into()),
             prompt: Some(prompt.into()),
             raw: None,
+            activity: deck_core::agents::Activity::Keep,
+            at_ms: 0,
         })
         .await;
     assert_eq!(r, Response::Ok);
@@ -220,6 +222,8 @@ async fn a_title_that_changes_only_its_spinner_sends_no_view() {
         session_id: Some("s1".into()),
         prompt: None,
         raw: None,
+        activity: deck_core::agents::Activity::Keep,
+        at_ms: 0,
     })
     .await;
     set_title(&mut c, &format!("{SPIN1} Fix login bug"), "T1").await;

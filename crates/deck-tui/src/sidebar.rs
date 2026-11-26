@@ -2,6 +2,7 @@
 //! drawing.
 
 use deck_core::action::Action as Act;
+use deck_core::agents::{AgentStatus, describe_status};
 use deck_core::icons::{Icon, IconKind, icon_for};
 use deck_core::keys::{KeyCode, KeyEvent};
 use deck_core::layout::{self, COLLAPSED_SIDEBAR_WIDTH};
@@ -192,6 +193,9 @@ pub enum Row {
     Terminal(ProjectId, PanelId, TerminalId),
     /// The muted `no panels` of an empty project.
     NoPanels,
+    /// The muted line under the row of `Sel` (a panel with one terminal, or a terminal) that
+    /// has an agent: what the agent does. It belongs to its owner and is never selected.
+    Activity(Sel),
     /// A blank row between two spaces (`sidebar_space_gap`).
     Gap,
     /// The muted rule between the entries of two spaces in the collapsed sidebar.
@@ -204,7 +208,16 @@ impl Row {
             Self::Project(p) => Some(Sel::Project(p)),
             Self::Panel(p, panel) => Some(Sel::Panel(p, panel)),
             Self::Terminal(p, panel, t) => Some(Sel::Terminal(p, panel, t)),
-            Self::NoPanels | Self::Gap | Self::Rule => None,
+            Self::Activity(_) | Self::NoPanels | Self::Gap | Self::Rule => None,
+        }
+    }
+
+    /// The item a pointer on the row acts on: the row's own, or its owner's for an activity
+    /// line.
+    pub(crate) fn owner(self) -> Option<Sel> {
+        match self {
+            Self::Activity(owner) => Some(owner),
+            _ => self.sel(),
         }
     }
 }
@@ -264,15 +277,22 @@ pub fn rows_with(view: &SessionView, gap: u8, reorder: Option<Reorder>) -> Vec<R
         }
         for id in panels {
             rows.push(Row::Panel(project.id, id));
-            if let Some(panel) = project.panels.iter().find(|p| p.id == id)
-                && panel.terminals.len() > 1
-            {
-                rows.extend(
-                    panel
-                        .terminals
-                        .iter()
-                        .map(|t| Row::Terminal(project.id, id, t.id)),
-                );
+            let Some(panel) = project.panels.iter().find(|p| p.id == id) else {
+                continue;
+            };
+            match panel.terminals.as_slice() {
+                [only] if only.agent.is_some() => {
+                    rows.push(Row::Activity(Sel::Panel(project.id, id)));
+                }
+                [] | [_] => {}
+                terminals => {
+                    for t in terminals {
+                        rows.push(Row::Terminal(project.id, id, t.id));
+                        if t.agent.is_some() {
+                            rows.push(Row::Activity(Sel::Terminal(project.id, id, t.id)));
+                        }
+                    }
+                }
             }
         }
     }
@@ -368,7 +388,7 @@ impl App {
             let rows = self.preview_rows();
             return rows
                 .get(self.sidebar_offset + line)
-                .and_then(|r| r.sel())
+                .and_then(|r| r.owner())
                 .map(Hover::Row);
         }
         if new_span(w, self.sidebar_collapsed).contains(&column) {
@@ -480,10 +500,16 @@ impl App {
         let max = rows.len().saturating_sub(height);
         let mut offset = self.sidebar_offset.min(max);
         if let Some(target) = target {
+            // The row's activity line comes into view with it when there is room.
+            let last = if height > 1 && matches!(rows.get(target + 1), Some(Row::Activity(_))) {
+                target + 1
+            } else {
+                target
+            };
             if target < offset {
                 offset = target;
-            } else if height > 0 && target >= offset + height {
-                offset = target + 1 - height;
+            } else if height > 0 && last >= offset + height {
+                offset = last + 1 - height;
             }
         }
         self.sidebar_offset = offset.min(max);
@@ -798,16 +824,24 @@ impl App {
                 // A blank row or `no panels` belongs to the space above it.
                 let owner = rows.get(..=at)?.iter().rev().find_map(|r| match r {
                     Row::Project(p) | Row::Panel(p, _) | Row::Terminal(p, _, _) => Some(*p),
+                    Row::Activity(sel) => Some(sel.project()),
                     Row::NoPanels | Row::Gap | Row::Rule => None,
                 })?;
                 view.projects.iter().position(|p| p.id == owner)
             }
             Sel::Panel(project, _) => {
                 let panels = &view.projects.iter().find(|p| p.id == project)?.panels;
-                if let Some(Row::Panel(p, panel) | Row::Terminal(p, panel, _)) = rows.get(at)
-                    && *p == project
+                let at_panel = match rows.get(at) {
+                    Some(Row::Panel(p, panel) | Row::Terminal(p, panel, _)) => Some((*p, *panel)),
+                    Some(Row::Activity(Sel::Panel(p, panel) | Sel::Terminal(p, panel, _))) => {
+                        Some((*p, *panel))
+                    }
+                    _ => None,
+                };
+                if let Some((p, panel)) = at_panel
+                    && p == project
                 {
-                    return panels.iter().position(|x| x.id == *panel);
+                    return panels.iter().position(|x| x.id == panel);
                 }
                 // Above the space's panels is the first, below is the last.
                 let first = rows
@@ -906,7 +940,7 @@ impl App {
             // The pointer has to reach another row to start a drag.
             let reached = line
                 .and_then(|l| rows.get(self.sidebar_offset + l))
-                .is_some_and(|r| r.sel() != Some(item));
+                .is_some_and(|r| r.owner() != Some(item));
             if !reached {
                 return;
             }
@@ -976,7 +1010,7 @@ impl App {
                 self.row_press = self
                     .preview_rows()
                     .get(self.sidebar_offset + line)
-                    .and_then(|r| r.sel());
+                    .and_then(|r| r.owner());
                 Vec::new()
             }
             _ => Vec::new(),
@@ -1216,16 +1250,19 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
     {
         let y = area.y + HEADER_ROWS + u16::try_from(line).unwrap_or(0);
         let mut row_style = base;
-        let is_selected = row.sel().is_some() && row.sel() == selected;
-        let active = matches!(*row, Row::Panel(_, id) if view.active_panel == Some(id));
+        // An activity line is part of its owner's row: its band, hover and drag state.
+        let owner = row.owner();
+        let is_selected = owner.is_some() && owner == selected;
+        let active = matches!(*row, Row::Panel(_, id) | Row::Activity(Sel::Panel(_, id))
+            if view.active_panel == Some(id));
         // The selection in sidebar focus, else the active panel, has the band.
         // The drop target is drawn two columns to the right, after a caret; the dragged row
         // is dimmed.
-        let shifted = row.sel().is_some() && row.sel() == target;
+        let shifted = owner.is_some() && owner == target;
         // A dragged panel carries its terminal rows.
-        let dimmed = row.sel().is_some()
-            && (row.sel() == dragged
-                || matches!(*row, Row::Terminal(p, panel, _) if dragged == Some(Sel::Panel(p, panel))));
+        let dimmed = owner.is_some()
+            && (owner == dragged
+                || matches!(owner, Some(Sel::Terminal(p, panel, _)) if dragged == Some(Sel::Panel(p, panel))));
         // A band or hover background starts after the caret.
         let (lead, full) = if shifted {
             (2, w.saturating_sub(2))
@@ -1235,8 +1272,8 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         let band = !dimmed && (is_selected || (active && !app.sidebar_focus));
         let hovered = !dimmed
             && !band
-            && row.sel().is_some()
-            && (app.hover == row.sel().map(Hover::Row) || menu_row == row.sel());
+            && owner.is_some()
+            && (app.hover == owner.map(Hover::Row) || menu_row == owner);
         let muted = if hovered {
             fg(theme.sidebar_fg)
         } else {
@@ -1267,7 +1304,7 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
         }
         // The caret, then the row's content in the room that is left.
         let (shift, w) = (lead, full);
-        if shifted {
+        if shifted && !matches!(row, Row::Activity(_)) {
             let caret = Style::new()
                 .fg(color(theme.accent))
                 .add_modifier(Modifier::BOLD)
@@ -1467,6 +1504,52 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
                     &exited,
                     keep(row_style.patch(muted)),
                 );
+            }
+            Row::Activity(owner) => {
+                let (x, agent, tree) = match owner {
+                    Sel::Panel(_, panel) => {
+                        let Some((_, p)) = app.mirror.find_panel(panel) else {
+                            continue;
+                        };
+                        (
+                            NAME_X,
+                            p.terminals.first().and_then(|t| t.agent.as_ref()),
+                            false,
+                        )
+                    }
+                    Sel::Terminal(_, panel, id) => {
+                        let Some((_, p)) = app.mirror.find_panel(panel) else {
+                            continue;
+                        };
+                        let last = p.terminals.last().map(|t| t.id) == Some(id);
+                        let agent = p
+                            .terminals
+                            .iter()
+                            .find(|t| t.id == id)
+                            .and_then(|t| t.agent.as_ref());
+                        (TERMINAL_LABEL_X, agent, !last)
+                    }
+                    Sel::Project(_) => continue,
+                };
+                let Some(agent) = agent else { continue };
+                if tree {
+                    put(buf, y, TREE_X, "│", keep(row_style.patch(muted)));
+                }
+                let clean =
+                    |text: &str| -> String { text.chars().filter(|c| !c.is_control()).collect() };
+                let mut text = agent.activity.as_deref().map(clean).unwrap_or_default();
+                if text.is_empty() {
+                    text = describe_status(agent.status).to_string();
+                }
+                let text = truncate(&text, w.saturating_sub(x + 1));
+                let style = if band {
+                    keep(row_style)
+                } else if agent.status == AgentStatus::Waiting && !dimmed {
+                    row_style.patch(fg(theme.warning))
+                } else {
+                    keep(row_style.patch(muted))
+                };
+                put(buf, y, x, &text, style);
             }
             Row::NoPanels => put(buf, y, 3, "no panels", keep(row_style.patch(muted))),
             Row::Gap | Row::Rule => {}

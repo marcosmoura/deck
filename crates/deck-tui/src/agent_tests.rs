@@ -25,6 +25,7 @@ fn state(kind: AgentKind, status: AgentStatus) -> AgentState {
         session_id: None,
         first_prompt: None,
         since: Duration::ZERO,
+        activity: None,
     }
 }
 
@@ -77,17 +78,24 @@ fn the_sidebar_status_column_shows_each_panels_glyph() {
     let buf = render(&a);
     let side = |y| row(&buf, y).chars().take(28).collect::<String>();
     assert_eq!(side(3), " ✻  editor               ⠋  ");
-    assert_eq!(side(4), " ✻  claude               !  ");
-    assert_eq!(side(5), " ✻  tests                ●  ");
-    assert_eq!(side(7), " ✻  api                  ○  ");
+    assert_eq!(side(4), "    working                 ");
+    assert_eq!(side(5), " ✻  claude               !  ");
+    assert_eq!(side(6), "    needs you               ");
+    assert_eq!(side(7), " ✻  tests                ●  ");
+    assert_eq!(side(8), "    ready                   ");
+    assert_eq!(side(10), " ✻  api                  ○  ");
+    assert_eq!(side(11), "    quiet                   ");
     // Roles: waiting is a bold warning, idle is ok, quiet is muted; working is the accent, but
     // on the reversed band of the active row it keeps the row's text colour.
     let theme = &a.theme;
     assert_eq!(buf[(25, 3)].fg, buf[(4, 3)].fg);
-    assert_eq!(buf[(25, 4)].fg, color(theme.warning));
-    assert!(buf[(25, 4)].modifier.contains(Modifier::BOLD));
-    assert_eq!(buf[(25, 5)].fg, color(theme.ok));
-    assert_eq!(buf[(25, 7)].fg, color(theme.muted));
+    assert_eq!(buf[(25, 5)].fg, color(theme.warning));
+    assert!(buf[(25, 5)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buf[(25, 7)].fg, color(theme.ok));
+    assert_eq!(buf[(25, 10)].fg, color(theme.muted));
+    // The line under a waiting agent is a warning, the others' are muted.
+    assert_eq!(buf[(4, 6)].fg, color(theme.warning));
+    assert_eq!(buf[(4, 8)].fg, color(theme.muted));
 }
 
 #[test]
@@ -277,11 +285,12 @@ fn an_unseen_panel_is_bold_with_the_glyph_after_its_name() {
     let buf = render(&a);
     let side = |y| row(&buf, y).chars().take(28).collect::<String>();
     assert_eq!(side(4), " ✻  claude •             !  ");
-    assert_eq!(side(5), " ❯  tests                   ");
+    assert_eq!(side(5), "    needs you               ");
+    assert_eq!(side(6), " ❯  tests                   ");
     for x in 4..10 {
         assert!(buf[(x, 4)].modifier.contains(Modifier::BOLD), "{x}");
     }
-    assert!(!buf[(4, 5)].modifier.contains(Modifier::BOLD));
+    assert!(!buf[(4, 6)].modifier.contains(Modifier::BOLD));
     assert_eq!(buf[(11, 4)].fg, color(a.theme.accent));
     assert_eq!(buf[(12, 4)].symbol(), " ");
 }

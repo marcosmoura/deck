@@ -80,6 +80,8 @@ async fn event(
             session_id: session_id.map(Into::into),
             prompt: prompt.map(Into::into),
             raw: None,
+            activity: deck_core::agents::Activity::Keep,
+            at_ms: 0,
         })
         .await
 }
@@ -436,6 +438,8 @@ async fn raw(client: &mut Client, terminal: TerminalId, json: &str) -> Response 
             session_id: None,
             prompt: None,
             raw: Some(json.into()),
+            activity: deck_core::agents::Activity::Keep,
+            at_ms: 0,
         })
         .await
 }

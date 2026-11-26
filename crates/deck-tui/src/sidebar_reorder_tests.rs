@@ -110,6 +110,7 @@ fn preview(a: &App) -> String {
             Row::Project(p) => format!("P{}", p.0),
             Row::Panel(_, p) => format!("p{}", p.0),
             Row::Terminal(_, _, t) => format!("t{}", t.0),
+            Row::Activity(_) => "a".into(),
             Row::NoPanels => "n".into(),
             Row::Gap => "_".into(),
             Row::Rule => "-".into(),

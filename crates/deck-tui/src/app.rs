@@ -12,7 +12,7 @@ use deck_core::action::Action as Act;
 use deck_core::config::Config;
 use deck_core::keys::{KeyCode, KeyEvent, KeyEventKind, Modifiers, encode, encode_key};
 use deck_core::layout;
-use deck_core::model::TerminalId;
+use deck_core::model::{PanelId, ProjectId, TerminalId};
 use deck_core::mouse::{self, MouseButton, MouseEvent, MouseKind};
 use deck_core::protocol::{
     ByeReason, CellPx, ClientMsg, CursorShape, Modes, NoticeLevel, Pos, ScrollTo, ServerMsg,
@@ -205,7 +205,13 @@ pub struct App {
     /// The last press that started a selection and how many presses in a row it ends, for
     /// double and triple clicks.
     last_click: Option<(Instant, TerminalId, (u16, u16), u8)>,
+    /// The panel of the last alert written while the outer terminal was unfocused, and when:
+    /// a focus gain soon after brings the user to it.
+    alert_jump: Option<(PanelId, Instant)>,
 }
+
+/// How long after an alert a focus gain still counts as the click on its notification.
+const ALERT_JUMP_WINDOW: Duration = Duration::from_secs(10);
 
 /// A mouse cell on a terminal of the grid.
 struct Hit {
@@ -289,6 +295,7 @@ impl App {
             focus_seen: false,
             text_sel: None,
             last_click: None,
+            alert_jump: None,
         }
     }
 
@@ -649,8 +656,8 @@ impl App {
                 vec![self.viewport_msg()]
             }
             ct::Event::Mouse(mouse) => self.on_mouse(mouse, now),
-            ct::Event::FocusGained => self.on_focus(true),
-            ct::Event::FocusLost => self.on_focus(false),
+            ct::Event::FocusGained => self.on_focus(true, now),
+            ct::Event::FocusLost => self.on_focus(false, now),
         }
     }
 
@@ -1067,7 +1074,7 @@ impl App {
     }
 
     /// Focus-in and focus-out of the outer terminal, for programs that asked for them.
-    fn on_focus(&mut self, gained: bool) -> Vec<Out> {
+    fn on_focus(&mut self, gained: bool, now: Instant) -> Vec<Out> {
         self.focused = gained;
         self.focus_seen = true;
         if !gained && self.sidebar_drag.take().is_some() {
@@ -1080,17 +1087,41 @@ impl App {
             self.set_hover(None);
         }
         let mut outs = vec![Out::Send(ClientMsg::Focus(gained))];
-        outs.extend(self.forward_focus(gained));
+        let jump = if gained { self.alert_jump(now) } else { None };
+        // The focus-in goes to the terminal the user lands on.
+        outs.extend(self.forward_focus(gained, jump.map(|(_, _, terminal)| terminal)));
+        if let Some((project, panel, terminal)) = jump {
+            outs.push(self.act(Act::FocusProject { project }, None));
+            outs.push(self.act(Act::FocusPanel { panel }, None));
+            outs.push(self.act(Act::FocusTerminal { terminal }, None));
+        }
         outs
     }
 
+    /// On a focus gain: the space, panel and terminal to show for a recent alert, if its panel
+    /// still needs the user and no prompt or overlay is open. The alert is forgotten either way.
+    fn alert_jump(&mut self, now: Instant) -> Option<(ProjectId, PanelId, TerminalId)> {
+        let (panel, at) = self.alert_jump.take()?;
+        if self.overlay_open() || now.saturating_duration_since(at) > ALERT_JUMP_WINDOW {
+            return None;
+        }
+        let view = self.mirror.view()?;
+        let project = view
+            .projects
+            .iter()
+            .find(|p| p.panels.iter().any(|x| x.id == panel))?;
+        let terminal = agent::panel_attention(project.panels.iter().find(|x| x.id == panel)?)?;
+        Some((project.id, panel, terminal))
+    }
+
     /// The focus report for the focused terminal, if its program asked for them.
-    fn forward_focus(&mut self, gained: bool) -> Vec<Out> {
+    /// `to` is the terminal a jump lands on, which gets the report instead of the focused one.
+    fn forward_focus(&mut self, gained: bool, to: Option<TerminalId>) -> Vec<Out> {
         self.end_repeat();
         if self.overlay_open() {
             return Vec::new();
         }
-        let Some(terminal) = self.ready() else {
+        let Some(terminal) = to.or_else(|| self.ready()) else {
             return Vec::new();
         };
         let reports = self
@@ -1628,11 +1659,15 @@ impl App {
                 status,
                 project,
                 panel,
+                panel_id,
             } => {
                 let bytes = agent::alert_bytes(self.config.notify, kind, status, &project, &panel);
                 if bytes.is_empty() {
                     Vec::new()
                 } else {
+                    if !self.focused {
+                        self.alert_jump = Some((panel_id, Instant::now()));
+                    }
                     vec![Out::Notify(bytes)]
                 }
             }
@@ -2439,6 +2474,7 @@ mod tests {
             status,
             project: project.into(),
             panel: panel.into(),
+            panel_id: deck_core::model::PanelId(1),
         }
     }
 
@@ -2483,6 +2519,206 @@ mod tests {
         }
     }
 
+    /// An app showing the mockup with terminal 41 (panel 4) waiting and terminal 91
+    /// (panel 9) idle and unseen; returns the view too.
+    fn jump_app(notify: &str) -> (App, deck_core::model::SessionView) {
+        use deck_core::agents::{AgentKind, AgentSource, AgentState, AgentStatus};
+        let mut v = crate::mirror::tests::mockup();
+        for (id, status) in [(41, AgentStatus::Waiting), (91, AgentStatus::Idle)] {
+            let t = v
+                .projects
+                .iter_mut()
+                .flat_map(|p| &mut p.panels)
+                .flat_map(|p| &mut p.terminals)
+                .find(|t| t.id == TerminalId(id))
+                .unwrap();
+            t.agent = Some(AgentState {
+                kind: AgentKind::Claude,
+                status,
+                source: AgentSource::Hooks,
+                session_id: None,
+                first_prompt: None,
+                since: Duration::ZERO,
+                activity: None,
+            });
+        }
+        v.projects[3].panels[0].unseen = true;
+        let config = Config::parse(&format!("notify = \"{notify}\""))
+            .unwrap()
+            .config;
+        let mut a = App::new(&config, (100, 24), &[]);
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        (a, v)
+    }
+
+    fn alert_for(panel: u64, status: deck_core::agents::AgentStatus) -> ServerMsg {
+        let ServerMsg::AgentAlert {
+            kind,
+            status,
+            project,
+            panel: name,
+            ..
+        } = alert(status, "proj", "p")
+        else {
+            unreachable!()
+        };
+        ServerMsg::AgentAlert {
+            kind,
+            status,
+            project,
+            panel: name,
+            panel_id: PanelId(panel),
+        }
+    }
+
+    fn jump_to(project: u64, panel: u64, terminal: u64) -> Vec<Out> {
+        vec![
+            Out::Send(ClientMsg::Action(Act::FocusProject {
+                project: deck_core::model::ProjectId(project),
+            })),
+            Out::Send(ClientMsg::Action(Act::FocusPanel {
+                panel: PanelId(panel),
+            })),
+            Out::Send(ClientMsg::Action(Act::FocusTerminal {
+                terminal: TerminalId(terminal),
+            })),
+        ]
+    }
+
+    fn unfocus_and_alert(a: &mut App, panel: u64, status: deck_core::agents::AgentStatus) {
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        a.on_server(alert_for(panel, status));
+    }
+
+    #[test]
+    fn a_focus_gain_soon_after_an_alert_jumps_to_its_panel() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        let mut outs = a.on_event(
+            ct::Event::FocusGained,
+            Instant::now() + Duration::from_secs(3),
+        );
+        assert_eq!(outs.remove(0), focus(true));
+        assert_eq!(outs, jump_to(1, 4, 41));
+        // Forgotten: the next focus gain does nothing.
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+    }
+
+    #[test]
+    fn an_unseen_idle_panel_is_jumped_to_too() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 9, AgentStatus::Idle);
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        assert_eq!(outs[1..], jump_to(8, 9, 91));
+    }
+
+    #[test]
+    fn a_late_focus_gain_does_not_jump() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        let outs = a.on_event(
+            ct::Event::FocusGained,
+            Instant::now() + Duration::from_secs(11),
+        );
+        assert_eq!(outs, [focus(true)]);
+    }
+
+    #[test]
+    fn a_seen_or_closed_panel_does_not_jump() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, mut v) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 9, AgentStatus::Idle);
+        v.projects[3].panels[0].unseen = false;
+        a.on_server(ServerMsg::SessionView(v.clone()));
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+        // Closed: the panel is gone from the view.
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        a.on_server(alert_for(4, AgentStatus::Waiting));
+        v.projects[0].panels.retain(|p| p.id != PanelId(4));
+        a.on_server(ServerMsg::SessionView(v));
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+    }
+
+    #[test]
+    fn no_jump_with_notify_none_or_without_a_focus_loss() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("none");
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+        // Never reported focus out: the client counts as focused and does not remember.
+        let (mut a, _) = jump_app("osc9");
+        a.on_server(alert_for(4, AgentStatus::Waiting));
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+    }
+
+    #[test]
+    fn the_focus_in_report_goes_to_the_terminal_the_jump_lands_on() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        let mut f = frame(true, (78, 21), vec![]);
+        f.terminal = TerminalId(41);
+        f.modes = Modes(Modes::FOCUS_REPORTING);
+        a.on_server(ServerMsg::Frame(f));
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        assert_eq!(outs[0], focus(true));
+        assert_eq!(
+            outs[1],
+            Out::Send(ClientMsg::Input {
+                terminal: TerminalId(41),
+                bytes: b"\x1b[I".to_vec()
+            })
+        );
+        assert_eq!(outs[2..], jump_to(1, 4, 41));
+    }
+
+    #[test]
+    fn an_open_overlay_forgets_the_alert_without_jumping() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 4, AgentStatus::Waiting);
+        a.modal = Some(Modal::Help);
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+        a.modal = None;
+        a.on_event(ct::Event::FocusLost, Instant::now());
+        assert_eq!(
+            a.on_event(ct::Event::FocusGained, Instant::now()),
+            [focus(true)]
+        );
+    }
+
+    #[test]
+    fn the_newer_alert_wins() {
+        use deck_core::agents::AgentStatus;
+        let (mut a, _) = jump_app("osc9");
+        unfocus_and_alert(&mut a, 9, AgentStatus::Idle);
+        a.on_server(alert_for(4, AgentStatus::Waiting));
+        let outs = a.on_event(ct::Event::FocusGained, Instant::now());
+        assert_eq!(outs[1..], jump_to(1, 4, 41));
+    }
+
     #[test]
     fn next_attention_cycles_waiting_then_unseen_idle_then_flashes() {
         use deck_core::agents::{AgentKind, AgentSource, AgentState, AgentStatus};
@@ -2502,6 +2738,7 @@ mod tests {
                 session_id: None,
                 first_prompt: None,
                 since: Duration::ZERO,
+                activity: None,
             });
         };
         let mut v = crate::mirror::tests::mockup();

@@ -1564,6 +1564,8 @@ fn agent_working(home: &Home, terminal: u64) {
         session_id: Some("s1".into()),
         prompt: Some("refactor the layout engine".into()),
         raw: None,
+        activity: deck_core::agents::Activity::Keep,
+        at_ms: 0,
     });
     stream.write_all(&encode(&hello).unwrap()).unwrap();
     stream.write_all(&encode(&request).unwrap()).unwrap();

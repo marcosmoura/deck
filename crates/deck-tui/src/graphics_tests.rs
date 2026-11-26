@@ -292,22 +292,22 @@ fn agent_rows_draw_placeholders() {
     assert!(buf[(1, 3)].modifier.is_empty());
     // The second Claude row (inactive: `sidebar_fg`) has the same image: Claude's logo is
     // drawn in its own colour on every row.
-    let inactive = placeholder_cell(&buf, 1, 6).expect("placeholder on the second row");
+    let inactive = placeholder_cell(&buf, 1, 8).expect("placeholder on the second row");
     assert_eq!(active, inactive);
     // Every program icon is an image of its own: Codex, the editor, git.
-    let codex = placeholder_cell(&buf, 1, 5).expect("Codex");
-    let editor = placeholder_cell(&buf, 1, 4).expect("editor");
-    let git = placeholder_cell(&buf, 1, 7).expect("git");
+    let codex = placeholder_cell(&buf, 1, 6).expect("Codex");
+    let editor = placeholder_cell(&buf, 1, 5).expect("editor");
+    let git = placeholder_cell(&buf, 1, 10).expect("git");
     assert!(codex != editor && editor != git && codex != git);
     // The status marks: the spinner is an image of its own (frame 0), the waiting mark is an
     // image and not the row's icon; the space's caret is an image too.
     let spinner = placeholder_cell(&buf, 25, 3).expect("spinner");
     assert!(spinner != codex && spinner != active);
-    let waiting = placeholder_cell(&buf, 25, 5).expect("waiting mark");
+    let waiting = placeholder_cell(&buf, 25, 6).expect("waiting mark");
     assert!(waiting != codex && waiting != active);
     // The idle mark of the sixth row is an image of its own, not the waiting mark nor the
     // row's icon.
-    let idle = placeholder_cell(&buf, 25, 6).expect("idle mark");
+    let idle = placeholder_cell(&buf, 25, 8).expect("idle mark");
     assert!(idle != waiting && idle != inactive);
     placeholder_cell(&buf, 25, 2).expect("caret");
     // The names did not move.
@@ -424,10 +424,10 @@ fn a_selected_row_draws_its_visible_colours_without_reverse() {
     let mut sink = Vec::new();
     a.send_images(&mut sink).unwrap();
     let (buf, _) = render(&a);
-    let cell = &buf[(1, 6)];
+    let cell = &buf[(1, 8)];
     // The default selection is `REVERSED` over `default` colours: the row shows the outer
     // foreground (10, 20, 30) as its background; Claude's logo keeps its own colour on it.
-    let id = placeholder_cell(&buf, 1, 6).expect("placeholder on the selected row");
+    let id = placeholder_cell(&buf, 1, 8).expect("placeholder on the selected row");
     assert!(cell.modifier.is_empty(), "{:?}", cell.modifier);
     assert_eq!(cell.bg, Color::Rgb(10, 20, 30));
     let images = a.images.as_ref().unwrap();
@@ -435,7 +435,14 @@ fn a_selected_row_draws_its_visible_colours_without_reverse() {
     assert_eq!(pair.rgb, (0xd9, 0x77, 0x57));
     // The row's own cells are still reversed.
     assert!(
-        buf[(4, 6)]
+        buf[(4, 8)]
+            .modifier
+            .contains(ratatui::style::Modifier::REVERSED)
+    );
+    // Its activity line is part of the band.
+    assert_eq!(buf[(4, 9)].bg, buf[(4, 8)].bg);
+    assert!(
+        buf[(4, 9)]
             .modifier
             .contains(ratatui::style::Modifier::REVERSED)
     );
@@ -445,7 +452,7 @@ fn a_selected_row_draws_its_visible_colours_without_reverse() {
 fn names_start_at_the_same_column_with_logos_and_with_text_icons() {
     let name_column = |rows: &[String]| {
         // Panel rows of the first project: Claude, nvim, Codex, shell, git.
-        (3..8)
+        (3..11)
             .map(|y| {
                 rows[y]
                     .chars()
@@ -463,7 +470,7 @@ fn names_start_at_the_same_column_with_logos_and_with_text_icons() {
     a.send_images(&mut sink).unwrap();
     let (buf, _) = render(&a);
     // Logo rows and glyph rows: the first letter of each name is at column 4.
-    for (y, first) in [(3, "F"), (4, "n"), (5, "R"), (7, "a")] {
+    for (y, first) in [(3, "F"), (5, "n"), (6, "R"), (10, "a")] {
         assert_eq!(buf[(4, y)].symbol(), first, "row {y}");
     }
 }
@@ -473,7 +480,7 @@ fn the_logos_of_the_dragged_and_target_rows_are_sent_in_their_colours() {
     use crate::sidebar::{RowDrag, Sel};
     use deck_core::model::{PanelId, ProjectId};
     let mut a = ghostty("");
-    // Panel 6 (row 6) is dragged to the place of the first panel (row 3, the active one).
+    // Panel 6 (row 8) is dragged to the place of the first panel (row 3, the active one).
     a.row_drag = Some(RowDrag {
         item: Sel::Panel(ProjectId(1), PanelId(6)),
         to: 0,
@@ -487,7 +494,7 @@ fn the_logos_of_the_dragged_and_target_rows_are_sent_in_their_colours() {
     // The dragged row is dimmed in place; the target's logo moved two columns right and has
     // its normal (band, active) colours.
     for (column, row, style) in [
-        (1, 6, crate::sidebar::dimmed_style(&a.theme, base)),
+        (1, 8, crate::sidebar::dimmed_style(&a.theme, base)),
         (
             3,
             3,
@@ -518,7 +525,7 @@ fn the_unseen_marker_after_the_name_is_an_image_with_a_sent_id() {
     let (buf, rows) = render(&a);
     // ` nvim` then a space: the name starts at column 4.
     let x = 4 + u16::try_from("nvim".len()).unwrap() + 1;
-    let id = placeholder_cell(&buf, x, 4).unwrap_or_else(|| panic!("no unseen image: {}", rows[4]));
+    let id = placeholder_cell(&buf, x, 5).unwrap_or_else(|| panic!("no unseen image: {}", rows[5]));
     let images = a.images.as_ref().unwrap();
     let (_, pair) = *images
         .order

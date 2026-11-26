@@ -8,9 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::AgentsConfig;
 
+mod describe;
 mod opencode;
 
-pub use opencode::{OPENCODE_EVENTS, OpenCodeTracker, OpenCodeUpdate};
+pub use describe::{ACTIVITY_MAX, Activity, clean_activity, describe_hook, describe_status};
+pub use opencode::{OPENCODE_EVENTS, OpenCodeTracker, OpenCodeUpdate, reduce_opencode_event};
 
 /// The agents deck knows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -114,6 +116,8 @@ pub struct AgentState {
     pub first_prompt: Option<String>,
     /// When the status last changed, on the daemon's clock.
     pub since: Duration,
+    /// One line (at most [`ACTIVITY_MAX`] characters) on what the agent does now. Never saved.
+    pub activity: Option<String>,
 }
 
 /// The longest first prompt kept, in characters.
@@ -131,6 +135,8 @@ pub struct HookUpdate {
     pub status: AgentStatus,
     pub session_id: Option<String>,
     pub prompt: Option<String>,
+    /// What the event does to the activity line; `describe_hook` builds it from the payload.
+    pub activity: Activity,
 }
 
 /// The hook events deck installs a hook for, per agent. OpenCode has no hooks of this kind.
@@ -139,6 +145,7 @@ pub fn hook_events(kind: AgentKind) -> &'static [&'static str] {
         AgentKind::Claude => &[
             "SessionStart",
             "UserPromptSubmit",
+            "PreToolUse",
             "PostToolUse",
             "PermissionRequest",
             "Notification",
@@ -148,6 +155,7 @@ pub fn hook_events(kind: AgentKind) -> &'static [&'static str] {
         AgentKind::Codex => &[
             "SessionStart",
             "UserPromptSubmit",
+            "PreToolUse",
             "PostToolUse",
             "PermissionRequest",
             "Stop",
@@ -160,18 +168,19 @@ pub fn hook_events(kind: AgentKind) -> &'static [&'static str] {
 
 /// Maps a Claude Code or Codex hook event to what it tells deck; `None` for events deck
 /// ignores. The `session_id` of the payload is always passed on; the `prompt` only for
-/// `UserPromptSubmit`.
+/// `UserPromptSubmit`; the `activity` as it is.
 pub fn map_hook_event(
     kind: AgentKind,
     event: &str,
     notification_type: Option<&str>,
     session_id: Option<&str>,
     prompt: Option<&str>,
+    activity: Activity,
 ) -> Option<HookUpdate> {
     let status = match (kind, event) {
         (AgentKind::OpenCode, _) => return None,
         (_, "SessionStart") => AgentStatus::Idle,
-        (_, "UserPromptSubmit" | "PostToolUse") => AgentStatus::Working,
+        (_, "UserPromptSubmit" | "PreToolUse" | "PostToolUse") => AgentStatus::Working,
         (_, "PermissionRequest") => AgentStatus::Waiting,
         (_, "SessionEnd") => AgentStatus::None,
         (AgentKind::Claude, "Stop") => AgentStatus::Idle,
@@ -191,6 +200,7 @@ pub fn map_hook_event(
         } else {
             None
         },
+        activity,
     })
 }
 
@@ -503,8 +513,15 @@ mod tests {
         event: &str,
         notification: Option<&str>,
     ) -> Option<(AgentStatus, bool, bool)> {
-        map_hook_event(kind, event, notification, Some("s1"), Some("fix it"))
-            .map(|u| (u.status, u.session_id.is_some(), u.prompt.is_some()))
+        map_hook_event(
+            kind,
+            event,
+            notification,
+            Some("s1"),
+            Some("fix it"),
+            Activity::Keep,
+        )
+        .map(|u| (u.status, u.session_id.is_some(), u.prompt.is_some()))
     }
 
     #[test]
@@ -519,6 +536,7 @@ mod tests {
                 Option::None,
                 (Working, true, true),
             ),
+            (Claude, "PreToolUse", Option::None, (Working, true, false)),
             (Claude, "PostToolUse", Option::None, (Working, true, false)),
             (
                 Claude,
@@ -553,6 +571,7 @@ mod tests {
                 Option::None,
                 (Working, true, true),
             ),
+            (Codex, "PreToolUse", Option::None, (Working, true, false)),
             (Codex, "PostToolUse", Option::None, (Working, true, false)),
             (
                 Codex,
@@ -573,13 +592,11 @@ mod tests {
     fn other_hook_events_are_ignored() {
         use AgentKind::{Claude, Codex, OpenCode};
         for (kind, event, notification) in [
-            (Claude, "PreToolUse", None),
             (Claude, "Notification", Some("auth_success")),
             (Claude, "Notification", Some("elicitation_complete")),
             (Claude, "Notification", None),
             (Claude, "Interrupt", None),
             (Codex, "Notification", Some("idle_prompt")),
-            (Codex, "PreToolUse", None),
             (OpenCode, "Stop", None),
         ] {
             assert_eq!(map(kind, event, notification), None, "{kind:?} {event}");
@@ -588,13 +605,21 @@ mod tests {
 
     #[test]
     fn a_missing_payload_field_is_not_recorded() {
-        let update = map_hook_event(AgentKind::Claude, "UserPromptSubmit", None, None, None);
+        let update = map_hook_event(
+            AgentKind::Claude,
+            "UserPromptSubmit",
+            None,
+            None,
+            None,
+            Activity::Keep,
+        );
         assert_eq!(
             update,
             Some(HookUpdate {
                 status: AgentStatus::Working,
                 session_id: None,
-                prompt: None
+                prompt: None,
+                activity: Activity::Keep,
             })
         );
     }

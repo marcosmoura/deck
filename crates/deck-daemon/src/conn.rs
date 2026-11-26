@@ -13,6 +13,7 @@ use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::task::JoinSet;
 
+use crate::agents::Event;
 use crate::env::{Env, lookup};
 use crate::queue::{Next, Queue};
 use crate::server::{AttachRequest, ClientId, Shared, WriterGuard};
@@ -339,9 +340,19 @@ async fn dispatch(
             session_id,
             prompt,
             raw,
+            activity,
+            at_ms,
         })) => {
+            let event = Event {
+                kind,
+                status,
+                session_id,
+                prompt,
+                activity,
+                at_ms,
+            };
             queue.push_msg(ServerMsg::Response(
-                shared.agent_event(terminal, kind, status, session_id, prompt, raw),
+                shared.agent_event(terminal, event, raw),
             ));
         }
         Ok(ClientMsg::Action(action)) => {

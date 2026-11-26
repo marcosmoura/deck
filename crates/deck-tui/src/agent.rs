@@ -124,6 +124,23 @@ pub fn next_attention(view: &SessionView) -> Option<(PanelId, TerminalId)> {
         .map(|(p, t)| (p.id, t.id))
 }
 
+/// The terminal of one panel that needs the user: a waiting one, else an idle one when the
+/// panel is unseen. `None` when the panel needs nothing (already seen, or nobody waits).
+pub fn panel_attention(panel: &PanelView) -> Option<TerminalId> {
+    let status = |t: &TerminalView| t.agent.as_ref().map(|a| a.status);
+    panel
+        .terminals
+        .iter()
+        .find(|t| status(t) == Some(AgentStatus::Waiting))
+        .or_else(|| {
+            panel
+                .terminals
+                .iter()
+                .find(|t| panel.unseen && status(t) == Some(AgentStatus::Idle))
+        })
+        .map(|t| t.id)
+}
+
 /// The text a desktop notification carries: what the agent did, and where.
 fn alert_body(kind: AgentKind, status: AgentStatus, project: &str, panel: &str) -> Option<String> {
     let what = match status {

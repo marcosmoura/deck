@@ -653,6 +653,7 @@ mod tests {
             session_id: Some("abc".into()),
             first_prompt: Some("hi".into()),
             since: std::time::Duration::ZERO,
+            activity: None,
         });
         let saved = TerminalState::from_model(&t);
         let resume = AgentResume {

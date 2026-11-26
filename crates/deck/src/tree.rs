@@ -355,6 +355,7 @@ fn terminal_json(panel: &PanelView, index: usize, t: &TerminalView) -> Value {
             "status": a.status.name(),
             "source": a.source.name(),
             "session_id": a.session_id,
+            "activity": a.activity,
         })),
     })
 }
@@ -972,6 +973,7 @@ mod tests {
             session_id: Some("ses_1".into()),
             first_prompt: Some("hi".into()),
             since: std::time::Duration::ZERO,
+            activity: Some("running tests".into()),
         });
         let doc = tree_json(&[s]);
         assert_eq!(
@@ -981,6 +983,7 @@ mod tests {
                 "status": "waiting",
                 "source": "hooks",
                 "session_id": "ses_1",
+                "activity": "running tests",
             })
         );
     }

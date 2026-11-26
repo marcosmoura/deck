@@ -186,6 +186,7 @@ mod tests {
             session_id: None,
             first_prompt: prompt.map(Into::into),
             since: Duration::ZERO,
+            activity: None,
         }
     }
 
