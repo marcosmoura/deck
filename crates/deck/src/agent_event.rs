@@ -12,11 +12,11 @@ use clap::Parser;
 use deck_core::agents::{
     Activity, AgentKind, clip_prompt, describe_hook, map_hook_event, reduce_opencode_event,
 };
-use deck_core::model::TerminalId;
-use deck_core::protocol::Request;
+use deck_core::model::{SessionView, TerminalId};
+use deck_core::protocol::{Request, Response};
 use serde_json::Value;
 
-use crate::control::{Conn, checked_paths, control_socket};
+use crate::control::{Conn, Outcome, checked_paths, control_socket};
 
 /// The whole run, stdin and the daemon's answer included.
 pub const BUDGET: Duration = Duration::from_millis(500);
@@ -124,6 +124,63 @@ fn request(
     })
 }
 
+/// The terminal a Codex event is about. Codex runs its hooks in one background server shared
+/// by every Codex on the machine, started with the environment of the terminal that started
+/// it first, so `DECK_TERMINAL_ID` names that terminal, which may be another one or gone. The
+/// event goes instead to the Codex terminal that already has its session; else to a Codex
+/// terminal in the event's directory, else in any: one without a session first, then the
+/// focused terminal of an attached session (where the user just started Codex or typed a
+/// prompt), then the one the environment names. With no Codex terminal, the environment's.
+fn route(
+    tree: &[SessionView],
+    kind: AgentKind,
+    named: TerminalId,
+    session_id: Option<&str>,
+    cwd: Option<&std::path::Path>,
+) -> TerminalId {
+    struct Seen<'a> {
+        id: TerminalId,
+        session: Option<&'a str>,
+        cwd: Option<&'a std::path::Path>,
+        focused: bool,
+    }
+    let agents: Vec<Seen> = tree
+        .iter()
+        .flat_map(|s| {
+            s.projects.iter().flat_map(move |p| {
+                p.panels.iter().flat_map(move |panel| {
+                    let shown = s.attached_clients > 0 && s.active_panel == Some(panel.id);
+                    panel.terminals.iter().filter_map(move |t| {
+                        let agent = t.agent.as_ref().filter(|a| a.kind == kind)?;
+                        Some(Seen {
+                            id: t.id,
+                            session: agent.session_id.as_deref(),
+                            cwd: t.cwd.as_deref(),
+                            focused: shown && panel.focused_terminal == Some(t.id),
+                        })
+                    })
+                })
+            })
+        })
+        .collect();
+    if let Some(sid) = session_id
+        && let Some(a) = agents.iter().find(|a| a.session == Some(sid))
+    {
+        return a.id;
+    }
+    let best = |pool: Vec<&Seen>| {
+        pool.into_iter()
+            .max_by_key(|a| (a.session.is_none(), a.focused, a.id == named))
+            .map(|a| a.id)
+    };
+    let here = cwd.map_or_else(Vec::new, |cwd| {
+        agents.iter().filter(|a| a.cwd == Some(cwd)).collect()
+    });
+    best(here)
+        .or_else(|| best(agents.iter().collect()))
+        .unwrap_or(named)
+}
+
 /// Unix milliseconds now; 0 when the clock is before 1970.
 fn unix_ms() -> u64 {
     SystemTime::now()
@@ -143,10 +200,28 @@ fn send(args: &AgentEventArgs) -> Option<()> {
         .and_then(|v| v.parse().ok())
         .map(TerminalId)?;
     let kind = AgentKind::parse(&args.agent)?;
-    let request = request(terminal, kind, args.event.as_deref(), &payload, at_ms)?;
+    // Built first: an event deck ignores costs no connection.
+    request(terminal, kind, args.event.as_deref(), &payload, at_ms)?;
     let remaining = BUDGET.checked_sub(start.elapsed())?;
     let paths = checked_paths().ok()?;
     let mut conn = Conn::open(&control_socket(&paths), remaining.max(TICK)).ok()?;
+    let terminal = if kind == AgentKind::Codex {
+        let doc: Value = serde_json::from_slice(&payload).unwrap_or(Value::Null);
+        let field = |name: &str| doc.get(name).and_then(Value::as_str);
+        match conn.control(Request::Tree { session: None }) {
+            Outcome::Response(Response::Tree(tree)) => route(
+                &tree,
+                kind,
+                terminal,
+                field("session_id"),
+                field("cwd").map(std::path::Path::new),
+            ),
+            _ => terminal,
+        }
+    } else {
+        terminal
+    };
+    let request = request(terminal, kind, args.event.as_deref(), &payload, at_ms)?;
     let _ = conn.control(request);
     Some(())
 }
@@ -345,5 +420,127 @@ mod tests {
             panic!("no line");
         };
         assert_eq!(line, "z".repeat(80));
+    }
+
+    /// A session (attached when `attached`) whose panel `i` holds terminal `t` with an agent
+    /// of `kind` in `cwd`, with `session`; panel 1 is active and focused on its terminal.
+    fn tree(
+        attached: bool,
+        terminals: &[(u64, AgentKind, Option<&str>, &str)],
+    ) -> Vec<SessionView> {
+        use deck_core::agents::{AgentSource, AgentState};
+        use deck_core::layout::Ratios;
+        use deck_core::model::{
+            NameSource, PanelId, PanelView, ProjectId, ProjectView, SessionId, TerminalView,
+        };
+        let panels = terminals
+            .iter()
+            .enumerate()
+            .map(|(i, (t, kind, session, cwd))| PanelView {
+                id: PanelId(100 + i as u64),
+                name: format!("p{i}"),
+                name_source: NameSource::Auto,
+                terminals: vec![TerminalView {
+                    id: TerminalId(*t),
+                    program: kind.name().into(),
+                    title: None,
+                    cwd: Some(std::path::PathBuf::from(cwd)),
+                    exit_status: None,
+                    pid: None,
+                    keep: false,
+                    agent: Some(AgentState {
+                        kind: *kind,
+                        status: AgentStatus::Quiet,
+                        source: AgentSource::Process,
+                        session_id: session.map(str::to_string),
+                        first_prompt: None,
+                        since: Duration::ZERO,
+                        activity: None,
+                    }),
+                    busy: false,
+                }],
+                focused_terminal: Some(TerminalId(*t)),
+                ratios: Ratios::default_for(1),
+                unseen: false,
+            })
+            .collect();
+        vec![SessionView {
+            id: SessionId(1),
+            name: "main".into(),
+            projects: vec![ProjectView {
+                id: ProjectId(2),
+                name: "deck".into(),
+                root: "/p".into(),
+                collapsed: false,
+                panels,
+                active_panel: Some(PanelId(101)),
+            }],
+            active_project: Some(ProjectId(2)),
+            active_panel: Some(PanelId(101)),
+            layout_viewport: None,
+            attached_clients: u32::from(attached),
+        }]
+    }
+
+    const CX: AgentKind = AgentKind::Codex;
+    const GONE: TerminalId = TerminalId(99);
+
+    fn at(cwd: &str) -> Option<&std::path::Path> {
+        Some(std::path::Path::new(cwd))
+    }
+
+    #[test]
+    fn a_codex_event_goes_to_the_terminal_with_its_session() {
+        let t = tree(
+            true,
+            &[(10, CX, Some("a"), "/p"), (11, CX, Some("b"), "/p")],
+        );
+        assert_eq!(route(&t, CX, GONE, Some("a"), at("/p")), TerminalId(10));
+        assert_eq!(
+            route(&t, CX, GONE, Some("b"), at("/elsewhere")),
+            TerminalId(11)
+        );
+    }
+
+    #[test]
+    fn a_new_codex_session_goes_to_a_terminal_in_its_directory_without_one() {
+        // The terminal in another directory is not a candidate while one in this one is.
+        let t = tree(
+            true,
+            &[
+                (10, CX, None, "/other"),
+                (11, CX, Some("old"), "/p"),
+                (12, CX, None, "/p"),
+            ],
+        );
+        assert_eq!(route(&t, CX, GONE, Some("new"), at("/p")), TerminalId(12));
+        // In this directory only one with a session: it is the one (a `/new` in it).
+        let t = tree(
+            true,
+            &[(10, CX, None, "/other"), (11, CX, Some("old"), "/p")],
+        );
+        assert_eq!(route(&t, CX, GONE, Some("new"), at("/p")), TerminalId(11));
+    }
+
+    #[test]
+    fn between_equal_codex_terminals_the_focused_one_wins() {
+        // Panel 1 (terminal 11) is the active panel of an attached session.
+        let t = tree(true, &[(10, CX, None, "/p"), (11, CX, None, "/p")]);
+        assert_eq!(route(&t, CX, GONE, Some("new"), at("/p")), TerminalId(11));
+        // Detached: nobody focuses anything, the environment's terminal breaks the tie.
+        let t = tree(false, &[(10, CX, None, "/p"), (11, CX, None, "/p")]);
+        assert_eq!(
+            route(&t, CX, TerminalId(10), Some("new"), at("/p")),
+            TerminalId(10)
+        );
+    }
+
+    #[test]
+    fn with_no_codex_terminal_the_environments_terminal_is_kept() {
+        let t = tree(true, &[(10, AgentKind::Claude, None, "/p")]);
+        assert_eq!(route(&t, CX, GONE, Some("new"), at("/p")), GONE);
+        // A Codex terminal in another directory is still better than a dead one.
+        let t = tree(true, &[(10, CX, None, "/other")]);
+        assert_eq!(route(&t, CX, GONE, Some("new"), at("/p")), TerminalId(10));
     }
 }

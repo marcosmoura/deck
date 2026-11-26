@@ -167,6 +167,38 @@ fn opencode_event(h: &Harness, terminal: TerminalId, event: &Value) {
 }
 
 #[test]
+fn a_codex_event_from_another_terminals_environment_reaches_the_codex_terminal() {
+    // Codex runs its hooks in a server shared by every Codex, with the environment of the
+    // terminal that started it: here one that is long gone.
+    let bin = fake_agent("codex");
+    let mut h = attached(&bin);
+    h.send_keys("codex\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    wait_until("codex found by its process", TIMEOUT, || {
+        agent_json(&h)["kind"] == "codex"
+    });
+    let gone = TerminalId(999_999);
+    let mut cmd = h.home().deck_command(&["agent-event", "--agent", "codex"]);
+    let mut child = cmd
+        .env("DECK_TERMINAL_ID", gone.0.to_string())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let payload = serde_json::json!({"hook_event_name": "UserPromptSubmit", "session_id": "thr_1", "prompt": "ping"});
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+    wait_until("working from hooks", TIMEOUT, || {
+        let a = agent_json(&h);
+        a["status"] == "working" && a["source"] == "hooks" && a["session_id"] == "thr_1"
+    });
+}
+
+#[test]
 fn opencode_events_set_the_status_and_the_line() {
     let bin = fake_agent("opencode");
     let mut h = attached(&bin);
