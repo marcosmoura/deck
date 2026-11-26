@@ -16,10 +16,17 @@ use super::{Activity, AgentStatus, clean_activity, clip_prompt};
 ///
 /// The plugin subscribes to the v2 ones; the tracker also reads the v1 `session.updated`,
 /// `message.updated` and `message.part.updated`, for a v1 plugin that is still installed.
-pub const OPENCODE_EVENTS: [&str; 9] = [
+pub const OPENCODE_EVENTS: [&str; 16] = [
     "session.created",
     "session.status",
     "session.idle",
+    "session.execution.started",
+    "session.execution.succeeded",
+    "session.execution.interrupted",
+    "session.execution.failed",
+    "form.created",
+    "form.replied",
+    "form.cancelled",
     "permission.asked",
     "permission.replied",
     "session.inbox.enqueued",
@@ -201,6 +208,18 @@ pub fn reduce_opencode_event(doc: &Value) -> Value {
                 out.insert("resources".into(), json!([r]));
             }
         }
+        "form.created" => {
+            let form = props.get("form").unwrap_or(&Value::Null);
+            let mut kept = serde_json::Map::new();
+            put(form, &["id", "sessionID"], &mut kept);
+            let title = text(form, &["title"])
+                .or_else(|| form.pointer("/fields/0/title").and_then(Value::as_str))
+                .and_then(clean_activity);
+            if let Some(t) = title {
+                kept.insert("title".into(), json!(t));
+            }
+            out.insert("form".into(), Value::Object(kept));
+        }
         "session.inbox.enqueued" => {
             put(props, &["sessionID", "inboxID"], &mut out);
             let item = props.get("item").unwrap_or(&Value::Null);
@@ -274,6 +293,16 @@ impl OpenCodeTracker {
         })
     }
 
+    /// A turn started: `thinking`, unless a tool of the turn already gave the line.
+    fn turn_start(&mut self) -> Activity {
+        if self.turn_tool {
+            Activity::Keep
+        } else {
+            self.last_text = None;
+            Activity::Set("thinking".to_string())
+        }
+    }
+
     /// The turn ended: the line is its last text, else `done`.
     fn turn_end(&mut self) -> Activity {
         self.turn_tool = false;
@@ -313,12 +342,22 @@ impl OpenCodeTracker {
             return None;
         }
         let session = text(props, &["sessionID"])
+            .or_else(|| text(props, &["form", "sessionID"]))
             .or_else(|| text(props, &["info", "sessionID"]))
             .or_else(|| text(props, &["part", "sessionID"]));
         let child = session.is_some_and(|s| self.is_child(s));
         // A subagent's events are dropped, except that its permission prompts still need the
         // user. They carry no session id: the root's resumable one is kept.
-        if child && !matches!(kind, "permission.asked" | "permission.replied") {
+        if child
+            && !matches!(
+                kind,
+                "permission.asked"
+                    | "permission.replied"
+                    | "form.created"
+                    | "form.replied"
+                    | "form.cancelled"
+            )
+        {
             return None;
         }
         let status = |status, activity| {
@@ -330,20 +369,37 @@ impl OpenCodeTracker {
             })
         };
         match kind {
+            // v2.4 marks a turn with `session.execution.*`; earlier v2 with `session.status`.
             "session.status" => match text(props, &["status", "type"])? {
-                "busy" => {
-                    let activity = if self.turn_tool {
-                        Activity::Keep
-                    } else {
-                        self.last_text = None;
-                        Activity::Set("thinking".to_string())
-                    };
-                    status(AgentStatus::Working, activity)
-                }
+                "busy" => status(AgentStatus::Working, self.turn_start()),
                 "idle" => status(AgentStatus::Idle, self.turn_end()),
                 _ => None,
             },
-            "session.idle" => status(AgentStatus::Idle, self.turn_end()),
+            "session.execution.started" => status(AgentStatus::Working, self.turn_start()),
+            "session.idle" | "session.execution.succeeded" => {
+                status(AgentStatus::Idle, self.turn_end())
+            }
+            "session.execution.interrupted" | "session.execution.failed" => {
+                self.turn_end();
+                let word = kind.trim_start_matches("session.execution.");
+                status(AgentStatus::Idle, Activity::Set(word.to_string()))
+            }
+            // A question for the user: a form, by its title or its first field's.
+            "form.created" => {
+                let title = text(props, &["form", "title"])
+                    .or_else(|| {
+                        props
+                            .pointer("/form/fields/0/title")
+                            .and_then(Value::as_str)
+                    })
+                    .and_then(clean_activity);
+                let activity = match title {
+                    Some(t) => line_activity(&format!("asking: {t}")),
+                    None => Activity::Set("asking a question".to_string()),
+                };
+                status(AgentStatus::Waiting, activity)
+            }
+            "form.replied" | "form.cancelled" => status(AgentStatus::Working, Activity::Clear),
             "permission.asked" => {
                 // v2 names the tool in `action` and the call in `source.id`; v1 in `permission`
                 // and `tool.callID`.
@@ -1095,5 +1151,87 @@ mod tests {
             let doc: Value = serde_json::from_str(raw).unwrap();
             assert_eq!(reduce_opencode_event(&doc), doc, "{raw}");
         }
+    }
+
+    /// OpenCode v2.4 marks a turn with `session.execution.*` and asks with forms; the shapes
+    /// the herdr integration (v13) reads from a v2.4.2 TUI: `data.sessionID`, and a form's
+    /// session in `data.form.sessionID`.
+    #[test]
+    fn v2_4_turns_and_forms_set_the_status_and_the_line() {
+        let mut t = OpenCodeTracker::default();
+        let ev = |kind: &str, data: Value| json!({"type": kind, "data": data});
+        let s1 = || json!({"sessionID": "ses_1"});
+        assert_eq!(
+            t.feed(&ev("session.execution.started", s1())),
+            update(Some(AgentStatus::Working), Some("ses_1"))
+        );
+        t.feed(&ev(
+            "deck.text",
+            json!({"sessionID": "ses_1", "text": "Pong. I am here"}),
+        ));
+        assert_eq!(
+            t.feed(&ev("session.execution.succeeded", s1())),
+            update_with(
+                Some(AgentStatus::Idle),
+                Some("ses_1"),
+                Activity::Set("Pong. I am here".into())
+            )
+        );
+        assert_eq!(
+            t.feed(&ev("session.execution.interrupted", s1())),
+            update_with(
+                Some(AgentStatus::Idle),
+                Some("ses_1"),
+                Activity::Set("interrupted".into())
+            )
+        );
+        assert_eq!(
+            t.feed(&ev("session.execution.failed", s1())),
+            update_with(
+                Some(AgentStatus::Idle),
+                Some("ses_1"),
+                Activity::Set("failed".into())
+            )
+        );
+        let form = json!({"form": {"id": "frm_1", "sessionID": "ses_1", "title": "Pick a model"}});
+        assert_eq!(
+            t.feed(&ev("form.created", form)),
+            update_with(
+                Some(AgentStatus::Waiting),
+                Some("ses_1"),
+                Activity::Set("asking: Pick a model".into())
+            )
+        );
+        let untitled = json!({"form": {"id": "frm_2", "sessionID": "ses_1"}});
+        assert_eq!(
+            t.feed(&ev("form.created", untitled)),
+            update_with(
+                Some(AgentStatus::Waiting),
+                Some("ses_1"),
+                Activity::Set("asking a question".into())
+            )
+        );
+        assert_eq!(
+            t.feed(&ev(
+                "form.replied",
+                json!({"sessionID": "ses_1", "id": "frm_2"})
+            )),
+            update_with(Some(AgentStatus::Working), Some("ses_1"), Activity::Clear)
+        );
+    }
+
+    #[test]
+    fn a_form_is_reduced_to_its_ids_and_title() {
+        let doc = json!({"type": "form.created", "data": {"form": {
+            "id": "frm_1", "sessionID": "ses_1", "title": "Pick SECRET-MARKER",
+            "fields": [{"key": "k", "title": "Which one", "description": "SECRET-MARKER-2"}]
+        }}});
+        let reduced = reduce_opencode_event(&doc).to_string();
+        assert!(
+            reduced.contains("frm_1") && reduced.contains("ses_1"),
+            "{reduced}"
+        );
+        assert!(!reduced.contains("SECRET-MARKER-2"), "{reduced}");
+        assert!(!reduced.contains("fields"), "{reduced}");
     }
 }

@@ -145,6 +145,76 @@ fn hook(h: &Harness, terminal: TerminalId, payload: &Value) {
     assert!(child.wait().unwrap().success());
 }
 
+/// What the OpenCode plugin runs for one event: `deck agent-event --agent opencode --event
+/// <type>` with the event on stdin.
+fn opencode_event(h: &Harness, terminal: TerminalId, event: &Value) {
+    let kind = event["type"].as_str().unwrap();
+    let mut cmd = h
+        .home()
+        .deck_command(&["agent-event", "--agent", "opencode", "--event", kind]);
+    let mut child = cmd
+        .env("DECK_TERMINAL_ID", terminal.0.to_string())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(event.to_string().as_bytes())
+        .unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn opencode_events_set_the_status_and_the_line() {
+    let bin = fake_agent("opencode");
+    let mut h = attached(&bin);
+    h.send_keys("opencode\r");
+    h.wait_for_text("agent-ready", TIMEOUT);
+    let terminal = terminal_id(&h);
+    // OpenCode v2.4 marks a turn with `session.execution.*`.
+    let turn = |s: &str| serde_json::json!({"type": format!("session.execution.{s}"), "data": {"sessionID": "ses_1"}});
+
+    opencode_event(&h, terminal, &turn("started"));
+    wait_until("working from hooks", TIMEOUT, || {
+        let a = agent_json(&h);
+        a["status"] == "working" && a["source"] == "hooks"
+    });
+    assert_eq!(agent_json(&h)["activity"], "thinking");
+
+    opencode_event(
+        &h,
+        terminal,
+        &serde_json::json!({"type": "session.tool.called", "data": {"sessionID": "ses_1", "id": "call_1", "name": "shell", "input": {"command": "cargo test"}}}),
+    );
+    wait_until("the tool line", TIMEOUT, || {
+        agent_json(&h)["activity"] == "running cargo test"
+    });
+
+    opencode_event(
+        &h,
+        terminal,
+        &serde_json::json!({"type": "deck.text", "data": {"sessionID": "ses_1", "text": "All tests pass"}}),
+    );
+    opencode_event(&h, terminal, &turn("succeeded"));
+    wait_until("idle with the last text", TIMEOUT, || {
+        let a = agent_json(&h);
+        a["status"] == "idle" && a["activity"] == "All tests pass"
+    });
+
+    // A question for the user is a form.
+    opencode_event(
+        &h,
+        terminal,
+        &serde_json::json!({"type": "form.created", "data": {"form": {"id": "frm_1", "sessionID": "ses_1", "title": "Pick a model"}}}),
+    );
+    wait_until("waiting on the question", TIMEOUT, || {
+        let a = agent_json(&h);
+        a["status"] == "waiting" && a["activity"] == "asking: Pick a model"
+    });
+}
+
 #[test]
 fn a_hook_sequence_shows_its_activity_in_ls() {
     let bin = fake_agent("claude");

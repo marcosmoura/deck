@@ -93,7 +93,8 @@ export default {
       if (!EVENTS.has(event.type)) return;
       if (own.size > 512) own.clear();
       sync();
-      const id = event.data?.sessionID;
+      // A form (a question for the user) names its session inside it.
+      const id = event.data?.sessionID ?? event.data?.form?.sessionID;
       if (event.type === "session.created" && own.has(event.data?.parentID)) claim(id);
       if (!own.has(id)) return;
       const data = event.data;
@@ -116,8 +117,14 @@ export default {
         return;
       }
       const state = data.status?.type;
-      if (state === "busy") texts.delete(id);
-      if ((event.type === "session.idle" || state === "idle") && texts.has(id)) {
+      // A turn starts with `session.execution.started` (v2.4) or a busy status, and ends with
+      // `session.execution.succeeded` or an idle status: the turn's last text goes just before.
+      if (state === "busy" || event.type === "session.execution.started") texts.delete(id);
+      const ended =
+        event.type === "session.idle" ||
+        event.type === "session.execution.succeeded" ||
+        state === "idle";
+      if (ended && texts.has(id)) {
         forward({ type: "deck.text", data: { sessionID: id, text: texts.get(id) } });
         texts.delete(id);
       }
