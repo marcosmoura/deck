@@ -147,7 +147,7 @@ fn reduce_input(input: &Value) -> Value {
 /// The event as the daemon needs it, before it leaves `deck agent-event`: the type, the
 /// session ids and the status fields stay as they are; a tool event keeps only the tool's
 /// name and its reduced input ([`reduce_input`]), a text event only the first line of its text
-/// (80 characters; 200 for a v1 part, which can be the prompt). Other events pass unchanged.
+/// ([`ACTIVITY_MAX`](super::ACTIVITY_MAX) characters; 200 for a v1 part, which can be the prompt). Other events pass unchanged.
 /// Handles v2's `{ "type", "data" }` and v1's `{ "type", "properties" }`.
 pub fn reduce_opencode_event(doc: &Value) -> Value {
     let Some(kind) = text(doc, &["type"]) else {
@@ -1072,10 +1072,13 @@ mod tests {
         assert!(!reduce_opencode_event(&v1).to_string().contains(marker));
 
         let text = serde_json::json!({"type":"deck.text","data":{"sessionID":"s1",
-            "text":format!("{}\n{marker}", "a".repeat(200))}});
+            "text":format!("{}\n{marker}", "a".repeat(600))}});
         let reduced = reduce_opencode_event(&text);
         assert!(!reduced.to_string().contains(marker));
-        assert_eq!(reduced["data"]["text"].as_str().map(str::len), Some(80));
+        assert_eq!(
+            reduced["data"]["text"].as_str().map(str::len),
+            Some(crate::agents::ACTIVITY_MAX)
+        );
         let ended = serde_json::json!({"type":"session.text.ended","data":{"sessionID":"s1",
             "assistantMessageID":"m","text":format!("first\n{marker}")}});
         assert_eq!(

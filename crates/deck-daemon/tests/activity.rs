@@ -99,10 +99,14 @@ async fn a_hook_sequence_shows_the_line_of_each_step() {
     assert_eq!(line(&c, t).as_deref(), Some("all done"));
 
     // A raw request is cleaned and cut by the daemon.
-    let raw = format!("\u{1b}  {}\nsecond", "y".repeat(300));
+    let raw = format!("\u{1b}  {}\nsecond", "y".repeat(600));
     event(&mut c, t, None, Activity::Set(raw), 0).await;
-    c.wait(|c| line(c, t).is_some_and(|l| l.chars().count() == 80 && l.starts_with("yyy")))
-        .await;
+    c.wait(|c| {
+        line(c, t).is_some_and(|l| {
+            l.chars().count() == deck_core::agents::ACTIVITY_MAX && l.starts_with("yyy")
+        })
+    })
+    .await;
 
     // SessionEnd clears the state, and its line with it.
     event(&mut c, t, Some(AgentStatus::None), Activity::Clear, 0).await;

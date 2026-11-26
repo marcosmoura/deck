@@ -409,7 +409,7 @@ mod tests {
         // A very long line is cut by the sender already.
         let long = serde_json::json!({
             "hook_event_name": "Stop",
-            "last_assistant_message": format!("{}\nmore", "z".repeat(400)),
+            "last_assistant_message": format!("{}\nmore", "z".repeat(600)),
         })
         .to_string();
         let Some(Request::AgentEvent {
@@ -419,7 +419,7 @@ mod tests {
         else {
             panic!("no line");
         };
-        assert_eq!(line, "z".repeat(80));
+        assert_eq!(line, "z".repeat(deck_core::agents::ACTIVITY_MAX));
     }
 
     /// A session (attached when `attached`) whose panel `i` holds terminal `t` with an agent

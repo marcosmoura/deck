@@ -495,7 +495,7 @@ mod tests {
         ));
         assert_eq!(line(&agent), Some("thinking"));
         // Set replaces it, with the line cleaned and cut again.
-        let raw = format!("\u{1b}[31m{}\nsecond line", "x".repeat(200));
+        let raw = format!("\u{1b}[31m{}\nsecond line", "x".repeat(600));
         assert!(apply_event(
             &mut agent,
             &mut rt,
@@ -503,7 +503,7 @@ mod tests {
             secs(3)
         ));
         let shown = line(&agent).unwrap();
-        assert_eq!(shown.chars().count(), 80);
+        assert_eq!(shown.chars().count(), deck_core::agents::ACTIVITY_MAX);
         assert!(shown.starts_with("[31mxxx") && !shown.contains('\n'));
         // A blank line clears; so does Clear.
         apply_event(

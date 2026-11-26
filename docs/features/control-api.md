@@ -108,7 +108,7 @@ All four take `--terminal <id>`. Without it the target is the calling terminal (
 }
 ```
 
-`program` is the name of the foreground process (`nvim`, `claude`, the shell's name), kept as it was when the process cannot be read. A panel named after what runs in it has `name_source` `auto`. `agent` is `null` or `{ "kind", "status", "source", "session_id", "activity" }`; `activity` is the one-line description of what the agent does now (at most 80 characters, from its hook events; `null` when unknown), and, like the titles, it is untrusted text ([agents](agents.md#hook-events)). `pid` is null for a terminal that has exited; `exited` is the exit code (a death by signal `n` is `128 + n`) or null. `cwd` is the directory the program reported (OSC 7), else the one the daemon finds by polling the process every 5 s, else the directory it was launched in.
+`program` is the name of the foreground process (`nvim`, `claude`, the shell's name), kept as it was when the process cannot be read. A panel named after what runs in it has `name_source` `auto`. `agent` is `null` or `{ "kind", "status", "source", "session_id", "activity" }`; `activity` is the one-line description of what the agent does now (at most 400 characters, from its hook events; `null` when unknown), and, like the titles, it is untrusted text ([agents](agents.md#hook-events)). `pid` is null for a terminal that has exited; `exited` is the exit code (a death by signal `n` is `128 + n`) or null. `cwd` is the directory the program reported (OSC 7), else the one the daemon finds by polling the process every 5 s, else the directory it was launched in.
 
 ## Agent events
 

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::{AgentKind, AgentStatus};
 
 /// The longest activity line kept, in characters.
-pub const ACTIVITY_MAX: usize = 80;
+pub const ACTIVITY_MAX: usize = 400;
 
 /// What an event does to a terminal's activity line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -552,7 +552,7 @@ mod tests {
         assert_eq!(clean_activity("\n\n  \n x "), Some("x".into()));
         assert_eq!(clean_activity(" \u{7}\n"), None);
         assert_eq!(clean_activity(""), None);
-        let long = "é".repeat(200);
+        let long = "é".repeat(600);
         assert_eq!(
             clean_activity(&long).map(|l| l.chars().count()),
             Some(ACTIVITY_MAX)
@@ -560,7 +560,7 @@ mod tests {
         let big = describe_hook(
             AgentKind::Claude,
             "PreToolUse",
-            &json!({"tool_name": "Bash", "tool_input": {"command": "x".repeat(500)}}),
+            &json!({"tool_name": "Bash", "tool_input": {"command": "x".repeat(1000)}}),
         );
         assert_eq!(line(big).chars().count(), ACTIVITY_MAX);
     }
