@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0](https://github.com/marcosmoura/deck/compare/v0.3.0...v0.4.0) (2026-11-26)
+
+### Features
+
+- agent activity in the sidebar (DECK-50) ([3274f28](https://github.com/marcosmoura/deck/commit/3274f287cdffef4ebae4ba010af8444d45c37169))
+- keep agent activity lines up to 400 characters ([5f3e5f1](https://github.com/marcosmoura/deck/commit/5f3e5f142e4b7862fb202c9667febb36ebb3588c))
+- notification clicks focus the terminal and raise its window (DECK-52) ([a962983](https://github.com/marcosmoura/deck/commit/a962983e344775fec4f416735b35838bd1e376c6))
+- notifications that open their panel (DECK-51) ([64a85c1](https://github.com/marcosmoura/deck/commit/64a85c13c7dace0d0488186bee251180db277414))
+- security, privacy and performance reviews (DECK-26) ([9aedd08](https://github.com/marcosmoura/deck/commit/9aedd0866431abf6f738911b6d11bab146e30ecd))
+- show a loader in the sidebar while a command runs ([904a92d](https://github.com/marcosmoura/deck/commit/904a92d01a96a14f4de94ae78ba5d4d966f43c9a))
+- **tui:** draw the loader as eight fading spokes at 8 frames a second ([ceff9b2](https://github.com/marcosmoura/deck/commit/ceff9b2867cfcaf0d3145e6997dcc242ac099b13))
+- **tui:** show cut sidebar text in full on hover ([8377d77](https://github.com/marcosmoura/deck/commit/8377d772f769840b1cf1dbc4576b7132fc9aa670))
+- **tui:** wrap the sidebar tooltip to five lines ([48225c5](https://github.com/marcosmoura/deck/commit/48225c50809d84210cc832037795fafdfec7d926))
+
+### Bug Fixes
+
+- **cli:** send codex events to the codex terminal ([7fc63ad](https://github.com/marcosmoura/deck/commit/7fc63ad99ff075b34183488436fb2835546ef7a6))
+- **cli:** show the daemon's refusal when it hangs up before the request ([227a1b0](https://github.com/marcosmoura/deck/commit/227a1b0b94a6c028e3b131607469a3cb5e6ba370))
+- **core:** drop Codex's folder from panel names ([0f0f070](https://github.com/marcosmoura/deck/commit/0f0f070028f24426b72f79f39f28ddf3b6f8570a))
+- **core:** drop OpenCode's OC prefix from panel names ([995bc41](https://github.com/marcosmoura/deck/commit/995bc4112261a01cadd20e4dd041a913a5c23b88))
+- **daemon:** reap the opencode listings a timeout or a closed connection stops ([56892d3](https://github.com/marcosmoura/deck/commit/56892d318e15354802229e8c08dbe50741795e6e))
+- opencode status from v2.4 turn events ([a387276](https://github.com/marcosmoura/deck/commit/a387276840b9fd7a8bda6c13e2bed1bbf451fdf6))
+- **tui:** draw each frame inside synchronized output ([16f2328](https://github.com/marcosmoura/deck/commit/16f23284765e32e11245e250107dc6a290b50dcf))
+
 ## [0.3.0](https://github.com/marcosmoura/deck/compare/v0.2.0...v0.3.0) (2026-11-25)
 
 ### Features
