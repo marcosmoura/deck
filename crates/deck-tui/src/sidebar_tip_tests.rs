@@ -92,6 +92,25 @@ fn rest(a: &mut App, row: u16, start: Instant, after: Duration) -> Buffer {
     buffer(a)
 }
 
+/// The texts the tooltip shows on `rows`, joined by spaces. With `NAME` (54 cells) and
+/// `ACTIVITY` from column 4, the box may be a quarter narrower than 55 cells: 41, so a line
+/// holds 40 and the name takes rows 3 and 4, the activity rows 5 and 6. The longest line has
+/// 38 cells, so the box ends at column 43: only what is inside it is read.
+fn tip(buf: &Buffer, rows: std::ops::Range<u16>) -> String {
+    rows.map(|y| {
+        line(buf, y)
+            .chars()
+            .skip(4)
+            .take(39)
+            .collect::<String>()
+            .trim()
+            .to_string()
+    })
+    .filter(|t| !t.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
 #[test]
 fn a_cut_row_is_shown_in_full_after_the_delay() {
     let mut a = app(view(NAME, ACTIVITY));
@@ -101,14 +120,11 @@ fn a_cut_row_is_shown_in_full_after_the_delay() {
     assert!(!line(&before, 3).contains(NAME));
     a.tick(t0 + TIP_DELAY);
     let after = buffer(&a);
-    assert!(line(&after, 3).contains(NAME), "{}", line(&after, 3));
-    // Its activity line expands with it, from the same column as in the sidebar.
-    assert_eq!(
-        col(&line(&after, 4), ACTIVITY),
-        Some(4),
-        "{}",
-        line(&after, 4)
-    );
+    assert_eq!(tip(&after, 3..5), NAME);
+    // Its activity line expands with it under the name, from the same column as in the
+    // sidebar.
+    assert_eq!(tip(&after, 5..7), ACTIVITY);
+    assert_eq!(col(&line(&after, 5), "running"), Some(4));
     assert_eq!(col(&line(&after, 3), "This"), Some(4));
 }
 
@@ -142,10 +158,10 @@ fn the_tooltip_follows_the_pointer_and_any_other_input_takes_it_down() {
     let mut a = app(view(NAME, ACTIVITY));
     let t0 = Instant::now();
     rest(&mut a, 3, t0, TIP_DELAY);
-    assert!(line(&buffer(&a), 3).contains(NAME));
+    assert_eq!(tip(&buffer(&a), 3..5), NAME);
     // Moving within the same row keeps it.
     hover(&mut a, 4, t0 + TIP_DELAY);
-    assert!(line(&buffer(&a), 3).contains(NAME));
+    assert_eq!(tip(&buffer(&a), 3..5), NAME);
     // A key takes it down; resting again on the row starts the delay over.
     a.on_event(
         ct::Event::Key(ct::KeyEvent::new(
@@ -172,14 +188,66 @@ fn leaving_the_row_before_the_delay_shows_nothing() {
     assert!(!line(&buffer(&a), 3).contains(NAME));
 }
 
+/// The words of `row` from column `from` on, trimmed.
+fn text_from(row: &str, from: usize) -> String {
+    row.chars()
+        .skip(from)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 #[test]
-fn a_text_longer_than_the_window_is_cut_at_its_edge() {
-    let long = "x".repeat(150);
-    let mut a = app(view(&long, ACTIVITY));
+fn a_long_text_wraps_at_words_within_sixty_columns() {
+    // Texts from column 4: the box is 60 columns at most, so a line holds 59.
+    let long = "word ".repeat(30);
+    let long = long.trim();
+    let mut a = app(view(long, ACTIVITY));
     let shown = rest(&mut a, 3, Instant::now(), TIP_DELAY);
-    let row = line(&shown, 3);
-    assert!(row.ends_with('…'), "{row}");
-    assert_eq!(row.chars().filter(|c| *c == 'x').count(), 100 - 4 - 1);
+    let mut lines = Vec::new();
+    for y in 3..6 {
+        let row = line(&shown, y);
+        let text = text_from(&row, 4);
+        assert!(text.len() <= 59, "{y}: {row}");
+        assert!(text.split(' ').all(|w| w == "word"), "{y}: {row}");
+        lines.push(text);
+    }
+    assert_eq!(lines.join(" "), long);
+    // The activity line follows the name's last line, from its own column.
+    assert_eq!(
+        col(&line(&shown, 6), ACTIVITY),
+        Some(4),
+        "{}",
+        line(&shown, 6)
+    );
+    // Past the box the panels show again.
+    assert!(line(&shown, 3).chars().skip(64).all(|c| c != 'w'));
+}
+
+#[test]
+fn the_tooltip_shows_five_lines_at_most_and_ends_with_an_ellipsis() {
+    let long = "word ".repeat(100);
+    let mut a = app(view(long.trim(), ACTIVITY));
+    let shown = rest(&mut a, 3, Instant::now(), TIP_DELAY);
+    for y in 3..7 {
+        assert!(!line(&shown, y).contains('…'), "{y}: {}", line(&shown, y));
+    }
+    let last = text_from(&line(&shown, 7), 4);
+    assert!(last.ends_with("word…"), "{last}");
+    // The activity line has no room left.
+    assert!(!line(&shown, 8).contains(ACTIVITY));
+}
+
+#[test]
+fn a_tooltip_near_the_bottom_is_moved_up_into_the_window() {
+    let long = "word ".repeat(30);
+    let mut a = app(view(long.trim(), ACTIVITY));
+    rest(&mut a, 3, Instant::now(), TIP_DELAY);
+    // A window 6 rows tall: the 4 lines from row 3 would end past it, so they start at row 2.
+    let mut buf = Buffer::empty(ratatui::layout::Rect::new(0, 0, 100, 6));
+    crate::sidebar::draw_tip(&mut buf, &a);
+    assert!(line(&buf, 2).contains("word word"), "{}", line(&buf, 2));
+    assert_eq!(col(&line(&buf, 5), ACTIVITY), Some(4), "{}", line(&buf, 5));
 }
 
 #[test]
@@ -198,16 +266,20 @@ fn the_tooltip_blanks_what_was_under_it() {
         );
     }
     crate::sidebar::draw_tip(&mut buf, &a);
-    // The box runs a cell past the longer text (the name), on both lines.
-    let right = 4 + NAME.len() + 1;
-    for y in [3, 4] {
+    // The box runs a cell past the longest line, "running some long command in here with"
+    // (38 cells), on all four lines. The hovered row keeps what it drew before its text; the
+    // rows under it are blanked from the window's left.
+    let right = 4 + 38 + 1;
+    for y in 3..7 {
         let row = line(&buf, y);
-        let inside: String = row.chars().skip(4).take(right - 4).collect();
+        let from = if y == 3 { 4 } else { 0 };
+        let inside: String = row.chars().skip(from).take(right - from).collect();
         assert!(!inside.contains('Z'), "{y}: {row}");
         assert_eq!(row.chars().nth(right), Some('Z'), "{y}: {row}");
     }
-    assert!(line(&buf, 3).contains(&format!("{NAME} Z")));
-    assert!(line(&buf, 4).contains(&format!("{ACTIVITY}       ")));
+    assert!(line(&buf, 3).starts_with("ZZZZThis"), "{}", line(&buf, 3));
+    assert_eq!(tip(&buf, 3..5), NAME);
+    assert_eq!(tip(&buf, 5..7), ACTIVITY);
 }
 
 #[test]
@@ -226,7 +298,7 @@ fn a_name_deck_cut_when_it_made_it_is_shown_in_full() {
     panel.terminals[0].title = Some(format!("✳ {title}"));
     let mut a = app(v);
     let shown = rest(&mut a, 3, Instant::now(), TIP_DELAY);
-    assert!(line(&shown, 3).contains(title), "{}", line(&shown, 3));
+    assert_eq!(tip(&shown, 3..5), title);
     // A name the user gave stays as given.
     let mut v = view(&format!("{kept}…"), ACTIVITY);
     let panel = v

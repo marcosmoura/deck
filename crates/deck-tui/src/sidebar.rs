@@ -1642,43 +1642,135 @@ pub fn draw(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
 /// are drawn.
 /// The hover tooltip: once the pointer rested on a row long enough, a row with a text cut
 /// with `…` is drawn again with every text in full, from where each starts, across the
-/// sidebar's edge and over the panels, cut only at the window's edge. Its lines share one
-/// right edge, a cell past the longest text.
+/// sidebar's edge and over the panels. The box is at most three quarters as wide as it would
+/// be with every text on one line (cut at the window's right edge), and `TIP_WIDTH` cells at
+/// most; each text wraps at word boundaries inside it, one under the other, with at most
+/// `TIP_LINES` lines in all and `…` at the end of the last one when text is left over. Its lines share one right edge, a cell
+/// past the longest line. A box that would run past the window's bottom is moved up.
 pub(crate) fn draw_tip(buf: &mut Buffer, app: &App) {
     let Some(owner) = app.tip_shown() else {
         return;
     };
     let texts = app.sidebar_texts.borrow();
-    let lines: Vec<&Drawn> = texts.iter().filter(|d| d.owner == owner).collect();
-    if !lines.iter().any(|d| d.cut) {
+    let drawn: Vec<&Drawn> = texts.iter().filter(|d| d.owner == owner).collect();
+    if !drawn.iter().any(|d| d.cut) {
         return;
     }
+    let (Some(left), Some(first)) = (drawn.iter().map(|d| d.x).min(), drawn.first().map(|d| d.y))
+    else {
+        return;
+    };
     let edge = buf.area.x + buf.area.width;
-    let right = lines
+    let bottom = buf.area.y + buf.area.height;
+    if left >= edge {
+        return;
+    }
+    // A quarter narrower than the box would be with every text on one line, cut at the
+    // window's edge.
+    let full = drawn
         .iter()
         .map(|d| d.x.saturating_add(width(&d.full)).saturating_add(1))
         .max()
+        .unwrap_or(left)
+        .min(edge);
+    let most = left
+        + u16::try_from(u32::from(full - left) * 3 / 4)
+            .unwrap_or(0)
+            .min(TIP_WIDTH);
+    // Every line of the box: its column, its text and its style.
+    let mut lines: Vec<(u16, String, Style)> = Vec::new();
+    for d in &drawn {
+        let room = most.saturating_sub(d.x).saturating_sub(1).max(1);
+        let wrapped = wrap(&d.full, room);
+        let free = TIP_LINES - lines.len();
+        let left_over = wrapped.len() > free;
+        for (i, text) in wrapped.into_iter().take(free).enumerate() {
+            let text = if left_over && i + 1 == free {
+                // A full line gives up its last word for the `…`, so no word is cut.
+                match text.rsplit_once(' ') {
+                    _ if width(&text) < room => format!("{text}…"),
+                    Some((kept, _)) => format!("{kept}…"),
+                    None => truncate(&format!("{text}…"), room),
+                }
+            } else {
+                text
+            };
+            lines.push((d.x, text, d.style));
+        }
+        if lines.len() == TIP_LINES {
+            break;
+        }
+    }
+    let right = lines
+        .iter()
+        .map(|(x, text, _)| x.saturating_add(width(text)).saturating_add(1))
+        .max()
         .unwrap_or(0)
         .min(edge);
-    for d in lines {
-        if d.x >= right {
+    let height = u16::try_from(lines.len()).unwrap_or(0);
+    let top = first.min(bottom.saturating_sub(height)).max(buf.area.y);
+    for (i, (x, text, style)) in lines.iter().enumerate() {
+        let y = top + u16::try_from(i).unwrap_or(0);
+        if y >= bottom || *x >= right {
             continue;
         }
-        let room = right - d.x;
         // The box is blanked first: whatever was drawn there (the panel's text, an image's
-        // placeholders, the row's status slot) must not show through after the text.
-        for x in d.x..right {
-            buf[(x, d.y)].reset();
-            buf[(x, d.y)].set_style(d.style);
+        // placeholders, the row's status slot) must not show through after the text. The
+        // hovered row keeps what it drew before its text (its icon); every other row of the
+        // box is blanked from the sidebar's left, so no mark of a row under it shows.
+        let from = if y == first { *x } else { buf.area.x };
+        for cx in from..right {
+            buf[(cx, y)].reset();
+            buf[(cx, y)].set_style(*style);
         }
         // The cell just past the box may be the second half of a wide character whose first
         // half was blanked: it becomes a blank of its own.
-        if right < edge && buf[(right, d.y)].symbol().is_empty() {
-            buf[(right, d.y)].reset();
+        if right < edge && buf[(right, y)].symbol().is_empty() {
+            buf[(right, y)].reset();
         }
-        let text = truncate(&d.full, room);
-        buf.set_stringn(d.x, d.y, &text, usize::from(room), d.style);
+        let room = right - x;
+        buf.set_stringn(*x, y, truncate(text, room), usize::from(room), *style);
     }
+}
+
+/// The widest the hover tooltip's box gets: a quarter narrower than the 80 cells of the
+/// activity line it used to show on one line.
+const TIP_WIDTH: u16 = 60;
+
+/// The most lines the hover tooltip shows, the name's included.
+const TIP_LINES: usize = 5;
+
+/// `text` wrapped at spaces into lines of at most `max` columns; a word longer than a line is
+/// cut across lines.
+fn wrap(text: &str, max: u16) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if line.is_empty() {
+            word.to_string()
+        } else {
+            format!("{line} {word}")
+        };
+        if width(&candidate) <= max {
+            line = candidate;
+            continue;
+        }
+        if !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        for c in word.chars() {
+            let next = format!("{line}{c}");
+            if width(&next) > max && !line.is_empty() {
+                lines.push(std::mem::replace(&mut line, c.to_string()));
+            } else {
+                line = next;
+            }
+        }
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 fn draw_collapsed(buf: &mut Buffer, area: Rect, app: &App, theme: &Theme) {
