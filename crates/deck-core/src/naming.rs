@@ -63,9 +63,12 @@ pub fn source_terminal_view(panel: &PanelView) -> Option<&TerminalView> {
 /// A title without its leading spinner and status glyphs and its surrounding space: what is
 /// left when only an animation changed is the same.
 pub fn title_core(title: &str) -> &str {
-    title
-        .trim_start_matches(|c: char| !c.is_alphanumeric())
-        .trim()
+    strip_agent_prefix(title.trim_start_matches(|c: char| !c.is_alphanumeric())).trim()
+}
+
+/// A title without the `OC | ` that OpenCode puts before its session's name.
+fn strip_agent_prefix(title: &str) -> &str {
+    title.strip_prefix("OC |").map_or(title, str::trim_start)
 }
 
 /// Recomputes the name of a panel whose name follows what runs in it (`Default` or
@@ -126,7 +129,7 @@ pub fn auto_name(input: &NameInput) -> Option<String> {
 fn agent_name(agent: &AgentState, input: &NameInput) -> Option<String> {
     let from_title = input.title.and_then(|t| {
         let clean: String = t.chars().filter(|c| !c.is_control()).collect();
-        let stripped = clean.trim_start_matches(|c: char| !c.is_alphanumeric());
+        let stripped = strip_agent_prefix(clean.trim_start_matches(|c: char| !c.is_alphanumeric()));
         let lower = stripped.trim().to_lowercase();
         let bare = lower.is_empty()
             || lower == input.program.to_lowercase()
@@ -205,6 +208,21 @@ mod tests {
             name(Some(&a), Some("⠹ Fix login bug"), "claude").as_deref(),
             Some("Fix login bug")
         );
+    }
+
+    #[test]
+    fn an_opencode_title_loses_its_prefix() {
+        let a = agent(Some("Review the API"));
+        assert_eq!(
+            name(Some(&a), Some("OC | Fix login bug"), "opencode").as_deref(),
+            Some("Fix login bug")
+        );
+        assert_eq!(
+            name(Some(&a), Some("OC |"), "opencode").as_deref(),
+            Some("Review the API")
+        );
+        assert_eq!(title_core("OC | Fix login bug"), "Fix login bug");
+        assert_eq!(title_core("OCaml"), "OCaml");
     }
 
     #[test]
